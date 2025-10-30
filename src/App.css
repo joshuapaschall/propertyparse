@@ -1,0 +1,127 @@
+#root {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 2rem;
+  text-align: center;
+}
+/* App.css */
+
+/* General styles */
+body {
+  font-family: Arial, sans-serif;
+  background-color: #f0f2f5;
+  margin: 0;
+  padding: 20px;
+}
+
+/* Container for the card */
+.card {
+  background-color: #fff;
+  padding: 20px;
+  border-radius: 10px;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+/* Headings */
+h1 {
+  text-align: center;
+  color: #333;
+}
+/* Input field styles */
+input[type="file"] {
+  display: block;
+  margin: 20px auto;
+  padding: 10px;
+}
+
+/* Dropdown styles */
+
+
+/* State dropdown */
+.state-dropdown .Select__control {
+  background-color: #d1ecf1;
+  border-color: #007bff;
+}
+
+.state-dropdown .Select__control--is-focused {
+  border-color: #0056b3;
+}
+
+/* County dropdown */
+.county-dropdown .Select__control {
+  background-color: #d4edda;
+  border-color: #28a745;
+}
+
+.county-dropdown .Select__control--is-focused {
+  border-color: #1e7e34;
+}
+
+/* City dropdown */
+.city-dropdown .Select__control {
+  background-color: #fff3cd;
+  border-color: #ffc107;
+}
+
+.city-dropdown .Select__control--is-focused {
+  border-color: #e0a800;
+}
+
+/* Submit button */
+button {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  background-color: #edc188;
+  color: rgb(0, 0, 0);
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  margin: 20px 0;
+}
+
+button:disabled {
+  background-color: #dce9f7;
+}
+
+button:hover:not(:disabled) {
+  background-color: #0056b3;
+}
+
+/* CSV data table */
+.csv-container {
+  margin-top: 20px;
+}
+
+.csv-container table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.csv-container th, .csv-container td {
+  border: 1px solid #ddd;
+  padding: 8px;
+}
+
+.csv-container th {
+  background-color: #f2f2f2;
+  text-align: left;
+}
+
+.csv-container tbody tr:nth-child(even) {
+  background-color: #f9f9f9;
+}
+
+.csv-container tbody tr:hover {
+  background-color: #f1f1f1;
+}
+
+/* Loading spinner */
+.LoadingSpinner {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 20px;
+}
