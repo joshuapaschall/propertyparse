@@ -9,52 +9,41 @@ async function expectJson(res: Response) {
   return res.json();
 }
 
-const dedupe = (arr: string[]) => {
-  const out: string[] = [];
-  const seen = new Set<string>();
-  for (const s of arr) {
-    if (!s) continue;
-    const k = s.trim();
-    if (!seen.has(k)) {
-      seen.add(k);
-      out.push(k);
-    }
-  }
-  return out;
-};
-
 export async function searchStates(query: string) {
   const local = listStates(query).map((i) => i.value);
+  if (local.length) return { items: local };
+
   try {
     const res = await fetch(`${BASE}/states/search?query=${encodeURIComponent(query || '')}`, { method: 'POST' });
-    const remote = ((await expectJson(res)) as { items: string[] }).items || [];
-    return { items: dedupe([...local, ...remote]) };
+    return (await expectJson(res)) as { items: string[] };
   } catch {
-    return { items: local };
+    return { items: [] };
   }
 }
 
-export async function searchCounties(state: string, query: string) {
-  const local = listCounties(state, query).map((i) => i.value);
+export async function searchCounties(stateFull: string, query: string) {
+  const local = listCounties(stateFull, query).map((i) => i.value);
+  if (local.length) return { items: local };
+
   try {
-    const url = `${BASE}/counties/search?state=${encodeURIComponent(state || '')}&query=${encodeURIComponent(query || '')}`;
+    const url = `${BASE}/counties/search?state=${encodeURIComponent(stateFull || '')}&query=${encodeURIComponent(query || '')}`;
     const res = await fetch(url, { method: 'POST' });
-    const remote = ((await expectJson(res)) as { items: string[] }).items || [];
-    return { items: dedupe([...local, ...remote]) };
+    return (await expectJson(res)) as { items: string[] };
   } catch {
-    return { items: local };
+    return { items: [] };
   }
 }
 
-export async function searchCities(state: string, county: string, query: string) {
-  const local = listCities(state, county, query).map((i) => i.value);
+export async function searchCities(stateFull: string, county: string, query: string) {
+  const local = listCities(stateFull, county, query).map((i) => i.value);
+  if (local.length) return { items: local };
+
   try {
-    const url = `${BASE}/cities/search?state=${encodeURIComponent(state || '')}&county=${encodeURIComponent(county || '')}&query=${encodeURIComponent(query || '')}`;
+    const url = `${BASE}/cities/search?state=${encodeURIComponent(stateFull || '')}&county=${encodeURIComponent(county || '')}&query=${encodeURIComponent(query || '')}`;
     const res = await fetch(url, { method: 'POST' });
-    const remote = ((await expectJson(res)) as { items: string[] }).items || [];
-    return { items: dedupe([...local, ...remote]) };
+    return (await expectJson(res)) as { items: string[] };
   } catch {
-    return { items: local };
+    return { items: [] };
   }
 }
 
