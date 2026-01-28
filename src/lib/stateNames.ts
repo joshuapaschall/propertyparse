@@ -1,20 +1,35 @@
-import statesJson from '../assets/states_json.json';
+import statesJsonRaw from '../assets/states_json.json';
 
-// states_json.json shape: { "Alabama": "AL", "Alaska": "AK", ... }
+type Map = Record<string, string>;
+const raw = statesJsonRaw as Map;
 
-// Return full state name given either a full name or a 2-letter code.
+const isKeyCode = Object.keys(raw).every((k) => /^[A-Z]{2}$/.test(k));
+const isValCode = Object.values(raw).every((v) => /^[A-Z]{2}$/.test(v));
+
+const invert = (m: Map): Map =>
+  Object.fromEntries(Object.entries(m).map(([k, v]) => [v, k]));
+
+// Build both maps no matter which direction the JSON is.
+export const STATE_CODE_TO_NAME: Map = isKeyCode ? raw : invert(raw);
+export const STATE_NAME_TO_CODE: Map = isValCode ? raw : invert(raw);
+
+// Canonical full name from either a code or a (possibly mis-cased) full name.
 export function toFullState(input: string): string {
   const s = (input || '').trim();
   if (!s) return '';
-  // If it's already a full name, pass through.
-  if ((statesJson as Record<string, string>)[s]) return s;
-  // If it's a code, find the matching full name.
-  if (/^[A-Z]{2}$/.test(s)) {
-    const entry = Object.entries(statesJson as Record<string, string>).find(([, code]) => code === s);
-    return entry ? entry[0] : s;
-  }
-  return s; // unknown string; pass through
+
+  // exact full-name match
+  if (STATE_NAME_TO_CODE[s]) return s;
+
+  // code match
+  const upper = s.toUpperCase();
+  if (STATE_CODE_TO_NAME[upper]) return STATE_CODE_TO_NAME[upper];
+
+  // case-insensitive full-name match
+  const found = Object.keys(STATE_NAME_TO_CODE).find((n) => n.toLowerCase() === s.toLowerCase());
+  return found || s;
 }
 
-// For convenience, provide the map and a quick list of full names.
-export const STATE_NAMES: string[] = Object.keys(statesJson as Record<string, string>);
+export const STATE_NAMES: string[] = Array.from(new Set(Object.values(STATE_CODE_TO_NAME).filter(Boolean))).sort(
+  (a, b) => a.localeCompare(b)
+);
