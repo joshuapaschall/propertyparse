@@ -1,34 +1,44 @@
-import statesJson from '../assets/states_json.json';
 import countiesJson from '../assets/counties_list.json';
 import citiesJson from '../assets/data.json';
+import { toFullState, STATE_NAMES } from './stateNames';
 
 type Item = { value: string; label: string };
 const norm = (s: string) => (s || '').toLowerCase().trim();
 
+const titleCase = (s: string) =>
+  (s || '')
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+
 export function listStates(query: string): Item[] {
   const q = norm(query);
-  const names = Object.keys(statesJson as Record<string, string>); // FULL names
-  return names
+  return STATE_NAMES
     .filter((n) => !q || norm(n).includes(q))
-    .map((n) => ({ value: n, label: n })); // label shows full name
+    .map((n) => ({ value: n, label: n }));
 }
 
-export function listCounties(stateFull: string, query: string): Item[] {
+export function listCounties(stateFullOrCode: string, query: string): Item[] {
+  const stateFull = toFullState(stateFullOrCode);
   if (!stateFull) return [];
-  const st = (statesJson as Record<string, string>)[stateFull]; // -> "GA"
-  if (!st) return []; // guard when state hasn't normalized yet
   const q = norm(query);
+
   return (countiesJson as Array<{ County: string; State: string }>)
-    .filter((c) => c.State === st && (!q || norm(c.County).includes(q)))
+    .filter((c) => norm(c.State) === norm(stateFull) && (!q || norm(c.County).includes(q)))
     .map((c) => ({ value: c.County, label: c.County }));
 }
 
-export function listCities(stateFull: string, county: string, query: string): Item[] {
+export function listCities(stateFullOrCode: string, _county: string, query: string): Item[] {
+  const stateFull = toFullState(stateFullOrCode);
   if (!stateFull) return [];
-  const key = stateFull.toUpperCase();
   const q = norm(query);
-  const arr = (citiesJson as Record<string, string[]>)[key] || [];
+
+  // data.json uses Title Case keys like "Georgia"
+  const cityMap = citiesJson as Record<string, string[]>;
+  const key = Object.keys(cityMap).find((k) => norm(k) === norm(stateFull)) || stateFull;
+
+  const arr = cityMap[key] || [];
   return arr
+    .map(titleCase) // nicer UX than ALL CAPS
     .filter((name) => !q || norm(name).includes(q))
     .map((name) => ({ value: name, label: name }));
 }

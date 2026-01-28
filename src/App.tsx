@@ -35,30 +35,44 @@ function App() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
     const full = toFullState(stateVal);
     if (full !== stateVal) setStateVal(full);
     setCounty('');
     setCity('');
+    setCounties([]);
     setCities([]);
     if (full) {
       searchCounties(full, '')
-        .then((r) => setCounties(r.items))
-        .catch(() => setCounties([]));
-    } else {
-      setCounties([]);
+        .then((r) => {
+          if (!cancelled) setCounties(r.items);
+        })
+        .catch(() => {
+          if (!cancelled) setCounties([]);
+        });
     }
+    return () => {
+      cancelled = true;
+    };
   }, [stateVal]);
 
   useEffect(() => {
+    let cancelled = false;
     const full = toFullState(stateVal);
     setCity('');
+    setCities([]);
     if (full && county) {
       searchCities(full, county, '')
-        .then((r) => setCities(r.items))
-        .catch(() => setCities([]));
-    } else {
-      setCities([]);
+        .then((r) => {
+          if (!cancelled) setCities(r.items);
+        })
+        .catch(() => {
+          if (!cancelled) setCities([]);
+        });
     }
+    return () => {
+      cancelled = true;
+    };
   }, [stateVal, county]);
 
   const stateOptions: LocationOption[] = states.map((item) => ({
@@ -121,7 +135,14 @@ function App() {
               className="w-full"
               options={stateOptions}
               value={stateVal ? { label: stateVal, value: stateVal } : null}
-              onChange={(option) => setStateVal(option?.value ?? '')}
+              onChange={(option) => {
+                const next = option?.value ?? '';
+                setStateVal(next);
+                setCounty('');
+                setCity('');
+                setCounties([]);
+                setCities([]);
+              }}
               placeholder="Select State"
             />
 
@@ -129,7 +150,12 @@ function App() {
               className="w-full"
               options={countyOptions}
               value={county ? { label: county, value: county } : null}
-              onChange={(option) => setCounty(option?.value ?? '')}
+              onChange={(option) => {
+                const next = option?.value ?? '';
+                setCounty(next);
+                setCity('');
+                setCities([]);
+              }}
               placeholder="Select County"
               isDisabled={!stateVal}
             />
