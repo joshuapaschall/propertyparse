@@ -3,6 +3,7 @@ import FileUpload from './components/FileUpload/FileUpload';
 import LocationSelect from './components/LocationSelect/LocationSelect';
 import './App.css';
 import { searchStates, searchCounties, searchCities, uploadFile, parseFile } from './lib/api';
+import { toFullState } from './lib/stateNames';
 import 'antd/dist/reset.css';
 import { Button, Typography } from 'antd';
 
@@ -28,27 +29,36 @@ function App() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    searchStates('').then((r) => setStates(r.items)).catch(() => {});
+    searchStates('')
+      .then((r) => setStates(r.items))
+      .catch(() => setStates([]));
   }, []);
 
   useEffect(() => {
-    if (!stateVal) {
+    const full = toFullState(stateVal);
+    if (full !== stateVal) setStateVal(full);
+    setCounty('');
+    setCity('');
+    setCities([]);
+    if (full) {
+      searchCounties(full, '')
+        .then((r) => setCounties(r.items))
+        .catch(() => setCounties([]));
+    } else {
       setCounties([]);
-      setCounty('');
-      setCities([]);
-      setCity('');
-      return;
     }
-    searchCounties(stateVal, '').then((r) => setCounties(r.items)).catch(() => {});
   }, [stateVal]);
 
   useEffect(() => {
-    if (!stateVal || !county) {
+    const full = toFullState(stateVal);
+    setCity('');
+    if (full && county) {
+      searchCities(full, county, '')
+        .then((r) => setCities(r.items))
+        .catch(() => setCities([]));
+    } else {
       setCities([]);
-      setCity('');
-      return;
     }
-    searchCities(stateVal, county, '').then((r) => setCities(r.items)).catch(() => {});
   }, [stateVal, county]);
 
   const stateOptions: LocationOption[] = states.map((item) => ({
