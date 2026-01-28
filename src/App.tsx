@@ -123,7 +123,7 @@ function App() {
               value={city ? { label: city, value: city } : null}
               onChange={(option) => setCity(option?.value ?? '')}
               placeholder="Select City"
-              isDisabled={!stateVal}
+              isDisabled={!stateVal || !county}
             />
           </div>
 
