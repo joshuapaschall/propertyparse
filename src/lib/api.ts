@@ -1,4 +1,4 @@
-import { listCities, listCounties, listStates } from './locations';
+import { listCitiesByState, listCounties, listStates } from './locations';
 import { toFullState } from './stateNames';
 
 const BASE = import.meta.env.VITE_API_BASE_URL as string;
@@ -10,42 +10,32 @@ async function expectJson(res: Response) {
   return res.json();
 }
 
+const norm = (value: string) => (value || '').trim().toLowerCase();
+
 export async function searchStates(query: string) {
-  // Always prefer local full names
-  const local = listStates(query).map((i) => i.value);
-  if (local.length) return { items: local };
-  try {
-    const res = await fetch(`${BASE}/states/search?query=${encodeURIComponent(query || '')}`, { method: 'POST' });
-    return (await expectJson(res)) as { items: string[] };
-  } catch {
-    return { items: [] };
-  }
+  const q = norm(query);
+  const items = listStates()
+    .map((i) => i.value)
+    .filter((item) => !q || norm(item).includes(q));
+  return { items };
 }
 
 export async function searchCounties(stateFullOrCode: string, query: string) {
   const stateFull = toFullState(stateFullOrCode);
-  const local = listCounties(stateFull, query).map((i) => i.value);
-  if (local.length) return { items: local };
-  try {
-    const url = `${BASE}/counties/search?state=${encodeURIComponent(stateFull)}&query=${encodeURIComponent(query || '')}`;
-    const res = await fetch(url, { method: 'POST' });
-    return (await expectJson(res)) as { items: string[] };
-  } catch {
-    return { items: [] };
-  }
+  const q = norm(query);
+  const items = listCounties(stateFull)
+    .map((i) => i.value)
+    .filter((item) => !q || norm(item).includes(q));
+  return { items };
 }
 
-export async function searchCities(stateFullOrCode: string, county: string, query: string) {
+export async function searchCities(stateFullOrCode: string, _county: string, query: string) {
   const stateFull = toFullState(stateFullOrCode);
-  const local = listCities(stateFull, query).map((i) => i.value);
-  if (local.length) return { items: local };
-  try {
-    const url = `${BASE}/cities/search?state=${encodeURIComponent(stateFull)}&county=${encodeURIComponent(county || '')}&query=${encodeURIComponent(query || '')}`;
-    const res = await fetch(url, { method: 'POST' });
-    return (await expectJson(res)) as { items: string[] };
-  } catch {
-    return { items: [] };
-  }
+  const q = norm(query);
+  const items = listCitiesByState(stateFull)
+    .map((i) => i.value)
+    .filter((item) => !q || norm(item).includes(q));
+  return { items };
 }
 
 export async function uploadFile(file: File) {

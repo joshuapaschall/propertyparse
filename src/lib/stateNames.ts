@@ -1,35 +1,24 @@
-import statesJsonRaw from '../assets/states_json.json';
+import statesJson from '../assets/states_json.json';
 
-type Map = Record<string, string>;
-const raw = statesJsonRaw as Map;
+// states_json.json shape is: { "GA": "Georgia", "AL": "Alabama", ... }
 
-const isKeyCode = Object.keys(raw).every((k) => /^[A-Z]{2}$/.test(k));
-const isValCode = Object.values(raw).every((v) => /^[A-Z]{2}$/.test(v));
+const CODE_TO_NAME = statesJson as Record<string, string>;
 
-const invert = (m: Map): Map =>
-  Object.fromEntries(Object.entries(m).map(([k, v]) => [v, k]));
+// Build a sorted list of FULL names (deduped)
+export const STATE_NAMES: string[] = Array.from(
+  new Set(Object.values(CODE_TO_NAME).map((s) => (s || '').trim()).filter(Boolean))
+).sort((a, b) => a.localeCompare(b));
 
-// Build both maps no matter which direction the JSON is.
-export const STATE_CODE_TO_NAME: Map = isKeyCode ? raw : invert(raw);
-export const STATE_NAME_TO_CODE: Map = isValCode ? raw : invert(raw);
-
-// Canonical full name from either a code or a (possibly mis-cased) full name.
+// Return full state name given either a full name or a 2-letter code.
 export function toFullState(input: string): string {
-  const s = (input || '').trim();
-  if (!s) return '';
+  const raw = (input || '').trim();
+  if (!raw) return '';
 
-  // exact full-name match
-  if (STATE_NAME_TO_CODE[s]) return s;
+  // If code provided, map directly
+  if (/^[A-Z]{2}$/.test(raw) && CODE_TO_NAME[raw]) return CODE_TO_NAME[raw];
 
-  // code match
-  const upper = s.toUpperCase();
-  if (STATE_CODE_TO_NAME[upper]) return STATE_CODE_TO_NAME[upper];
-
-  // case-insensitive full-name match
-  const found = Object.keys(STATE_NAME_TO_CODE).find((n) => n.toLowerCase() === s.toLowerCase());
-  return found || s;
+  // If full name provided (any casing), find canonical casing from STATE_NAMES
+  const lower = raw.toLowerCase();
+  const match = STATE_NAMES.find((n) => n.toLowerCase() === lower);
+  return match || raw;
 }
-
-export const STATE_NAMES: string[] = Array.from(new Set(Object.values(STATE_CODE_TO_NAME).filter(Boolean))).sort(
-  (a, b) => a.localeCompare(b)
-);
