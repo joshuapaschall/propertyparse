@@ -37,7 +37,7 @@ export async function searchCounties(stateFullOrCode: string, query: string) {
 
 export async function searchCities(stateFullOrCode: string, county: string, query: string) {
   const stateFull = toFullState(stateFullOrCode);
-  const local = listCities(stateFull, county, query).map((i) => i.value);
+  const local = listCities(stateFull, query).map((i) => i.value);
   if (local.length) return { items: local };
   try {
     const url = `${BASE}/cities/search?state=${encodeURIComponent(stateFull)}&county=${encodeURIComponent(county || '')}&query=${encodeURIComponent(query || '')}`;

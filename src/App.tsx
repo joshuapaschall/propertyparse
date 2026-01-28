@@ -1,18 +1,13 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import FileUpload from './components/FileUpload/FileUpload';
-import LocationSelect from './components/LocationSelect/LocationSelect';
 import './App.css';
-import { searchStates, searchCounties, searchCities, uploadFile, parseFile } from './lib/api';
-import { toFullState } from './lib/stateNames';
+import { uploadFile, parseFile } from './lib/api';
+import { listCities, listCounties, listStates } from './lib/locations';
 import 'antd/dist/reset.css';
 import { Button, Typography } from 'antd';
+import VirtualDropdown from './components/VirtualDropdown';
 
 const { Title } = Typography;
-
-interface LocationOption {
-  label: string;
-  value: string;
-}
 
 function App() {
   const [stateVal, setStateVal] = useState('');
@@ -29,66 +24,20 @@ function App() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    searchStates('')
-      .then((r) => setStates(r.items))
-      .catch(() => setStates([]));
+    const allStates = listStates('').map((x) => x.value);
+    setStates(allStates);
   }, []);
 
   useEffect(() => {
-    let cancelled = false;
-    const full = toFullState(stateVal);
-    if (full !== stateVal) setStateVal(full);
     setCounty('');
     setCity('');
-    setCounties([]);
-    setCities([]);
-    if (full) {
-      searchCounties(full, '')
-        .then((r) => {
-          if (!cancelled) setCounties(r.items);
-        })
-        .catch(() => {
-          if (!cancelled) setCounties([]);
-        });
-    }
-    return () => {
-      cancelled = true;
-    };
+    setCounties(listCounties(stateVal, '').map((x) => x.value));
+    setCities(listCities(stateVal, '').map((x) => x.value));
   }, [stateVal]);
 
   useEffect(() => {
-    let cancelled = false;
-    const full = toFullState(stateVal);
     setCity('');
-    setCities([]);
-    if (full && county) {
-      searchCities(full, county, '')
-        .then((r) => {
-          if (!cancelled) setCities(r.items);
-        })
-        .catch(() => {
-          if (!cancelled) setCities([]);
-        });
-    }
-    return () => {
-      cancelled = true;
-    };
   }, [stateVal, county]);
-
-  const stateOptions: LocationOption[] = states.map((item) => ({
-    label: item,
-    value: item,
-  }));
-
-  const countyOptions: LocationOption[] = counties.map((item) => ({
-    label: item,
-    value: item,
-  }));
-
-  const cityOptions: LocationOption[] = cities.map((item) => ({
-    label: item,
-    value: item,
-  }));
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -131,42 +80,30 @@ function App() {
           </div>
 
           <div className="flex flex-col max-w-xl gap-4">
-            <LocationSelect
-              className="w-full"
-              options={stateOptions}
-              value={stateVal ? { label: stateVal, value: stateVal } : null}
-              onChange={(option) => {
-                const next = option?.value ?? '';
-                setStateVal(next);
-                setCounty('');
-                setCity('');
-                setCounties([]);
-                setCities([]);
-              }}
+            <VirtualDropdown
+              label="State"
+              value={stateVal}
+              items={states}
+              onChange={setStateVal}
               placeholder="Select State"
             />
 
-            <LocationSelect
-              className="w-full"
-              options={countyOptions}
-              value={county ? { label: county, value: county } : null}
-              onChange={(option) => {
-                const next = option?.value ?? '';
-                setCounty(next);
-                setCity('');
-                setCities([]);
-              }}
+            <VirtualDropdown
+              label="County"
+              value={county}
+              items={counties}
+              onChange={setCounty}
               placeholder="Select County"
-              isDisabled={!stateVal}
+              disabled={!stateVal}
             />
 
-            <LocationSelect
-              className="w-full"
-              options={cityOptions}
-              value={city ? { label: city, value: city } : null}
-              onChange={(option) => setCity(option?.value ?? '')}
+            <VirtualDropdown
+              label="City"
+              value={city}
+              items={cities}
+              onChange={setCity}
               placeholder="Select City"
-              isDisabled={!stateVal || !county}
+              disabled={!stateVal}
             />
           </div>
 
