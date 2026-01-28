@@ -2,7 +2,7 @@ import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import FileUpload from './components/FileUpload/FileUpload';
 import './App.css';
 import { uploadFile, parseFile } from './lib/api';
-import { listCities, listCounties, listStates } from './lib/locations';
+import { listCitiesByState, listCounties, listStates } from './lib/locations';
 import 'antd/dist/reset.css';
 import { Button, Typography } from 'antd';
 import VirtualDropdown from './components/VirtualDropdown';
@@ -24,20 +24,16 @@ function App() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    const allStates = listStates('').map((x) => x.value);
+    const allStates = listStates().map((x) => x.value);
     setStates(allStates);
   }, []);
 
   useEffect(() => {
     setCounty('');
     setCity('');
-    setCounties(listCounties(stateVal, '').map((x) => x.value));
-    setCities(listCities(stateVal, '').map((x) => x.value));
+    setCounties(listCounties(stateVal).map((x) => x.value));
+    setCities(listCitiesByState(stateVal).map((x) => x.value));
   }, [stateVal]);
-
-  useEffect(() => {
-    setCity('');
-  }, [stateVal, county]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;

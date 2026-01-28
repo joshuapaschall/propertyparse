@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FixedSizeList as List } from 'react-window';
 
 type Props = {
@@ -12,7 +12,6 @@ type Props = {
 
 export default function VirtualDropdown({ label, value, placeholder, items, disabled, onChange }: Props) {
   const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState('');
   const boxRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -31,13 +30,6 @@ export default function VirtualDropdown({ label, value, placeholder, items, disa
       document.removeEventListener('keydown', onEsc);
     };
   }, [open]);
-
-  // Filter is optional; scroll works even with empty filter
-  const filtered = useMemo(() => {
-    const q = (filter || '').trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((s) => s.toLowerCase().includes(q));
-  }, [items, filter]);
 
   return (
     <div ref={boxRef} style={{ width: '100%' }}>
@@ -61,9 +53,7 @@ export default function VirtualDropdown({ label, value, placeholder, items, disa
           cursor: disabled ? 'not-allowed' : 'pointer',
         }}
       >
-        <span style={{ color: value ? '#111827' : '#9ca3af' }}>
-          {value || placeholder || 'Select...'}
-        </span>
+        <span style={{ color: value ? '#111827' : '#9ca3af' }}>{value || placeholder || 'Select...'}</span>
         <span style={{ opacity: 0.6 }}>▾</span>
       </button>
 
@@ -78,24 +68,9 @@ export default function VirtualDropdown({ label, value, placeholder, items, disa
             overflow: 'hidden',
           }}
         >
-          <div style={{ padding: 10, borderBottom: '1px solid #f3f4f6' }}>
-            <input
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              placeholder="(optional) type to filter…"
-              style={{
-                width: '100%',
-                height: 36,
-                borderRadius: 8,
-                border: '1px solid #e5e7eb',
-                padding: '0 10px',
-              }}
-            />
-          </div>
-
-          <List height={280} itemCount={filtered.length} itemSize={38} width="100%">
+          <List height={260} itemCount={items.length} itemSize={38} width="100%">
             {({ index, style }) => {
-              const item = filtered[index];
+              const item = items[index];
               return (
                 <div
                   style={{
@@ -110,7 +85,6 @@ export default function VirtualDropdown({ label, value, placeholder, items, disa
                   onClick={() => {
                     onChange(item);
                     setOpen(false);
-                    setFilter('');
                   }}
                 >
                   {item}
