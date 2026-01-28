@@ -9,32 +9,52 @@ async function expectJson(res: Response) {
   return res.json();
 }
 
+const dedupe = (arr: string[]) => {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const s of arr) {
+    if (!s) continue;
+    const k = s.trim();
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(k);
+    }
+  }
+  return out;
+};
+
 export async function searchStates(query: string) {
+  const local = listStates(query).map((i) => i.value);
   try {
     const res = await fetch(`${BASE}/states/search?query=${encodeURIComponent(query || '')}`, { method: 'POST' });
-    return (await expectJson(res)) as { items: string[] };
+    const remote = ((await expectJson(res)) as { items: string[] }).items || [];
+    return { items: dedupe([...local, ...remote]) };
   } catch {
-    return { items: listStates(query).map((i) => i.value) };
+    return { items: local };
   }
 }
 
 export async function searchCounties(state: string, query: string) {
+  const local = listCounties(state, query).map((i) => i.value);
   try {
     const url = `${BASE}/counties/search?state=${encodeURIComponent(state || '')}&query=${encodeURIComponent(query || '')}`;
     const res = await fetch(url, { method: 'POST' });
-    return (await expectJson(res)) as { items: string[] };
+    const remote = ((await expectJson(res)) as { items: string[] }).items || [];
+    return { items: dedupe([...local, ...remote]) };
   } catch {
-    return { items: listCounties(state, query).map((i) => i.value) };
+    return { items: local };
   }
 }
 
 export async function searchCities(state: string, county: string, query: string) {
+  const local = listCities(state, county, query).map((i) => i.value);
   try {
     const url = `${BASE}/cities/search?state=${encodeURIComponent(state || '')}&county=${encodeURIComponent(county || '')}&query=${encodeURIComponent(query || '')}`;
     const res = await fetch(url, { method: 'POST' });
-    return (await expectJson(res)) as { items: string[] };
+    const remote = ((await expectJson(res)) as { items: string[] }).items || [];
+    return { items: dedupe([...local, ...remote]) };
   } catch {
-    return { items: listCities(state, county, query).map((i) => i.value) };
+    return { items: local };
   }
 }
 
