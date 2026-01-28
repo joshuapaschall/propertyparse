@@ -13,6 +13,9 @@ type ApiResponse<T> = {
   [key: string]: JsonValue | T | undefined;
 };
 
+export type JobRecord = Record<string, JsonValue>;
+export type JobExportType = 'matched' | 'unmatched';
+
 const joinUrl = (path: string) => `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
 
 async function requestJson<T>(path: string, options: RequestInit) {
@@ -35,6 +38,13 @@ async function postJson<T>(path: string, body: unknown) {
     body: JSON.stringify(body),
   });
 }
+
+const getFilenameFromDisposition = (value: string | null) => {
+  if (!value) return null;
+  const match = /filename\*?=(?:UTF-8'')?["']?([^"';\n]+)["']?/i.exec(value);
+  if (!match) return null;
+  return decodeURIComponent(match[1]);
+};
 
 export type UploadResponse = {
   fileId: string;
@@ -88,4 +98,26 @@ export async function getHealth() {
 
 export async function validateApiKeys() {
   return requestJson<JsonValue>('/validate-api-keys', { method: 'POST' });
+}
+
+export async function getJobs() {
+  const res = await requestJson<ApiResponse<JobRecord[]>>('/jobs', { method: 'GET' });
+  return (res.items ?? res.data ?? res) as JobRecord[];
+}
+
+export async function getJob(jobId: string) {
+  const res = await requestJson<ApiResponse<JobRecord>>(`/jobs/${jobId}`, { method: 'GET' });
+  return (res.data ?? res.items ?? res) as JobRecord;
+}
+
+export async function downloadJobExport(jobId: string, type: JobExportType) {
+  const res = await fetch(joinUrl(`/jobs/${jobId}/export?type=${type}`), { method: 'GET' });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  const filename =
+    getFilenameFromDisposition(res.headers.get('content-disposition')) ??
+    `job-${jobId}-${type}.csv`;
+  return { blob: await res.blob(), filename };
 }

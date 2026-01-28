@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import Papa from 'papaparse';
-import StatusIndicators from '../components/StatusIndicators';
+import AppShell from '../components/AppShell';
 import LocationSearchField from '../components/LocationSearchField';
 import FileUploadCard from '../components/FileUploadCard';
 import ProgressIndicator from '../components/ProgressIndicator';
@@ -15,7 +15,6 @@ import {
   searchStates,
   uploadFile,
 } from '../lib/api';
-import { useAuthControls } from '../App';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Finalizing'];
 
@@ -112,7 +111,6 @@ const buildCsv = (rows: ParsedRow[]) =>
   );
 
 export default function ParsePage() {
-  const { logout } = useAuthControls();
   const [stateValue, setStateValue] = useState('');
   const [countyValue, setCountyValue] = useState('');
   const [cityValue, setCityValue] = useState('');
@@ -257,27 +255,8 @@ export default function ParsePage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <div className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-between gap-4 px-6 py-4">
-          <div>
-            <h1 className="text-xl font-semibold">PropertyParse</h1>
-            <p className="text-xs text-slate-500">Address Parsing Workflow</p>
-          </div>
-          <div className="flex items-center gap-6">
-            <StatusIndicators />
-            <button
-              type="button"
-              onClick={logout}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="mx-auto grid w-full max-w-6xl gap-6 px-6 py-8 lg:grid-cols-[1fr_1.2fr]">
+    <AppShell title="PropertyParse" subtitle="Address Parsing Workflow">
+      <div className="grid w-full gap-6 lg:grid-cols-[1fr_1.2fr]">
         <div className="space-y-6">
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="space-y-4">
@@ -479,6 +458,6 @@ export default function ParsePage() {
         onClose={() => setEditingRow(null)}
         onSave={handleEditSave}
       />
-    </div>
+    </AppShell>
   );
 }

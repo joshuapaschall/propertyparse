@@ -1,6 +1,9 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import AuthPage from './pages/AuthPage';
+import AdminPage from './pages/AdminPage';
+import HistoryDetailPage from './pages/HistoryDetailPage';
+import HistoryPage from './pages/HistoryPage';
 import ParsePage from './pages/ParsePage';
 import './App.css';
 
@@ -72,6 +75,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ParsePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/history"
+        element={
+          <ProtectedRoute>
+            <HistoryPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/history/:jobId"
+        element={
+          <ProtectedRoute>
+            <HistoryDetailPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <AdminPage />
           </ProtectedRoute>
         }
       />
