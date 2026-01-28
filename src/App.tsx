@@ -1,26 +1,22 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import FileUpload from './components/FileUpload/FileUpload';
-import LocationSelect from './components/LocationSelect/LocationSelect';
 import './App.css';
 import { searchStates, searchCounties, searchCities, uploadFile, parseFile } from './lib/api';
-import { toFullState } from './lib/stateNames';
 import 'antd/dist/reset.css';
 import { Button, Typography } from 'antd';
 
 const { Title } = Typography;
 
-interface LocationOption {
-  label: string;
-  value: string;
-}
-
 function App() {
   const [stateVal, setStateVal] = useState('');
   const [county, setCounty] = useState('');
   const [city, setCity] = useState('');
-  const [states, setStates] = useState<string[]>([]);
-  const [counties, setCounties] = useState<string[]>([]);
-  const [cities, setCities] = useState<string[]>([]);
+  const [stateQuery, setStateQuery] = useState('');
+  const [countyQuery, setCountyQuery] = useState('');
+  const [cityQuery, setCityQuery] = useState('');
+  const [stateOpts, setStateOpts] = useState<string[]>([]);
+  const [countyOpts, setCountyOpts] = useState<string[]>([]);
+  const [cityOpts, setCityOpts] = useState<string[]>([]);
   const [file, setFile] = useState<File | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -29,66 +25,30 @@ function App() {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    searchStates('')
-      .then((r) => setStates(r.items))
-      .catch(() => setStates([]));
-  }, []);
+    searchStates(stateQuery)
+      .then((r) => setStateOpts(r.items))
+      .catch(() => setStateOpts([]));
+  }, [stateQuery]);
 
   useEffect(() => {
-    let cancelled = false;
-    const full = toFullState(stateVal);
-    if (full !== stateVal) setStateVal(full);
-    setCounty('');
-    setCity('');
-    setCounties([]);
-    setCities([]);
-    if (full) {
-      searchCounties(full, '')
-        .then((r) => {
-          if (!cancelled) setCounties(r.items);
-        })
-        .catch(() => {
-          if (!cancelled) setCounties([]);
-        });
+    if (!stateVal) {
+      setCountyOpts([]);
+      return;
     }
-    return () => {
-      cancelled = true;
-    };
-  }, [stateVal]);
+    searchCounties(stateVal, countyQuery)
+      .then((r) => setCountyOpts(r.items))
+      .catch(() => setCountyOpts([]));
+  }, [stateVal, countyQuery]);
 
   useEffect(() => {
-    let cancelled = false;
-    const full = toFullState(stateVal);
-    setCity('');
-    setCities([]);
-    if (full && county) {
-      searchCities(full, county, '')
-        .then((r) => {
-          if (!cancelled) setCities(r.items);
-        })
-        .catch(() => {
-          if (!cancelled) setCities([]);
-        });
+    if (!stateVal) {
+      setCityOpts([]);
+      return;
     }
-    return () => {
-      cancelled = true;
-    };
-  }, [stateVal, county]);
-
-  const stateOptions: LocationOption[] = states.map((item) => ({
-    label: item,
-    value: item,
-  }));
-
-  const countyOptions: LocationOption[] = counties.map((item) => ({
-    label: item,
-    value: item,
-  }));
-
-  const cityOptions: LocationOption[] = cities.map((item) => ({
-    label: item,
-    value: item,
-  }));
+    searchCities(stateVal, county, cityQuery)
+      .then((r) => setCityOpts(r.items))
+      .catch(() => setCityOpts([]));
+  }, [stateVal, cityQuery]);
 
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -131,43 +91,103 @@ function App() {
           </div>
 
           <div className="flex flex-col max-w-xl gap-4">
-            <LocationSelect
-              className="w-full"
-              options={stateOptions}
-              value={stateVal ? { label: stateVal, value: stateVal } : null}
-              onChange={(option) => {
-                const next = option?.value ?? '';
-                setStateVal(next);
-                setCounty('');
-                setCity('');
-                setCounties([]);
-                setCities([]);
-              }}
-              placeholder="Select State"
-            />
+            <div className="w-full">
+              <label className="block text-sm font-medium text-gray-700 mb-1">State</label>
+              <input
+                value={stateQuery || stateVal}
+                onChange={(e) => {
+                  setStateQuery(e.target.value);
+                }}
+                placeholder="Type a state…"
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              {!!stateOpts.length && (
+                <ul className="border border-gray-200 rounded-md mt-2 max-h-60 overflow-auto bg-white">
+                  {stateOpts.map((s) => (
+                    <li
+                      key={s}
+                      className="px-3 py-2 cursor-pointer hover:bg-gray-50"
+                      onClick={() => {
+                        setStateVal(s);
+                        setStateQuery(s);
+                        setStateOpts([]);
+                        setCounty('');
+                        setCity('');
+                        setCountyQuery('');
+                        setCityQuery('');
+                        setCountyOpts([]);
+                        setCityOpts([]);
+                      }}
+                    >
+                      {s}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
-            <LocationSelect
-              className="w-full"
-              options={countyOptions}
-              value={county ? { label: county, value: county } : null}
-              onChange={(option) => {
-                const next = option?.value ?? '';
-                setCounty(next);
-                setCity('');
-                setCities([]);
-              }}
-              placeholder="Select County"
-              isDisabled={!stateVal}
-            />
+            <div className="w-full">
+              <label className="block text-sm font-medium text-gray-700 mb-1">County</label>
+              <input
+                value={countyQuery || county}
+                onChange={(e) => {
+                  setCountyQuery(e.target.value);
+                }}
+                placeholder="Type a county…"
+                disabled={!stateVal}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100"
+              />
+              {!!countyOpts.length && (
+                <ul className="border border-gray-200 rounded-md mt-2 max-h-60 overflow-auto bg-white">
+                  {countyOpts.map((c) => (
+                    <li
+                      key={c}
+                      className="px-3 py-2 cursor-pointer hover:bg-gray-50"
+                      onClick={() => {
+                        setCounty(c);
+                        setCountyQuery(c);
+                        setCountyOpts([]);
+                        setCity('');
+                        setCityQuery('');
+                        setCityOpts([]);
+                      }}
+                    >
+                      {c}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
 
-            <LocationSelect
-              className="w-full"
-              options={cityOptions}
-              value={city ? { label: city, value: city } : null}
-              onChange={(option) => setCity(option?.value ?? '')}
-              placeholder="Select City"
-              isDisabled={!stateVal || !county}
-            />
+            <div className="w-full">
+              <label className="block text-sm font-medium text-gray-700 mb-1">City</label>
+              <input
+                value={cityQuery || city}
+                onChange={(e) => {
+                  setCityQuery(e.target.value);
+                }}
+                placeholder="Type a city…"
+                disabled={!stateVal}
+                className="w-full border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100"
+              />
+              {!!cityOpts.length && (
+                <ul className="border border-gray-200 rounded-md mt-2 max-h-60 overflow-auto bg-white">
+                  {cityOpts.map((c) => (
+                    <li
+                      key={c}
+                      className="px-3 py-2 cursor-pointer hover:bg-gray-50"
+                      onClick={() => {
+                        setCity(c);
+                        setCityQuery(c);
+                        setCityOpts([]);
+                      }}
+                    >
+                      {c}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           </div>
 
           <Button

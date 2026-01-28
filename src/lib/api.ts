@@ -1,5 +1,4 @@
 import { listCities, listCounties, listStates } from './locations';
-import { toFullState } from './stateNames';
 
 const BASE = import.meta.env.VITE_API_BASE_URL as string;
 
@@ -11,8 +10,7 @@ async function expectJson(res: Response) {
 }
 
 export async function searchStates(query: string) {
-  // Always prefer local full names
-  const local = listStates(query).map((i) => i.value);
+  const local = listStates(query, 50).map((i) => i.value);
   if (local.length) return { items: local };
   try {
     const res = await fetch(`${BASE}/states/search?query=${encodeURIComponent(query || '')}`, { method: 'POST' });
@@ -23,8 +21,8 @@ export async function searchStates(query: string) {
 }
 
 export async function searchCounties(stateFullOrCode: string, query: string) {
-  const stateFull = toFullState(stateFullOrCode);
-  const local = listCounties(stateFull, query).map((i) => i.value);
+  const stateFull = stateFullOrCode;
+  const local = listCounties(stateFull, query, 50).map((i) => i.value);
   if (local.length) return { items: local };
   try {
     const url = `${BASE}/counties/search?state=${encodeURIComponent(stateFull)}&query=${encodeURIComponent(query || '')}`;
@@ -36,8 +34,8 @@ export async function searchCounties(stateFullOrCode: string, query: string) {
 }
 
 export async function searchCities(stateFullOrCode: string, county: string, query: string) {
-  const stateFull = toFullState(stateFullOrCode);
-  const local = listCities(stateFull, county, query).map((i) => i.value);
+  const stateFull = stateFullOrCode;
+  const local = listCities(stateFull, county, query, 50).map((i) => i.value);
   if (local.length) return { items: local };
   try {
     const url = `${BASE}/cities/search?state=${encodeURIComponent(stateFull)}&county=${encodeURIComponent(county || '')}&query=${encodeURIComponent(query || '')}`;
