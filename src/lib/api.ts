@@ -1,55 +1,91 @@
-import { listCitiesByState, listCounties, listStates } from './locations';
-import { toFullState } from './stateNames';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
-const BASE = import.meta.env.VITE_API_BASE_URL as string;
-
-async function expectJson(res: Response) {
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  const ct = res.headers.get('content-type') || '';
-  if (!ct.includes('application/json')) throw new Error('not json');
-  return res.json();
+if (!API_BASE_URL) {
+  throw new Error('VITE_API_BASE_URL is not set.');
 }
 
-const norm = (value: string) => (value || '').trim().toLowerCase();
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+type ApiResponse<T> = {
+  data?: T;
+  items?: T;
+  metadata?: Record<string, JsonValue>;
+  [key: string]: JsonValue | T | undefined;
+};
+
+const joinUrl = (path: string) => `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+
+async function requestJson<T>(path: string, options: RequestInit) {
+  const res = await fetch(joinUrl(path), options);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error('Expected JSON response.');
+  }
+  return (await res.json()) as T;
+}
+
+async function postJson<T>(path: string, body: unknown) {
+  return requestJson<T>(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+export type UploadResponse = {
+  fileId: string;
+  rowsReceived: number;
+};
+
+export type ParseResponse = {
+  matched?: unknown[];
+  unmatched?: unknown[];
+  items?: unknown[];
+  total?: number;
+  metadata?: Record<string, JsonValue>;
+};
 
 export async function searchStates(query: string) {
-  const q = norm(query);
-  const items = listStates()
-    .map((i) => i.value)
-    .filter((item) => !q || norm(item).includes(q));
-  return { items };
+  const res = await postJson<ApiResponse<string[]>>('/states/search', { query });
+  return res.items ?? (res.data as string[]) ?? [];
 }
 
-export async function searchCounties(stateFullOrCode: string, query: string) {
-  const stateFull = toFullState(stateFullOrCode);
-  const q = norm(query);
-  const items = listCounties(stateFull)
-    .map((i) => i.value)
-    .filter((item) => !q || norm(item).includes(q));
-  return { items };
+export async function searchCounties(state: string, query: string) {
+  const res = await postJson<ApiResponse<string[]>>('/counties/search', { state, query });
+  return res.items ?? (res.data as string[]) ?? [];
 }
 
-export async function searchCities(stateFullOrCode: string, _county: string, query: string) {
-  const stateFull = toFullState(stateFullOrCode);
-  const q = norm(query);
-  const items = listCitiesByState(stateFull)
-    .map((i) => i.value)
-    .filter((item) => !q || norm(item).includes(q));
-  return { items };
+export async function searchCities(state: string, county: string, query: string) {
+  const res = await postJson<ApiResponse<string[]>>('/cities/search', { state, county, query });
+  return res.items ?? (res.data as string[]) ?? [];
 }
 
 export async function uploadFile(file: File) {
   const fd = new FormData();
   fd.append('file', file);
-  const res = await fetch(`${BASE}/upload/file`, { method: 'POST', body: fd });
-  return expectJson(res) as Promise<{ fileId: string; rowsReceived: number }>;
+  return requestJson<UploadResponse>('/upload/file', { method: 'POST', body: fd });
 }
 
-export async function parseFile(fileId: string, p: { state: string; county: string; city: string }) {
-  const res = await fetch(`${BASE}/parse`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ fileId, ...p }),
-  });
-  return expectJson(res) as Promise<{ total: number; items: any[] }>;
+export async function parseFile(fileId: string, payload: { state: string; county: string; city?: string }) {
+  return postJson<ParseResponse>('/parse', { fileId, ...payload });
+}
+
+export async function retryParseRow(payload: unknown) {
+  return postJson<ParseResponse>('/parse/retry', payload);
+}
+
+export async function retryParseBatch(payload: unknown) {
+  return postJson<ParseResponse>('/parse/retry-batch', payload);
+}
+
+export async function getHealth() {
+  return requestJson<JsonValue>('/health', { method: 'GET' });
+}
+
+export async function validateApiKeys() {
+  return requestJson<JsonValue>('/validate-api-keys', { method: 'POST' });
 }
