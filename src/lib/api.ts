@@ -33,3 +33,12 @@ export async function uploadFile(file: File) {
   const res = await fetch(`${BASE}/upload/file`, { method: 'POST', body: fd });
   return expectJson(res) as Promise<{ fileId: string; rowsReceived: number }>;
 }
+
+export async function parseFile(fileId: string, p: { state: string; county: string; city: string }) {
+  const res = await fetch(`${BASE}/parse`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ fileId, ...p }),
+  });
+  return expectJson(res) as Promise<{ total: number; items: any[] }>;
+}

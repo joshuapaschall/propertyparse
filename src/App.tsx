@@ -1,8 +1,8 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent } from 'react';
 import FileUpload from './components/FileUpload/FileUpload';
 import LocationSelect from './components/LocationSelect/LocationSelect';
-import "./App.css";
-import { searchStates, searchCounties, searchCities, uploadFile } from './lib/api';
+import './App.css';
+import { searchStates, searchCounties, searchCities, uploadFile, parseFile } from './lib/api';
 import 'antd/dist/reset.css';
 import { Button, Typography } from 'antd';
 
@@ -23,7 +23,9 @@ function App() {
   const [file, setFile] = useState<File | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [rows, setRows] = useState<any[]>([]);
+  const [total, setTotal] = useState<number>(0);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     searchStates('').then((r) => setStates(r.items)).catch(() => {});
@@ -73,17 +75,22 @@ function App() {
     e.preventDefault();
     setMsg(null);
     setErr(null);
+    setRows([]);
+    setTotal(0);
+    setBusy(true);
     try {
       if (!file) {
         throw new Error('Please select a file first.');
       }
-      setIsLoading(true);
-      const result = await uploadFile(file);
-      setMsg(`Uploaded! fileId=${result.fileId}, rows=${result.rowsReceived}`);
+      const up = await uploadFile(file);
+      const parsed = await parseFile(up.fileId, { state: stateVal, county, city });
+      setRows(parsed.items);
+      setTotal(parsed.total);
+      setMsg(`Parsed ${parsed.total} rows (showing ${parsed.items.length}).`);
     } catch (ex: any) {
-      setErr(ex?.message || 'Upload failed');
+      setErr(ex?.message || 'Upload/parse failed');
     } finally {
-      setIsLoading(false);
+      setBusy(false);
     }
   }
 
@@ -130,8 +137,8 @@ function App() {
           <Button
             htmlType="submit"
             type="primary"
-            loading={isLoading}
-            disabled={!file}
+            loading={busy}
+            disabled={!file || busy}
             className={
               `
               !w-full !py-3 !px-4 !rounded-lg !font-medium !text-sm
@@ -157,6 +164,49 @@ function App() {
       {err && (
         <div className="max-w-3xl mx-auto mt-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
           {err}
+        </div>
+      )}
+
+      {!!rows.length && (
+        <div className="max-w-5xl w-full mx-auto mt-6 bg-white rounded-xl shadow-md p-6 space-y-4">
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b">
+                <th className="py-2 pr-4">Address</th>
+                <th className="py-2 pr-4">City</th>
+                <th className="py-2 pr-4">State</th>
+                <th className="py-2">ZIP</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, i) => (
+                <tr key={i} className="border-b last:border-b-0">
+                  <td className="py-2 pr-4">{row.address_raw}</td>
+                  <td className="py-2 pr-4">{row.city_raw}</td>
+                  <td className="py-2 pr-4">{row.state_raw}</td>
+                  <td className="py-2">{row.zip_raw}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div className="flex justify-end">
+            <Button
+              onClick={() => {
+                const blob = new Blob([JSON.stringify({ total, items: rows }, null, 2)], {
+                  type: 'application/json',
+                });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'parsed.json';
+                a.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              Download JSON
+            </Button>
+          </div>
         </div>
       )}
     </div>
