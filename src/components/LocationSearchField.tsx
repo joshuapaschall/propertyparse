@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 type LocationSearchFieldProps = {
   label: string;
@@ -7,9 +7,11 @@ type LocationSearchFieldProps = {
   disabled?: boolean;
   required?: boolean;
   onChange: (value: string) => void;
-  onSearch: (query: string) => Promise<string[]>;
+  onSearch: (query: string, signal?: AbortSignal) => Promise<string[]>;
   helperText?: string;
 };
+
+const DEBOUNCE_DELAY_MS = 250;
 
 export default function LocationSearchField({
   label,
@@ -27,37 +29,76 @@ export default function LocationSearchField({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const blurTimeout = useRef<number | null>(null);
+  const debounceTimeout = useRef<number | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const skipDebounceQueryRef = useRef<string | null>(null);
 
   useEffect(() => {
     setQuery(value);
   }, [value]);
 
+  const runSearch = useCallback(
+    async (nextQuery: string) => {
+      if (disabled) return;
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+      setLoading(true);
+      setErrorMessage(null);
+      try {
+        const result = await onSearch(nextQuery, controller.signal);
+        if (controller.signal.aborted) return;
+        setOptions(result);
+      } catch {
+        if (controller.signal.aborted) return;
+        setOptions([]);
+        setErrorMessage('Unable to load results (API error)');
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    },
+    [disabled, onSearch],
+  );
+
   useEffect(() => {
     if (!isOpen || disabled) {
       return;
     }
-    const timeout = window.setTimeout(async () => {
-      setLoading(true);
-      setErrorMessage(null);
-      try {
-        const result = await onSearch(query);
-        setOptions(result);
-      } catch {
-        setOptions([]);
-        setErrorMessage('Unable to load locations. Check your connection and try again.');
-      } finally {
-        setLoading(false);
-      }
-    }, 200);
 
-    return () => window.clearTimeout(timeout);
-  }, [query, isOpen, disabled, onSearch]);
+    if (skipDebounceQueryRef.current === query) {
+      skipDebounceQueryRef.current = null;
+      return;
+    }
+
+    if (debounceTimeout.current) {
+      window.clearTimeout(debounceTimeout.current);
+    }
+
+    debounceTimeout.current = window.setTimeout(() => {
+      runSearch(query);
+    }, DEBOUNCE_DELAY_MS);
+
+    return () => {
+      if (debounceTimeout.current) {
+        window.clearTimeout(debounceTimeout.current);
+      }
+    };
+  }, [query, isOpen, disabled, runSearch]);
+
+  useEffect(() => {
+    return () => {
+      abortControllerRef.current?.abort();
+    };
+  }, []);
 
   const showClear = value.length > 0;
-  const filteredOptions = useMemo(
-    () => options.filter((option) => option.toLowerCase().includes(query.toLowerCase())),
-    [options, query],
-  );
+  const loadingLabel = query ? 'Searching...' : 'Loading...';
+  const showEmptyState = !loading && !errorMessage && options.length === 0;
+  const emptyMessage = query ? 'No matches found' : 'No results available';
 
   return (
     <div className="relative space-y-2">
@@ -72,7 +113,12 @@ export default function LocationSearchField({
           placeholder={placeholder}
           disabled={disabled}
           className="w-full text-sm outline-none disabled:bg-transparent disabled:text-slate-400"
-          onFocus={() => setIsOpen(true)}
+          onFocus={() => {
+            if (disabled) return;
+            setIsOpen(true);
+            skipDebounceQueryRef.current = query;
+            runSearch(query);
+          }}
           onChange={(event) => {
             setQuery(event.target.value);
             if (!isOpen) {
@@ -101,11 +147,21 @@ export default function LocationSearchField({
         <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
           <div className="max-h-48 overflow-auto p-2">
             {loading ? (
-              <div className="px-3 py-2 text-sm text-slate-500">Searching...</div>
+              <div className="px-3 py-2 text-sm text-slate-500">{loadingLabel}</div>
             ) : errorMessage ? (
-              <div className="px-3 py-2 text-sm text-rose-500">{errorMessage}</div>
-            ) : filteredOptions.length ? (
-              filteredOptions.map((option) => (
+              <div className="flex items-center justify-between gap-2 px-3 py-2 text-sm text-rose-500">
+                <span>{errorMessage}</span>
+                <button
+                  type="button"
+                  className="rounded border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-500 hover:bg-rose-50"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => runSearch(query)}
+                >
+                  Retry
+                </button>
+              </div>
+            ) : options.length ? (
+              options.map((option) => (
                 <button
                   key={option}
                   type="button"
@@ -123,9 +179,9 @@ export default function LocationSearchField({
                   {option}
                 </button>
               ))
-            ) : (
-              <div className="px-3 py-2 text-sm text-slate-500">No matches found.</div>
-            )}
+            ) : showEmptyState ? (
+              <div className="px-3 py-2 text-sm text-slate-500">{emptyMessage}</div>
+            ) : null}
           </div>
         </div>
       ) : null}
