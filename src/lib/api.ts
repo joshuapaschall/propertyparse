@@ -16,7 +16,9 @@ type ApiResponse<T> = {
 export type JobRecord = Record<string, JsonValue>;
 export type JobExportType = 'matched' | 'unmatched';
 
-const joinUrl = (path: string) => `${API_BASE_URL}${path.startsWith('/') ? path : `/${path}`}`;
+const normalizedApiBaseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
+const joinUrl = (path: string) =>
+  new URL(path.startsWith('/') ? path.slice(1) : path, normalizedApiBaseUrl).toString();
 
 async function requestJson<T>(path: string, options: RequestInit) {
   const res = await fetch(joinUrl(path), options);
@@ -97,7 +99,7 @@ export async function getHealth() {
 }
 
 export async function validateApiKeys() {
-  return requestJson<JsonValue>('/validate-api-keys', { method: 'POST' });
+  return requestJson<JsonValue>('/validate-api-keys', { method: 'GET' });
 }
 
 export async function getJobs() {

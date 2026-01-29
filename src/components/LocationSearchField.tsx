@@ -25,6 +25,7 @@ export default function LocationSearchField({
   const [options, setOptions] = useState<string[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const blurTimeout = useRef<number | null>(null);
 
   useEffect(() => {
@@ -37,11 +38,13 @@ export default function LocationSearchField({
     }
     const timeout = window.setTimeout(async () => {
       setLoading(true);
+      setErrorMessage(null);
       try {
         const result = await onSearch(query);
         setOptions(result);
       } catch {
         setOptions([]);
+        setErrorMessage('Unable to load locations. Check your connection and try again.');
       } finally {
         setLoading(false);
       }
@@ -99,6 +102,8 @@ export default function LocationSearchField({
           <div className="max-h-48 overflow-auto p-2">
             {loading ? (
               <div className="px-3 py-2 text-sm text-slate-500">Searching...</div>
+            ) : errorMessage ? (
+              <div className="px-3 py-2 text-sm text-rose-500">{errorMessage}</div>
             ) : filteredOptions.length ? (
               filteredOptions.map((option) => (
                 <button
