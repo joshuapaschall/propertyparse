@@ -276,7 +276,7 @@ export default function ParsePage() {
                   setCountyValue('');
                   setCityValue('');
                 }}
-                onSearch={(query) => searchStates(query)}
+                onSearch={(query, signal) => searchStates(query, signal)}
               />
               <LocationSearchField
                 label="County"
@@ -288,7 +288,7 @@ export default function ParsePage() {
                   setCountyValue(value);
                   setCityValue('');
                 }}
-                onSearch={(query) => searchCounties(stateValue, query)}
+                onSearch={(query, signal) => searchCounties(stateValue, query, signal)}
               />
               <LocationSearchField
                 label="City (optional)"
@@ -296,7 +296,7 @@ export default function ParsePage() {
                 placeholder={stateValue ? 'Search city' : 'Select state first'}
                 disabled={!stateValue}
                 onChange={(value) => setCityValue(value)}
-                onSearch={(query) => searchCities(stateValue, countyValue, query)}
+                onSearch={(query, signal) => searchCities(stateValue, countyValue, query, signal)}
                 helperText="Leave blank if the file spans multiple cities."
               />
             </div>

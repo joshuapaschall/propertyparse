@@ -33,10 +33,11 @@ async function requestJson<T>(path: string, options: RequestInit) {
   return (await res.json()) as T;
 }
 
-async function postJson<T>(path: string, body: unknown) {
+async function postJson<T>(path: string, body: unknown, options: RequestInit = {}) {
   return requestJson<T>(path, {
+    ...options,
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...(options.headers ?? {}) },
     body: JSON.stringify(body),
   });
 }
@@ -61,18 +62,18 @@ export type ParseResponse = {
   metadata?: Record<string, JsonValue>;
 };
 
-export async function searchStates(query: string) {
-  const res = await postJson<ApiResponse<string[]>>('/states/search', { query });
+export async function searchStates(query: string, signal?: AbortSignal) {
+  const res = await postJson<ApiResponse<string[]>>('/states/search', { query }, { signal });
   return res.items ?? (res.data as string[]) ?? [];
 }
 
-export async function searchCounties(state: string, query: string) {
-  const res = await postJson<ApiResponse<string[]>>('/counties/search', { state, query });
+export async function searchCounties(state: string, query: string, signal?: AbortSignal) {
+  const res = await postJson<ApiResponse<string[]>>('/counties/search', { state, query }, { signal });
   return res.items ?? (res.data as string[]) ?? [];
 }
 
-export async function searchCities(state: string, county: string, query: string) {
-  const res = await postJson<ApiResponse<string[]>>('/cities/search', { state, county, query });
+export async function searchCities(state: string, county: string, query: string, signal?: AbortSignal) {
+  const res = await postJson<ApiResponse<string[]>>('/cities/search', { state, county, query }, { signal });
   return res.items ?? (res.data as string[]) ?? [];
 }
 
