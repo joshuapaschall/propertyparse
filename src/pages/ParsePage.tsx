@@ -1,20 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Papa from 'papaparse';
 import AppShell from '../components/AppShell';
-import LocationSearchField from '../components/LocationSearchField';
 import FileUploadCard from '../components/FileUploadCard';
+import LocationSelect from '../components/LocationSelect';
 import ProgressIndicator from '../components/ProgressIndicator';
 import ResultsTable from '../components/ResultsTable';
 import EditRowModal, { ParsedRow } from '../components/EditRowModal';
-import {
-  parseFile,
-  retryParseBatch,
-  retryParseRow,
-  searchCities,
-  searchCounties,
-  searchStates,
-  uploadFile,
-} from '../lib/api';
+import { parseFile, retryParseBatch, retryParseRow, uploadFile } from '../lib/api';
+import { listCitiesByState, listCounties, listStates50 } from '../lib/locations';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Finalizing'];
 
@@ -129,11 +122,31 @@ export default function ParsePage() {
   const [retryAvailable, setRetryAvailable] = useState<'unknown' | 'available' | 'unavailable'>(
     'unknown',
   );
+  const didLogLocations = useRef(false);
 
   const canParse = Boolean(file && stateValue && countyValue);
 
   const dedupedMatched = useMemo(() => dedupeRows(matchedRows), [matchedRows]);
   const dedupedUnmatched = useMemo(() => dedupeRows(unmatchedRows), [unmatchedRows]);
+  const states = useMemo(() => listStates50(), []);
+  const counties = useMemo(
+    () => (stateValue ? listCounties(stateValue) : []),
+    [stateValue],
+  );
+  const cities = useMemo(
+    () => (stateValue ? listCitiesByState(stateValue) : []),
+    [stateValue],
+  );
+
+  useEffect(() => {
+    if (!import.meta.env.DEV || didLogLocations.current) return;
+    didLogLocations.current = true;
+    const georgiaCounties = listCounties('Georgia');
+    const georgiaCities = listCitiesByState('Georgia');
+    console.info(
+      `[locations] states=${states.length} (expected 50), GA counties=${georgiaCounties.length}, GA cities=${georgiaCities.length}`,
+    );
+  }, [states]);
 
   const apiCallsUsed = useMemo(() => {
     if (!metadata) return null;
@@ -266,7 +279,7 @@ export default function ParsePage() {
                   Select the required location fields to improve parsing accuracy.
                 </p>
               </div>
-              <LocationSearchField
+              <LocationSelect
                 label="State"
                 value={stateValue}
                 placeholder="Select state"
@@ -276,9 +289,14 @@ export default function ParsePage() {
                   setCountyValue('');
                   setCityValue('');
                 }}
-                onSearch={(query, signal) => searchStates(query, undefined, signal)}
+                onClear={() => {
+                  setStateValue('');
+                  setCountyValue('');
+                  setCityValue('');
+                }}
+                options={states}
               />
-              <LocationSearchField
+              <LocationSelect
                 label="County"
                 value={countyValue}
                 placeholder={stateValue ? 'Select county' : 'Select state first'}
@@ -288,15 +306,17 @@ export default function ParsePage() {
                   setCountyValue(value);
                   setCityValue('');
                 }}
-                onSearch={(query, signal) => searchCounties(stateValue, query, undefined, signal)}
+                onClear={() => setCountyValue('')}
+                options={counties}
               />
-              <LocationSearchField
+              <LocationSelect
                 label="City (optional)"
                 value={cityValue}
                 placeholder={stateValue ? 'Select city' : 'Select state first'}
                 disabled={!stateValue}
                 onChange={(value) => setCityValue(value)}
-                onSearch={(query, signal) => searchCities(stateValue, countyValue, query, undefined, signal)}
+                onClear={() => setCityValue('')}
+                options={cities}
                 helperText="Leave blank if the file spans multiple cities."
               />
             </div>
