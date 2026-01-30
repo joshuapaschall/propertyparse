@@ -1,8 +1,6 @@
 import countiesJson from '../assets/counties_list.json';
 import citiesJson from '../assets/data.json';
-import { STATE_NAMES, toFullState } from './stateNames';
-
-type Item = { value: string; label: string };
+import { toFullState } from './stateNames';
 
 const norm = (s: string) => (s || '').trim().toLowerCase();
 
@@ -20,12 +18,71 @@ function dedupeStrings(values: string[]) {
   return out;
 }
 
-export function listStates(): Item[] {
-  // FULL names, alphabetical
-  return STATE_NAMES.map((n) => ({ value: n, label: n }));
+const STATE_CODES_50 = [
+  'AL',
+  'AK',
+  'AZ',
+  'AR',
+  'CA',
+  'CO',
+  'CT',
+  'DE',
+  'FL',
+  'GA',
+  'HI',
+  'ID',
+  'IL',
+  'IN',
+  'IA',
+  'KS',
+  'KY',
+  'LA',
+  'ME',
+  'MD',
+  'MA',
+  'MI',
+  'MN',
+  'MS',
+  'MO',
+  'MT',
+  'NE',
+  'NV',
+  'NH',
+  'NJ',
+  'NM',
+  'NY',
+  'NC',
+  'ND',
+  'OH',
+  'OK',
+  'OR',
+  'PA',
+  'RI',
+  'SC',
+  'SD',
+  'TN',
+  'TX',
+  'UT',
+  'VT',
+  'VA',
+  'WA',
+  'WV',
+  'WI',
+  'WY',
+];
+
+const toTitleCase = (value: string) =>
+  value
+    .toLowerCase()
+    .replace(/\b\w/g, (match) => match.toUpperCase())
+    .trim();
+
+export function listStates50(): string[] {
+  const names = STATE_CODES_50.map((code) => toFullState(code)).filter(Boolean);
+  return dedupeStrings(names).sort((a, b) => a.localeCompare(b));
 }
 
-export function listCounties(stateFullOrCode: string): Item[] {
+export function listCounties(stateFullOrCode: string): string[] {
   const stateFull = toFullState(stateFullOrCode);
   if (!stateFull) return [];
 
@@ -36,11 +93,10 @@ export function listCounties(stateFullOrCode: string): Item[] {
     .filter(Boolean);
 
   // Counties are already mostly unique, but safe to dedupe + sort.
-  const uniq = dedupeStrings(raw).sort((a, b) => a.localeCompare(b));
-  return uniq.map((n) => ({ value: n, label: n }));
+  return dedupeStrings(raw).sort((a, b) => a.localeCompare(b));
 }
 
-export function listCitiesByState(stateFullOrCode: string): Item[] {
+export function listCitiesByState(stateFullOrCode: string): string[] {
   const stateFull = toFullState(stateFullOrCode);
   if (!stateFull) return [];
 
@@ -51,9 +107,11 @@ export function listCitiesByState(stateFullOrCode: string): Item[] {
   const key =
     Object.keys(cityMap).find((k) => k.toLowerCase() === stateFull.toLowerCase()) || stateFull;
 
-  const raw = (cityMap[key] || []).map((s) => (s || '').trim()).filter(Boolean);
+  const raw = (cityMap[key] || [])
+    .map((s) => (s || '').trim())
+    .filter(Boolean)
+    .map((s) => toTitleCase(s));
 
   // DEDUPE (this is required; data.json contains duplicates)
-  const uniq = dedupeStrings(raw).sort((a, b) => a.localeCompare(b));
-  return uniq.map((n) => ({ value: n, label: n }));
+  return dedupeStrings(raw).sort((a, b) => a.localeCompare(b));
 }
