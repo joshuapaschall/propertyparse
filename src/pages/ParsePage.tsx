@@ -14,6 +14,7 @@ const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Fin
 const EXPORT_HEADERS = [
   'Full Address',
   'Street Address',
+  'Address 2',
   'City',
   'State',
   'Zip Code',
@@ -31,42 +32,27 @@ const stringifyValue = (value: unknown) => {
 };
 
 const normalizeRow = (row: Record<string, unknown>, index: number): ParsedRow => {
-  const fullAddress =
-    (row.full_address as string) ||
-    (row.fullAddress as string) ||
-    (row.address_full as string) ||
-    (row.address as string) ||
-    (row.address_raw as string) ||
-    '';
-  const streetAddress =
-    (row.street_address as string) ||
-    (row.streetAddress as string) ||
-    (row.address_line1 as string) ||
-    (row.street as string) ||
-    '';
-  const city = (row.city as string) || (row.city_raw as string) || '';
-  const state = (row.state as string) || (row.state_raw as string) || '';
-  const zipCode =
-    (row.zip as string) ||
-    (row.zip_code as string) ||
-    (row.zipCode as string) ||
-    (row.zip_raw as string) ||
-    '';
-  const sourceRaw =
-    (row.source_raw as string) ||
-    (row.raw as string) ||
-    (row.source as string) ||
-    (row.address_raw as string) ||
-    stringifyValue(row);
+  const fullAddress = (row.full_address as string) || '';
+  const streetAddress = (row.street_address as string) || '';
+  const address2 = (row.address2 as string) || '';
+  const city = (row.city as string) || '';
+  const state = (row.state as string) || '';
+  const zipCode = (row.zip_code as string) || '';
+  const status = (row.status as string) || '';
+  const sourceRaw = stringifyValue(row.raw ?? '');
+  const unmatchedReason = (row.unmatched_reason as string) || '';
 
   return {
     id: createId(row, index),
     fullAddress,
     streetAddress,
+    address2,
     city,
     state,
     zipCode,
+    status,
     sourceRaw,
+    unmatchedReason,
     original: row,
   };
 };
@@ -90,15 +76,23 @@ const dedupeRows = (rows: ParsedRow[]) => {
   });
 };
 
-const buildCsv = (rows: ParsedRow[]) =>
+const formatSourceRaw = (row: ParsedRow, includeReason: boolean) => {
+  if (includeReason && row.unmatchedReason) {
+    return `${row.sourceRaw} (reason: ${row.unmatchedReason})`.trim();
+  }
+  return row.sourceRaw;
+};
+
+const buildCsv = (rows: ParsedRow[], includeReason: boolean) =>
   Papa.unparse(
     rows.map((row) => ({
       'Full Address': row.fullAddress,
       'Street Address': row.streetAddress,
+      'Address 2': row.address2,
       City: row.city,
       State: row.state,
       'Zip Code': row.zipCode,
-      'Source / Raw': row.sourceRaw,
+      'Source / Raw': formatSourceRaw(row, includeReason),
     })),
     { columns: EXPORT_HEADERS },
   );
@@ -195,6 +189,15 @@ export default function ParsePage() {
     );
   }, [metadata]);
 
+  const unmatchedCount = useMemo(() => {
+    if (!metadata) return dedupedUnmatched.length;
+    return (
+      (metadata.unmatched_count as number) ||
+      (metadata.unmatchedCount as number) ||
+      dedupedUnmatched.length
+    );
+  }, [metadata, dedupedUnmatched.length]);
+
   const metadataWarnings = useMemo(() => {
     if (!metadata) return [];
     const warnings = metadata.warnings;
@@ -260,10 +263,19 @@ export default function ParsePage() {
       });
       setProgressStep(3);
       setProgressStep(4);
-      const rawMatched = (parsed.matched || parsed.items || []) as unknown[];
-      const rawUnmatched = (parsed.unmatched || []) as unknown[];
-      setMatchedRows(normalizeRows(rawMatched));
-      setUnmatchedRows(normalizeRows(rawUnmatched));
+      const parsedHasBuckets = 'matched' in parsed || 'unmatched' in parsed;
+      if (parsedHasBuckets) {
+        const rawMatched = (parsed.matched || []) as unknown[];
+        const rawUnmatched = (parsed.unmatched || []) as unknown[];
+        setMatchedRows(normalizeRows(rawMatched));
+        setUnmatchedRows(normalizeRows(rawUnmatched));
+      } else {
+        const rawItems = (parsed.items || []) as Record<string, unknown>[];
+        const matchedItems = rawItems.filter((item) => item.status === 'Matched');
+        const unmatchedItems = rawItems.filter((item) => item.status !== 'Matched');
+        setMatchedRows(normalizeRows(matchedItems));
+        setUnmatchedRows(normalizeRows(unmatchedItems));
+      }
       setMetadata((parsed.metadata as Record<string, unknown>) || null);
       const progressMeta = (parsed.metadata as Record<string, unknown> | undefined)?.progress;
       if (typeof progressMeta === 'number') {
@@ -293,9 +305,23 @@ export default function ParsePage() {
     );
   };
 
-  const applyRetryResponse = (parsed: { matched?: unknown[]; unmatched?: unknown[]; items?: unknown[] }) => {
-    const newMatched = normalizeRows((parsed.matched ?? parsed.items ?? []) as unknown[]);
-    const newUnmatched = normalizeRows((parsed.unmatched ?? []) as unknown[]);
+  const applyRetryResponse = (parsed: {
+    matched?: unknown[];
+    unmatched?: unknown[];
+    items?: unknown[];
+  }) => {
+    const parsedHasBuckets = 'matched' in parsed || 'unmatched' in parsed;
+    const items = (parsed.items ?? []) as Record<string, unknown>[];
+    const newMatched = normalizeRows(
+      (parsedHasBuckets
+        ? parsed.matched ?? []
+        : items.filter((item) => item.status === 'Matched')) as unknown[],
+    );
+    const newUnmatched = normalizeRows(
+      (parsedHasBuckets
+        ? parsed.unmatched ?? []
+        : items.filter((item) => item.status !== 'Matched')) as unknown[],
+    );
     if (newMatched.length) {
       setMatchedRows((prev) => dedupeRows([...prev, ...newMatched]));
     }
@@ -335,8 +361,8 @@ export default function ParsePage() {
     }
   };
 
-  const downloadCsv = (rows: ParsedRow[], filename: string) => {
-    const csv = buildCsv(rows);
+  const downloadCsv = (rows: ParsedRow[], filename: string, includeReason: boolean) => {
+    const csv = buildCsv(rows, includeReason);
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -468,6 +494,12 @@ export default function ParsePage() {
                 </ul>
               </div>
             ) : null}
+            {cityValue && unmatchedCount > 0 ? (
+              <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700">
+                Some addresses failed because Google returned a different city. Leave City blank if
+                your file spans multiple cities.
+              </div>
+            ) : null}
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <p className="text-xs uppercase text-slate-500">Rows Received</p>
@@ -566,6 +598,7 @@ export default function ParsePage() {
                     downloadCsv(
                       activeTab === 'matched' ? dedupedMatched : dedupedUnmatched,
                       activeTab === 'matched' ? 'matched-addresses.csv' : 'unmatched-addresses.csv',
+                      activeTab === 'unmatched',
                     )
                   }
                   className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
