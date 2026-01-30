@@ -15,6 +15,13 @@ export default function ResultsTable({
   onEdit,
   onRetry,
 }: ResultsTableProps) {
+  const formatSourceRaw = (row: ParsedRow) => {
+    if (variant === 'unmatched' && row.unmatchedReason) {
+      return `${row.sourceRaw} (reason: ${row.unmatchedReason})`.trim();
+    }
+    return row.sourceRaw;
+  };
+
   return (
     <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
       <div className="overflow-auto">
@@ -23,6 +30,7 @@ export default function ResultsTable({
             <tr>
               <th className="px-4 py-3">Full Address</th>
               <th className="px-4 py-3">Street Address</th>
+              <th className="px-4 py-3">Address 2</th>
               <th className="px-4 py-3">City</th>
               <th className="px-4 py-3">State</th>
               <th className="px-4 py-3">Zip Code</th>
@@ -33,7 +41,7 @@ export default function ResultsTable({
           <tbody className="divide-y divide-slate-100">
             {rows.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-center text-slate-500" colSpan={showRaw ? 7 : 6}>
+                <td className="px-4 py-6 text-center text-slate-500" colSpan={showRaw ? 8 : 7}>
                   No results yet.
                 </td>
               </tr>
@@ -42,11 +50,12 @@ export default function ResultsTable({
                 <tr key={row.id} className="hover:bg-slate-50">
                   <td className="px-4 py-3 text-slate-800">{row.fullAddress}</td>
                   <td className="px-4 py-3 text-slate-700">{row.streetAddress}</td>
+                  <td className="px-4 py-3 text-slate-700">{row.address2}</td>
                   <td className="px-4 py-3 text-slate-700">{row.city}</td>
                   <td className="px-4 py-3 text-slate-700">{row.state}</td>
                   <td className="px-4 py-3 text-slate-700">{row.zipCode}</td>
                   {showRaw ? (
-                    <td className="px-4 py-3 text-xs text-slate-500">{row.sourceRaw}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">{formatSourceRaw(row)}</td>
                   ) : null}
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">

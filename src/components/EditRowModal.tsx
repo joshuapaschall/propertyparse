@@ -4,10 +4,13 @@ export type ParsedRow = {
   id: string;
   fullAddress: string;
   streetAddress: string;
+  address2: string;
   city: string;
   state: string;
   zipCode: string;
+  status: string;
   sourceRaw: string;
+  unmatchedReason?: string;
   needsRetry?: boolean;
   original?: unknown;
 };
@@ -62,6 +65,14 @@ export default function EditRowModal({ open, row, onClose, onSave }: EditRowModa
               className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800"
               value={draft.streetAddress}
               onChange={(event) => update('streetAddress', event.target.value)}
+            />
+          </label>
+          <label className="space-y-1 text-sm text-slate-600">
+            <span>Address 2</span>
+            <input
+              className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800"
+              value={draft.address2}
+              onChange={(event) => update('address2', event.target.value)}
             />
           </label>
           <label className="space-y-1 text-sm text-slate-600">
