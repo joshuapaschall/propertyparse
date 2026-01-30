@@ -16,10 +16,38 @@ export default function ResultsTable({
   onRetry,
 }: ResultsTableProps) {
   const formatSourceRaw = (row: ParsedRow) => {
-    if (variant === 'unmatched' && row.unmatchedReason) {
-      return `${row.sourceRaw} (reason: ${row.unmatchedReason})`.trim();
-    }
     return row.sourceRaw;
+  };
+
+  const renderSourceDetails = (row: ParsedRow) => {
+    const details: Array<{ label: string; value: string }> = [
+      {
+        label: 'verification_source',
+        value: row.verificationSource ? row.verificationSource : '--',
+      },
+      {
+        label: 'from_cache',
+        value: typeof row.fromCache === 'boolean' ? String(row.fromCache) : '--',
+      },
+    ];
+
+    if (row.placeId) {
+      details.push({ label: 'place_id', value: row.placeId });
+    }
+
+    if (variant === 'unmatched' && row.unmatchedReason) {
+      details.push({ label: 'unmatched_reason', value: row.unmatchedReason });
+    }
+
+    return (
+      <div className="mt-2 space-y-1 text-[11px] text-slate-500">
+        {details.map((detail) => (
+          <div key={detail.label}>
+            <span className="font-semibold text-slate-600">{detail.label}:</span> {detail.value}
+          </div>
+        ))}
+      </div>
+    );
   };
 
   return (
@@ -55,7 +83,10 @@ export default function ResultsTable({
                   <td className="px-4 py-3 text-slate-700">{row.state}</td>
                   <td className="px-4 py-3 text-slate-700">{row.zipCode}</td>
                   {showRaw ? (
-                    <td className="px-4 py-3 text-xs text-slate-500">{formatSourceRaw(row)}</td>
+                    <td className="px-4 py-3 text-xs text-slate-500">
+                      <div>{formatSourceRaw(row)}</div>
+                      {renderSourceDetails(row)}
+                    </td>
                   ) : null}
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-2">

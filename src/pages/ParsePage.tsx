@@ -41,6 +41,15 @@ const normalizeRow = (row: Record<string, unknown>, index: number): ParsedRow =>
   const status = (row.status as string) || '';
   const sourceRaw = stringifyValue(row.raw ?? '');
   const unmatchedReason = (row.unmatched_reason as string) || '';
+  const verificationSource = (row.verification_source as string) || '';
+  const fromCacheValue = row.from_cache;
+  const fromCache =
+    typeof fromCacheValue === 'boolean'
+      ? fromCacheValue
+      : typeof fromCacheValue === 'string'
+        ? fromCacheValue.toLowerCase() === 'true'
+        : undefined;
+  const placeId = (row.place_id as string) || '';
 
   return {
     id: createId(row, index),
@@ -53,6 +62,9 @@ const normalizeRow = (row: Record<string, unknown>, index: number): ParsedRow =>
     status,
     sourceRaw,
     unmatchedReason,
+    verificationSource,
+    fromCache,
+    placeId,
     original: row,
   };
 };
@@ -116,6 +128,7 @@ export default function ParsePage() {
   const [retryAvailable, setRetryAvailable] = useState<'unknown' | 'available' | 'unavailable'>(
     'unknown',
   );
+  const [forceRefresh, setForceRefresh] = useState(false);
   const didLogLocations = useRef(false);
 
   const canParse = Boolean(file && stateValue && countyValue);
@@ -189,6 +202,29 @@ export default function ParsePage() {
     );
   }, [metadata]);
 
+  const verificationSourceCounts = useMemo(() => {
+    if (!metadata) return null;
+    return (metadata.verification_source_counts as Record<string, number>) || null;
+  }, [metadata]);
+
+  const verificationSourcesSummary = useMemo(() => {
+    if (!verificationSourceCounts) return null;
+    const preferredOrder = ['cache', 'geocoding', 'places', 'parser'];
+    const entries = Object.entries(verificationSourceCounts).filter(
+      ([, value]) => typeof value === 'number',
+    );
+    if (!entries.length) return null;
+    const orderedEntries = [
+      ...preferredOrder
+        .map((key) => [key, verificationSourceCounts[key]] as const)
+        .filter(([, value]) => typeof value === 'number'),
+      ...entries.filter(([key]) => !preferredOrder.includes(key)),
+    ];
+    return orderedEntries
+      .map(([key, value]) => `${key} ${value}`)
+      .join(' • ');
+  }, [verificationSourceCounts]);
+
   const unmatchedCount = useMemo(() => {
     if (!metadata) return dedupedUnmatched.length;
     return (
@@ -260,6 +296,7 @@ export default function ParsePage() {
         state: stateValue,
         county: countyValue,
         city: cityValue || undefined,
+        force_refresh: forceRefresh,
       });
       setProgressStep(3);
       setProgressStep(4);
@@ -429,6 +466,33 @@ export default function ParsePage() {
 
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
             <FileUploadCard file={file} onChange={setFile} />
+            <div className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">
+                  Force re-verify (ignore cache)
+                </p>
+                <p className="text-xs text-slate-500">
+                  Uses more API calls. Only enable if you suspect cached results are stale.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setForceRefresh((prev) => !prev)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border transition ${
+                  forceRefresh
+                    ? 'border-indigo-600 bg-indigo-600'
+                    : 'border-slate-300 bg-slate-200'
+                }`}
+                role="switch"
+                aria-checked={forceRefresh}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                    forceRefresh ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -546,6 +610,11 @@ export default function ParsePage() {
                 </div>
               ) : null}
             </div>
+            {verificationSourcesSummary ? (
+              <p className="mt-3 text-xs text-slate-500">
+                Sources: {verificationSourcesSummary}
+              </p>
+            ) : null}
             <div className="mt-6">
               <ProgressIndicator
                 steps={PROGRESS_STEPS}
