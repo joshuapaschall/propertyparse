@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { FixedSizeList } from 'react-window';
 
 type LocationSearchFieldProps = {
   label: string;
@@ -12,6 +13,8 @@ type LocationSearchFieldProps = {
 };
 
 const DEBOUNCE_DELAY_MS = 250;
+const OPTION_ROW_HEIGHT = 32;
+const MAX_VISIBLE_OPTIONS = 6;
 
 export default function LocationSearchField({
   label,
@@ -99,6 +102,30 @@ export default function LocationSearchField({
   const loadingLabel = query ? 'Searching...' : 'Loading...';
   const showEmptyState = !loading && !errorMessage && options.length === 0;
   const emptyMessage = query ? 'No matches found' : 'No results available';
+  const shouldVirtualize = options.length > 200;
+  const listHeight = useMemo(() => {
+    if (options.length === 0) return OPTION_ROW_HEIGHT;
+    return Math.min(options.length, MAX_VISIBLE_OPTIONS) * OPTION_ROW_HEIGHT;
+  }, [options.length]);
+
+  const handleOpen = useCallback(() => {
+    if (disabled) return;
+    setIsOpen(true);
+    skipDebounceQueryRef.current = query;
+    runSearch(query);
+  }, [disabled, query, runSearch]);
+
+  const handleSelect = useCallback(
+    (option: string) => {
+      if (blurTimeout.current) {
+        window.clearTimeout(blurTimeout.current);
+      }
+      onChange(option);
+      setQuery(option);
+      setIsOpen(false);
+    },
+    [onChange],
+  );
 
   return (
     <div className="relative space-y-2">
@@ -114,10 +141,12 @@ export default function LocationSearchField({
           disabled={disabled}
           className="w-full text-sm outline-none disabled:bg-transparent disabled:text-slate-400"
           onFocus={() => {
-            if (disabled) return;
-            setIsOpen(true);
-            skipDebounceQueryRef.current = query;
-            runSearch(query);
+            handleOpen();
+          }}
+          onClick={() => {
+            if (!isOpen) {
+              handleOpen();
+            }
           }}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -161,24 +190,41 @@ export default function LocationSearchField({
                 </button>
               </div>
             ) : options.length ? (
-              options.map((option) => (
-                <button
-                  key={option}
-                  type="button"
-                  className="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
-                  onMouseDown={(event) => event.preventDefault()}
-                  onClick={() => {
-                    if (blurTimeout.current) {
-                      window.clearTimeout(blurTimeout.current);
-                    }
-                    onChange(option);
-                    setQuery(option);
-                    setIsOpen(false);
-                  }}
+              shouldVirtualize ? (
+                <FixedSizeList
+                  height={listHeight}
+                  itemCount={options.length}
+                  itemSize={OPTION_ROW_HEIGHT}
+                  width="100%"
                 >
-                  {option}
-                </button>
-              ))
+                  {({ index, style }) => {
+                    const option = options[index];
+                    return (
+                      <button
+                        type="button"
+                        style={style}
+                        className="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => handleSelect(option)}
+                      >
+                        {option}
+                      </button>
+                    );
+                  }}
+                </FixedSizeList>
+              ) : (
+                options.map((option) => (
+                  <button
+                    key={option}
+                    type="button"
+                    className="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => handleSelect(option)}
+                  >
+                    {option}
+                  </button>
+                ))
+              )
             ) : showEmptyState ? (
               <div className="px-3 py-2 text-sm text-slate-500">{emptyMessage}</div>
             ) : null}
