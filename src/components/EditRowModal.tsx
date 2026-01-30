@@ -11,6 +11,9 @@ export type ParsedRow = {
   status: string;
   sourceRaw: string;
   unmatchedReason?: string;
+  verificationSource?: string;
+  fromCache?: boolean;
+  placeId?: string;
   needsRetry?: boolean;
   original?: unknown;
 };

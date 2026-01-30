@@ -94,7 +94,10 @@ export async function uploadFile(file: File) {
   return requestJson<UploadResponse>('/upload/file', { method: 'POST', body: fd });
 }
 
-export async function parseFile(fileId: string, payload: { state: string; county: string; city?: string }) {
+export async function parseFile(
+  fileId: string,
+  payload: { state: string; county: string; city?: string; force_refresh?: boolean },
+) {
   return postJson<ParseResponse>('/parse', { fileId, ...payload });
 }
 
