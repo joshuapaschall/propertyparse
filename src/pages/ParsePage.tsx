@@ -159,6 +159,85 @@ export default function ParsePage() {
     );
   }, [metadata]);
 
+  const candidatesExtracted = useMemo(() => {
+    if (!metadata) return null;
+    return (
+      (metadata.candidates_extracted as number) ||
+      (metadata.candidatesExtracted as number) ||
+      null
+    );
+  }, [metadata]);
+
+  const dedupedCount = useMemo(() => {
+    if (!metadata) return null;
+    return (
+      (metadata.deduped_count as number) ||
+      (metadata.dedupedCount as number) ||
+      null
+    );
+  }, [metadata]);
+
+  const cacheHits = useMemo(() => {
+    if (!metadata) return null;
+    return (
+      (metadata.cache_hits as number) ||
+      (metadata.cacheHits as number) ||
+      null
+    );
+  }, [metadata]);
+
+  const googleCallsUsed = useMemo(() => {
+    if (!metadata) return null;
+    return (
+      (metadata.google_calls_used as number) ||
+      (metadata.googleCallsUsed as number) ||
+      null
+    );
+  }, [metadata]);
+
+  const metadataWarnings = useMemo(() => {
+    if (!metadata) return [];
+    const warnings = metadata.warnings;
+    if (Array.isArray(warnings)) {
+      return warnings.map((warning) => stringifyValue(warning)).filter(Boolean);
+    }
+    if (typeof warnings === 'string' && warnings.trim()) {
+      return [warnings.trim()];
+    }
+    return [];
+  }, [metadata]);
+
+  const noAddressesDetected = useMemo(() => {
+    if (candidatesExtracted === 0) return true;
+    if (!rowsReceived || rowsReceived <= 0) return false;
+    return dedupedMatched.length + dedupedUnmatched.length === 0;
+  }, [rowsReceived, candidatesExtracted, dedupedMatched.length, dedupedUnmatched.length]);
+
+  const handleCopyDebugInfo = () => {
+    const debugInfo = [
+      `State: ${stateValue || '--'}`,
+      `County: ${countyValue || '--'}`,
+      `City: ${cityValue || '--'}`,
+      `File: ${file?.name || '--'}`,
+      `Rows received: ${rowsReceived ?? '--'}`,
+      `Metadata: ${metadata ? JSON.stringify(metadata, null, 2) : '--'}`,
+    ].join('\n');
+
+    if (navigator.clipboard?.writeText) {
+      void navigator.clipboard.writeText(debugInfo);
+      return;
+    }
+
+    const textarea = document.createElement('textarea');
+    textarea.value = debugInfo;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  };
+
   const handleParse = async () => {
     if (!file) return;
     setError(null);
@@ -356,14 +435,39 @@ export default function ParsePage() {
                   Track progress and review parsed results in real time.
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowRaw((prev) => !prev)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-              >
-                {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleCopyDebugInfo}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  Copy debug info
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRaw((prev) => !prev)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                >
+                  {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
+                </button>
+              </div>
             </div>
+            {noAddressesDetected ? (
+              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
+                No addresses were detected in this file. This usually means the file has unusual
+                headers or split columns.
+              </div>
+            ) : null}
+            {metadataWarnings.length ? (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+                <p className="font-semibold text-amber-800">Warnings</p>
+                <ul className="mt-2 list-disc space-y-1 pl-4">
+                  {metadataWarnings.map((warning, index) => (
+                    <li key={`${warning}-${index}`}>{warning}</li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                 <p className="text-xs uppercase text-slate-500">Rows Received</p>
@@ -383,6 +487,32 @@ export default function ParsePage() {
                   {apiCallsUsed ?? '--'}
                 </p>
               </div>
+              {candidatesExtracted !== null ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs uppercase text-slate-500">Candidates Extracted</p>
+                  <p className="text-lg font-semibold text-slate-800">
+                    {candidatesExtracted}
+                  </p>
+                </div>
+              ) : null}
+              {dedupedCount !== null ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs uppercase text-slate-500">Deduped Count</p>
+                  <p className="text-lg font-semibold text-slate-800">{dedupedCount}</p>
+                </div>
+              ) : null}
+              {cacheHits !== null ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs uppercase text-slate-500">Cache Hits</p>
+                  <p className="text-lg font-semibold text-slate-800">{cacheHits}</p>
+                </div>
+              ) : null}
+              {googleCallsUsed !== null ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+                  <p className="text-xs uppercase text-slate-500">Google Calls Used</p>
+                  <p className="text-lg font-semibold text-slate-800">{googleCallsUsed}</p>
+                </div>
+              ) : null}
             </div>
             <div className="mt-6">
               <ProgressIndicator
