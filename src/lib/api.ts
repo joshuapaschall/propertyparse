@@ -171,6 +171,25 @@ export async function getJob(jobId: string) {
   return (res.data ?? res.items ?? res) as JobRecord;
 }
 
+export async function getJobRows(
+  jobId: string,
+  status?: 'Matched' | 'Unmatched',
+  limit?: number,
+  offset?: number,
+) {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (typeof limit === 'number') params.set('limit', String(limit));
+  if (typeof offset === 'number') params.set('offset', String(offset));
+  const query = params.toString();
+  const path = query ? `/jobs/${jobId}/rows?${query}` : `/jobs/${jobId}/rows`;
+  const res = await requestJson<ApiResponse<JobRecord[]>>(path, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+  return (res.items ?? res.data ?? res) as JobRecord[];
+}
+
 export async function downloadJobExport(jobId: string, type: JobExportType) {
   const res = await fetch(joinUrl(`/jobs/${jobId}/export?type=${type}`), {
     method: 'GET',
