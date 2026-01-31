@@ -49,7 +49,7 @@ export default function LocationSelect({
         <div className="flex-1">
           <Select<Option, false>
             unstyled
-            isSearchable={false}
+            isSearchable
             options={selectOptions}
             value={selectedOption}
             isDisabled={disabled}
