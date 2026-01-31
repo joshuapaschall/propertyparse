@@ -5,7 +5,7 @@ import type {
   ParseSummary,
   RowResult,
 } from '../types/parse';
-import { getOrCreateOrgId, getOrCreateUserId } from './identity';
+import { getAuthHeaderState } from './authState';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -29,10 +29,17 @@ const normalizedApiBaseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_
 const joinUrl = (path: string) =>
   new URL(path.startsWith('/') ? path.slice(1) : path, normalizedApiBaseUrl).toString();
 
-const getAuthHeaders = () => ({
-  'X-Org-Id': getOrCreateOrgId(),
-  'X-User-Id': getOrCreateUserId(),
-});
+const getAuthHeaders = () => {
+  const { accessToken, orgId, userId } = getAuthHeaderState();
+  if (!accessToken || !orgId || !userId) {
+    throw new Error('Missing auth context. Please sign in again.');
+  }
+  return {
+    Authorization: `Bearer ${accessToken}`,
+    'X-Org-Id': orgId,
+    'X-User-Id': userId,
+  };
+};
 
 const getErrorMessage = async (res: Response) => {
   const text = await res.text();
