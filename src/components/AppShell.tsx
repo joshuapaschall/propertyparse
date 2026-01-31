@@ -39,7 +39,7 @@ export default function AppShell({ title, subtitle, actions, children }: AppShel
             </button>
             <button
               type="button"
-              onClick={logout}
+              onClick={() => void logout()}
               className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
             >
               Logout
