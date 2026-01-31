@@ -181,6 +181,28 @@ export async function getJob(jobId: string) {
   return (res.job ?? res.data ?? res.items ?? res) as JobRecord;
 }
 
+export async function getJobWithStatus(jobId: string) {
+  const res = await fetch(joinUrl(`/jobs/${jobId}`), {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+  if (import.meta.env.DEV) {
+    console.info(`[poll] GET /jobs/${jobId} -> ${res.status}`);
+  }
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res));
+  }
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new Error('Expected JSON response.');
+  }
+  const data = (await res.json()) as ApiResponse<JobRecord>;
+  return {
+    job: (data.job ?? data.data ?? data.items ?? data) as JobRecord,
+    status: res.status,
+  };
+}
+
 export async function getJobDetail(jobId: string) {
   return requestJson<{ job?: JobRecord; summary?: JobRecord }>(`/jobs/${jobId}`, {
     method: 'GET',
