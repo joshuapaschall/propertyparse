@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useAuthControls } from '../App';
+import { getOrCreateOrgId, getOrCreateUserId } from '../lib/identity';
 
 const features = [
   'Upload CSV, XLSX, PDF, image, or DOCX files.',
@@ -13,6 +14,8 @@ export default function AuthPage() {
   const navigate = useNavigate();
 
   const handleLogin = () => {
+    getOrCreateOrgId();
+    getOrCreateUserId();
     login();
     navigate('/parse', { replace: true });
   };
