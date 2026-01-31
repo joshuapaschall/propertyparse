@@ -195,14 +195,17 @@ export default function HistoryDetailPage() {
     <AppShell title="Job Details" subtitle="Review matched and unmatched previews.">
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <Link to="/history" className="text-xs font-semibold text-indigo-600 hover:text-indigo-800">
+          <Link
+            to="/history"
+            className="text-xs font-semibold text-indigo-600 transition hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200"
+          >
             ← Back to history
           </Link>
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => handleDownload('matched')}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               disabled={!jobId || downloading[`${jobId}-matched`]}
             >
               {downloading[`${jobId}-matched`] ? 'Downloading...' : 'Download matched CSV'}
@@ -210,7 +213,7 @@ export default function HistoryDetailPage() {
             <button
               type="button"
               onClick={() => handleDownload('unmatched')}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               disabled={!jobId || downloading[`${jobId}-unmatched`]}
             >
               {downloading[`${jobId}-unmatched`] ? 'Downloading...' : 'Download unmatched CSV'}
@@ -218,72 +221,74 @@ export default function HistoryDetailPage() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           {loading ? (
-            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500">
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
               Loading job details...
             </div>
           ) : jobSummary ? (
             <div className="grid gap-4 md:grid-cols-[2fr_1fr]">
               <div>
                 <h2 className="text-lg font-semibold">Summary</h2>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   {jobSummary.filename ?? 'Untitled file'} • {formatDateTime(jobSummary.createdAt)}
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase text-slate-500">Rows Received</p>
-                  <p className="text-lg font-semibold text-slate-800">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Rows Received</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {jobSummary.rowsReceived ?? '--'}
                   </p>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase text-slate-500">Matched</p>
-                  <p className="text-lg font-semibold text-slate-800">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Matched</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {jobSummary.matched ?? '--'}
                   </p>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase text-slate-500">Unmatched</p>
-                  <p className="text-lg font-semibold text-slate-800">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Unmatched</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {jobSummary.unmatched ?? '--'}
                   </p>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase text-slate-500">Cache Hits</p>
-                  <p className="text-lg font-semibold text-slate-800">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Cache Hits</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {jobSummary.cacheHits ?? '--'}
                   </p>
                 </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase text-slate-500">Google Calls</p>
-                  <p className="text-lg font-semibold text-slate-800">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Google Calls</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {jobSummary.googleCallsUsed ?? '--'}
                   </p>
                 </div>
               </div>
             </div>
           ) : (
-            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500">
+            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
               Job details not found.
             </div>
           )}
           {error ? (
-            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
               {error}
             </div>
           ) : null}
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex gap-3">
               <button
                 type="button"
                 onClick={() => setActiveTab('matched')}
                 className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  activeTab === 'matched' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'
+                  activeTab === 'matched'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                 }`}
               >
                 Matched Preview
@@ -294,7 +299,7 @@ export default function HistoryDetailPage() {
                 className={`rounded-full px-4 py-2 text-xs font-semibold ${
                   activeTab === 'unmatched'
                     ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                 }`}
               >
                 Unmatched Preview
@@ -303,15 +308,15 @@ export default function HistoryDetailPage() {
             <button
               type="button"
               onClick={() => setShowRaw((prev) => !prev)}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
             </button>
           </div>
-          <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
+          <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="overflow-auto">
               <table className="min-w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                   <tr>
                     <th className="px-4 py-3">Full Address</th>
                     <th className="px-4 py-3">Street Address</th>
@@ -321,23 +326,36 @@ export default function HistoryDetailPage() {
                     {showRaw ? <th className="px-4 py-3">Source / Raw</th> : null}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                   {(activeTab === 'matched' ? matchedRows : unmatchedRows).length === 0 ? (
                     <tr>
-                      <td className="px-4 py-6 text-center text-slate-500" colSpan={showRaw ? 6 : 5}>
+                      <td
+                        className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
+                        colSpan={showRaw ? 6 : 5}
+                      >
                         No preview rows available. Download the CSV for the full dataset.
                       </td>
                     </tr>
                   ) : (
                     (activeTab === 'matched' ? matchedRows : unmatchedRows).map((row) => (
-                      <tr key={row.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 text-slate-800">{row.fullAddress}</td>
-                        <td className="px-4 py-3 text-slate-700">{row.streetAddress}</td>
-                        <td className="px-4 py-3 text-slate-700">{row.city}</td>
-                        <td className="px-4 py-3 text-slate-700">{row.state}</td>
-                        <td className="px-4 py-3 text-slate-700">{row.zipCode}</td>
+                      <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
+                        <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
+                          {row.fullAddress}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                          {row.streetAddress}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.city}</td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                          {row.state}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                          {row.zipCode}
+                        </td>
                         {showRaw ? (
-                          <td className="px-4 py-3 text-xs text-slate-500">{row.sourceRaw}</td>
+                          <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                            {row.sourceRaw}
+                          </td>
                         ) : null}
                       </tr>
                     ))
@@ -346,7 +364,7 @@ export default function HistoryDetailPage() {
               </table>
             </div>
           </div>
-          <p className="mt-3 text-xs text-slate-500">
+          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
             Showing up to {PREVIEW_LIMIT} rows. Download the CSV for full results.
           </p>
         </div>

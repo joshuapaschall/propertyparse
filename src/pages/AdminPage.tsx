@@ -47,35 +47,37 @@ export default function AdminPage() {
   return (
     <AppShell title="Admin" subtitle="Manage team access and account settings.">
       {!hasRoleInfo || !isAdmin ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-800">Not authorized</h2>
-          <p className="mt-2 text-sm text-slate-500">
+        <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+            Not authorized
+          </h2>
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
             Admin access is restricted. If you believe you should have access, contact your account
             owner.
           </p>
         </div>
       ) : (
         <div className="space-y-6">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Team Members</h2>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   This is a preview UI. Connect the backend to make changes live.
                 </p>
               </div>
               <button
                 type="button"
-                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                 disabled
               >
                 Invite member (coming soon)
               </button>
             </div>
-            <div className="mt-6 overflow-hidden rounded-xl border border-slate-200">
+            <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
               <div className="overflow-auto">
                 <table className="min-w-full text-left text-sm">
-                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                     <tr>
                       <th className="px-4 py-3">Name</th>
                       <th className="px-4 py-3">Email</th>
@@ -84,17 +86,25 @@ export default function AdminPage() {
                       <th className="px-4 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-100">
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {members.map((member) => (
-                      <tr key={member.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-3 text-slate-800">{member.name}</td>
-                        <td className="px-4 py-3 text-slate-700">{member.email}</td>
-                        <td className="px-4 py-3 text-slate-700">{member.role}</td>
-                        <td className="px-4 py-3 text-slate-700">{member.status}</td>
+                      <tr key={member.id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
+                        <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
+                          {member.name}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                          {member.email}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                          {member.role}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                          {member.status}
+                        </td>
                         <td className="px-4 py-3 text-right">
                           <button
                             type="button"
-                            className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-400"
+                            className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-400 dark:border-slate-700 dark:text-slate-500"
                             disabled
                           >
                             Remove (placeholder)

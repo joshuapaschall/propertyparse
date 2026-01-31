@@ -40,10 +40,13 @@ export default function ResultsTable({
     }
 
     return (
-      <div className="mt-2 space-y-1 text-[11px] text-slate-500">
+      <div className="mt-2 space-y-1 text-[11px] text-slate-500 dark:text-slate-400">
         {details.map((detail) => (
           <div key={detail.label}>
-            <span className="font-semibold text-slate-600">{detail.label}:</span> {detail.value}
+            <span className="font-semibold text-slate-600 dark:text-slate-300">
+              {detail.label}:
+            </span>{' '}
+            {detail.value}
           </div>
         ))}
       </div>
@@ -51,10 +54,10 @@ export default function ResultsTable({
   };
 
   return (
-    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
       <div className="overflow-auto">
         <table className="min-w-full text-left text-sm">
-          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
             <tr>
               <th className="px-4 py-3">Full Address</th>
               <th className="px-4 py-3">Street Address</th>
@@ -66,24 +69,33 @@ export default function ResultsTable({
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100">
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
             {rows.length === 0 ? (
               <tr>
-                <td className="px-4 py-6 text-center text-slate-500" colSpan={showRaw ? 8 : 7}>
+                <td
+                  className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
+                  colSpan={showRaw ? 8 : 7}
+                >
                   No results yet.
                 </td>
               </tr>
             ) : (
               rows.map((row) => (
-                <tr key={row.id} className="hover:bg-slate-50">
-                  <td className="px-4 py-3 text-slate-800">{row.fullAddress}</td>
-                  <td className="px-4 py-3 text-slate-700">{row.streetAddress}</td>
-                  <td className="px-4 py-3 text-slate-700">{row.address2}</td>
-                  <td className="px-4 py-3 text-slate-700">{row.city}</td>
-                  <td className="px-4 py-3 text-slate-700">{row.state}</td>
-                  <td className="px-4 py-3 text-slate-700">{row.zipCode}</td>
+                <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
+                  <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
+                    {row.fullAddress}
+                  </td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                    {row.streetAddress}
+                  </td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                    {row.address2}
+                  </td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.city}</td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.state}</td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.zipCode}</td>
                   {showRaw ? (
-                    <td className="px-4 py-3 text-xs text-slate-500">
+                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
                       <div>{formatSourceRaw(row)}</div>
                       {renderSourceDetails(row)}
                     </td>
@@ -93,7 +105,7 @@ export default function ResultsTable({
                       <button
                         type="button"
                         onClick={() => onEdit(row)}
-                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                       >
                         Edit
                       </button>
@@ -103,8 +115,8 @@ export default function ResultsTable({
                           onClick={() => onRetry(row)}
                           className={`rounded-md px-2 py-1 text-xs font-semibold ${
                             row.needsRetry
-                              ? 'border border-amber-200 bg-amber-50 text-amber-700'
-                              : 'border border-indigo-200 bg-indigo-50 text-indigo-700'
+                              ? 'border border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200'
+                              : 'border border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-400/40 dark:bg-indigo-500/10 dark:text-indigo-200'
                           }`}
                         >
                           {row.needsRetry ? 'Needs Retry' : 'Retry'}
