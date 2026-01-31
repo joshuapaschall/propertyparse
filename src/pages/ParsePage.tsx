@@ -18,7 +18,7 @@ import {
   isSkippedRow,
   stringifyPreview,
 } from '../lib/parseUtils';
-import { parseFile, retryParseBatch, retryParseRow, uploadFile } from '../lib/api';
+import { getJob, parseFile, retryParseBatch, retryParseRow, uploadFile } from '../lib/api';
 import { listCitiesByState, listCounties, listStates50 } from '../lib/locations';
 import type {
   CanonicalAddress,
@@ -176,12 +176,74 @@ const buildCanonicalCsvRows = (rows: NormalizedCanonicalAddress[]) =>
     components_json: row.components ? JSON.stringify(row.components) : '',
   }));
 
+const normalizeNumber = (value: unknown) => {
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
+const normalizePhase = (value: unknown) => {
+  if (typeof value === 'string') return value.toUpperCase();
+  return null;
+};
+
+const mapPhaseToStep = (phase: string | null) => {
+  switch (phase) {
+    case 'UPLOADING':
+      return 0;
+    case 'EXTRACTING':
+      return 1;
+    case 'PARSING':
+      return 2;
+    case 'VERIFYING':
+    case 'VALIDATING':
+      return 3;
+    case 'DONE':
+      return 4;
+    default:
+      return 0;
+  }
+};
+
+const computeProgressPercent = (phase: string | null, done: number | null, total: number | null) => {
+  if (phase === 'DONE') return 100;
+  if (phase === 'EXTRACTING') {
+    if (typeof done === 'number' && typeof total === 'number' && total > 0) {
+      return Math.min(10, Math.max(0, (done / total) * 10));
+    }
+    return 5;
+  }
+  if (phase === 'VERIFYING' || phase === 'VALIDATING' || phase === 'PARSING') {
+    if (typeof done === 'number' && typeof total === 'number' && total > 0) {
+      return 10 + Math.min(85, Math.max(0, (done / total) * 85));
+    }
+    return 10;
+  }
+  if (phase === 'UPLOADING') {
+    return 0;
+  }
+  return null;
+};
+
+const formatEta = (seconds: number) => {
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  const rounded = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(rounded / 60);
+  const remaining = rounded % 60;
+  return `${minutes.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`;
+};
+
 export default function ParsePage() {
   const [stateValue, setStateValue] = useState('');
   const [countyValue, setCountyValue] = useState('');
   const [cityValue, setCityValue] = useState('');
+  const [campaignName, setCampaignName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<string | null>(null);
   const [parseTimestamp, setParseTimestamp] = useState<string | null>(null);
   const [rowsReceived, setRowsReceived] = useState<number | null>(null);
   const [parseSummary, setParseSummary] = useState<ParseSummary | null>(null);
@@ -215,8 +277,25 @@ export default function ParsePage() {
     () => new Set(),
   );
   const [parsePayload, setParsePayload] = useState<Record<string, unknown> | null>(null);
+  const [progressInfo, setProgressInfo] = useState<{
+    phase: string | null;
+    done: number | null;
+    total: number | null;
+    cacheHits: number | null;
+    googleCallsUsed: number | null;
+    eta: string | null;
+  }>({
+    phase: null,
+    done: null,
+    total: null,
+    cacheHits: null,
+    googleCallsUsed: null,
+    eta: null,
+  });
   const didLogLocations = useRef(false);
   const resultsRef = useRef<HTMLDivElement | null>(null);
+  const pollingRef = useRef<number | null>(null);
+  const progressSamplesRef = useRef<{ timestamp: number; done: number }[]>([]);
 
   const canParse = Boolean(file && stateValue && countyValue);
 
@@ -235,6 +314,15 @@ export default function ParsePage() {
       `[locations] states=${states.length} (expected 50), GA counties=${georgiaCounties.length}, GA cities=${georgiaCities.length}`,
     );
   }, [states]);
+
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current !== null) {
+        window.clearInterval(pollingRef.current);
+        pollingRef.current = null;
+      }
+    };
+  }, []);
 
   const apiCallsUsed = useMemo(() => {
     if (!metadata) return null;
@@ -371,14 +459,36 @@ export default function ParsePage() {
     return rowsReceived;
   }, [metadata, parseSummary, rowsReceived]);
 
+  const progressDetail = useMemo(() => {
+    const done = progressInfo.done;
+    const total = progressInfo.total;
+    const cacheHitsValue = progressInfo.cacheHits;
+    const googleCallsValue = progressInfo.googleCallsUsed;
+    if (
+      done === null &&
+      total === null &&
+      cacheHitsValue === null &&
+      googleCallsValue === null &&
+      !progressInfo.eta
+    ) {
+      return null;
+    }
+    const detail = `Validating addresses: ${done ?? '--'}/${total ?? '--'} • Google calls ${
+      googleCallsValue ?? '--'
+    } • Cache hits ${cacheHitsValue ?? '--'}`;
+    return progressInfo.eta ? `${detail} • ETA ~ ${progressInfo.eta}` : detail;
+  }, [progressInfo]);
+
   const handleCopyDebugInfo = () => {
     const debugInfo = [
       `Timestamp: ${parseTimestamp ?? new Date().toISOString()}`,
       `State: ${stateValue || '--'}`,
       `County: ${countyValue || '--'}`,
       `City: ${cityValue || '--'}`,
+      `Campaign name: ${campaignName || '--'}`,
       `File: ${file?.name || '--'}`,
       `File ID: ${fileId ?? '--'}`,
+      `Job ID: ${jobId ?? '--'}`,
       `Rows received: ${rowsReceived ?? '--'}`,
       `Summary: ${parseSummary ? JSON.stringify(parseSummary, null, 2) : '--'}`,
       `Row results count: ${rowResults.length}`,
@@ -403,6 +513,77 @@ export default function ParsePage() {
     document.body.removeChild(textarea);
   };
 
+  const stopPolling = () => {
+    if (pollingRef.current !== null) {
+      window.clearInterval(pollingRef.current);
+      pollingRef.current = null;
+    }
+  };
+
+  const startPolling = (jobId: string) => {
+    stopPolling();
+    progressSamplesRef.current = [];
+    pollingRef.current = window.setInterval(async () => {
+      try {
+        const job = await getJob(jobId);
+        const phase = normalizePhase(job.phase);
+        const done =
+          normalizeNumber(job.progress_done) ?? normalizeNumber(job.progressDone) ?? null;
+        const total =
+          normalizeNumber(job.progress_total) ?? normalizeNumber(job.progressTotal) ?? null;
+        const cacheHitsValue =
+          normalizeNumber(job.cache_hits) ?? normalizeNumber(job.cacheHits) ?? null;
+        const googleCallsValue =
+          normalizeNumber(job.google_calls_used) ?? normalizeNumber(job.googleCallsUsed) ?? null;
+        const updatedAtValue = job.updated_at ?? job.updatedAt;
+        const updatedAt =
+          typeof updatedAtValue === 'string' ? new Date(updatedAtValue).getTime() : Date.now();
+        if (typeof done === 'number' && typeof total === 'number' && total > 0) {
+          progressSamplesRef.current = [
+            ...progressSamplesRef.current.slice(-2),
+            { timestamp: updatedAt, done },
+          ];
+        }
+        const samples = progressSamplesRef.current;
+        let eta = null;
+        if (samples.length >= 2 && typeof done === 'number' && typeof total === 'number') {
+          const first = samples[0];
+          const last = samples[samples.length - 1];
+          const timeDelta = last.timestamp - first.timestamp;
+          const doneDelta = last.done - first.done;
+          if (timeDelta > 0 && doneDelta > 0) {
+            const ratePerMs = doneDelta / timeDelta;
+            const remaining = total - done;
+            const etaSeconds = remaining > 0 ? remaining / ratePerMs / 1000 : 0;
+            eta = formatEta(etaSeconds);
+          }
+        }
+        const percent = computeProgressPercent(phase, done, total);
+        if (typeof percent === 'number') {
+          setProgressPercent(Math.round(percent));
+        }
+        if (phase) {
+          setProgressStep(mapPhaseToStep(phase));
+        }
+        setProgressInfo({
+          phase,
+          done,
+          total,
+          cacheHits: cacheHitsValue,
+          googleCallsUsed: googleCallsValue,
+          eta,
+        });
+        if (phase === 'DONE') {
+          setProgressPercent(100);
+          setProgressStep(mapPhaseToStep(phase));
+          stopPolling();
+        }
+      } catch {
+        // Ignore polling errors; we'll continue polling until parse resolves.
+      }
+    }, 900);
+  };
+
   const handleParse = async () => {
     if (!file) return;
     setError(null);
@@ -419,21 +600,35 @@ export default function ParsePage() {
     setMetadata(null);
     setLegacyMode(false);
     setProgressStep(0);
-    setProgressPercent(null);
+    setProgressPercent(0);
+    setProgressInfo({
+      phase: null,
+      done: null,
+      total: null,
+      cacheHits: null,
+      googleCallsUsed: null,
+      eta: null,
+    });
     setProcessingReportFilter('all');
     setActiveTab('valid');
     setLegacyTab('matched');
     try {
-      const upload = await uploadFile(file);
+      const newJobId = crypto.randomUUID();
+      setJobId(newJobId);
+      const trimmedCampaignName = campaignName.trim();
+      const upload = await uploadFile(file, trimmedCampaignName || undefined);
       setFileId(upload.fileId);
       setRowsReceived(upload.rowsReceived ?? null);
       setProgressStep(1);
       setProgressStep(2);
+      startPolling(newJobId);
       const parsed = await parseFile(upload.fileId, {
         state: stateValue,
         county: countyValue,
         city: cityValue || undefined,
         force_refresh: forceRefresh,
+        jobId: newJobId,
+        jobName: trimmedCampaignName || undefined,
       });
       setParseTimestamp(new Date().toISOString());
       setParsePayload(parsed as Record<string, unknown>);
@@ -506,6 +701,7 @@ export default function ParsePage() {
     } catch (err) {
       setError((err as Error).message ?? 'Parsing failed.');
     } finally {
+      stopPolling();
       setBusy(false);
     }
   };
@@ -757,7 +953,28 @@ export default function ParsePage() {
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <FileUploadCard file={file} onChange={setFile} />
+            <div className="space-y-2">
+              <label
+                htmlFor="campaign-name"
+                className="text-sm font-semibold text-slate-700 dark:text-slate-200"
+              >
+                Campaign name (optional)
+              </label>
+              <input
+                id="campaign-name"
+                type="text"
+                value={campaignName}
+                onChange={(event) => setCampaignName(event.target.value)}
+                placeholder="e.g. April absentee owners"
+                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-indigo-400 dark:focus:ring-indigo-500/30"
+              />
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Shown in History so you can find this job later.
+              </p>
+            </div>
+            <div className="mt-4">
+              <FileUploadCard file={file} onChange={setFile} />
+            </div>
             <div className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
               <div>
                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
@@ -1076,6 +1293,11 @@ export default function ParsePage() {
                 currentStep={progressStep}
                 percent={progressPercent}
               />
+              {progressDetail ? (
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                  {progressDetail}
+                </p>
+              ) : null}
             </div>
           </div>
 

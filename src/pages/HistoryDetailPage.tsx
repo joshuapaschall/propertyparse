@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
-import { downloadJobExport, getJob, getJobRows, JobRecord } from '../lib/api';
+import { downloadJobExport, getJobDetail, getJobRows, JobRecord } from '../lib/api';
 
 type ParsedPreviewRow = {
   id: string;
@@ -123,12 +123,16 @@ export default function HistoryDetailPage() {
       setError(null);
       try {
         const [jobResponse, matchedResponse, unmatchedResponse] = await Promise.all([
-          getJob(jobId),
+          getJobDetail(jobId),
           getJobRows(jobId, 'Matched', PREVIEW_LIMIT, 0),
           getJobRows(jobId, 'Unmatched', PREVIEW_LIMIT, 0),
         ]);
         if (active) {
-          setJob(jobResponse ?? null);
+          const combinedJob = {
+            ...(jobResponse.summary ?? {}),
+            ...(jobResponse.job ?? {}),
+          };
+          setJob(Object.keys(combinedJob).length ? combinedJob : null);
           setMatchedRows(normalizeRows(matchedResponse ?? []));
           setUnmatchedRows(normalizeRows(unmatchedResponse ?? []));
         }
@@ -148,14 +152,17 @@ export default function HistoryDetailPage() {
     if (!job) return null;
     return {
       filename: pickString(job, [
+        'display_name',
+        'displayName',
         'filename',
+        'file_name',
         'fileName',
         'original_filename',
         'originalFilename',
         'file',
       ]),
       createdAt: pickString(job, ['created_at', 'createdAt', 'created', 'timestamp', 'date']),
-      rowsReceived: pickNumber(job, ['rowsReceived', 'rows_received', 'rows', 'rowCount']),
+      rowsReceived: pickNumber(job, ['rowsReceived', 'rows_received', 'total_rows', 'rows', 'rowCount']),
       matched: pickNumber(job, ['matched', 'matched_count', 'matchedCount']),
       unmatched: pickNumber(job, ['unmatched', 'unmatched_count', 'unmatchedCount']),
       cacheHits: pickNumber(job, ['cacheHits', 'cache_hits', 'cache_hit_count']),
