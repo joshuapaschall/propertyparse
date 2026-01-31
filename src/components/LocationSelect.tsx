@@ -41,7 +41,7 @@ export default function LocationSelect({
 
   return (
     <div className="relative space-y-2">
-      <label className="text-sm font-semibold text-slate-700">
+      <label className="text-sm font-semibold text-slate-700 dark:text-slate-200">
         {label}
         {required ? <span className="text-rose-500"> *</span> : null}
       </label>
@@ -61,15 +61,18 @@ export default function LocationSelect({
                 [
                   'flex min-h-[42px] w-full items-center rounded-lg border px-3 py-2 text-sm shadow-sm transition',
                   state.isFocused
-                    ? 'border-indigo-400 ring-2 ring-indigo-100'
-                    : 'border-slate-200',
-                  disabled ? 'bg-slate-100 text-slate-400' : 'bg-white text-slate-700',
+                    ? 'border-indigo-400 ring-2 ring-indigo-100 dark:border-indigo-300 dark:ring-indigo-900/40'
+                    : 'border-slate-200 dark:border-slate-700',
+                  disabled
+                    ? 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                    : 'bg-white text-slate-700 dark:bg-slate-900 dark:text-slate-200',
                 ].join(' '),
               valueContainer: () => 'p-0',
-              singleValue: () => 'text-sm text-slate-700',
-              placeholder: () => 'text-sm text-slate-400',
-              indicatorsContainer: () => 'text-slate-400',
-              menu: () => 'mt-1 rounded-lg border border-slate-200 bg-white shadow-lg',
+              singleValue: () => 'text-sm text-slate-700 dark:text-slate-200',
+              placeholder: () => 'text-sm text-slate-400 dark:text-slate-500',
+              indicatorsContainer: () => 'text-slate-400 dark:text-slate-500',
+              menu: () =>
+                'mt-1 rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900',
               menuList: () => 'max-h-72 overflow-auto py-2',
               option: (state) =>
                 [
@@ -77,8 +80,8 @@ export default function LocationSelect({
                   state.isSelected
                     ? 'bg-indigo-600 text-white'
                     : state.isFocused
-                      ? 'bg-slate-100 text-slate-700'
-                      : 'text-slate-700',
+                      ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                      : 'text-slate-700 dark:text-slate-200',
                 ].join(' '),
             }}
           />
@@ -87,13 +90,13 @@ export default function LocationSelect({
           <button
             type="button"
             onClick={onClear}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-700"
+            className="text-xs font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
           >
             Clear
           </button>
         ) : null}
       </div>
-      {helperText ? <p className="text-xs text-slate-500">{helperText}</p> : null}
+      {helperText ? <p className="text-xs text-slate-500 dark:text-slate-400">{helperText}</p> : null}
     </div>
   );
 }

@@ -129,17 +129,17 @@ export default function LocationSearchField({
 
   return (
     <div className="relative space-y-2">
-      <label className="text-sm font-semibold text-slate-700">
+      <label className="text-sm font-semibold text-slate-700 dark:text-slate-200">
         {label}
         {required ? <span className="text-rose-500"> *</span> : null}
       </label>
-      <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100">
+      <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 shadow-sm transition focus-within:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-100 dark:border-slate-700 dark:bg-slate-900 dark:focus-within:border-indigo-300 dark:focus-within:ring-indigo-900/40">
         <input
           type="text"
           value={query}
           placeholder={placeholder}
           disabled={disabled}
-          className="w-full text-sm outline-none disabled:bg-transparent disabled:text-slate-400"
+          className="w-full text-sm text-slate-700 outline-none disabled:bg-transparent disabled:text-slate-400 dark:text-slate-200 dark:disabled:text-slate-500"
           onFocus={() => {
             handleOpen();
           }}
@@ -165,24 +165,26 @@ export default function LocationSearchField({
               setQuery('');
               onChange('');
             }}
-            className="text-xs font-semibold text-slate-500 hover:text-slate-700"
+            className="text-xs font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
           >
             Clear
           </button>
         ) : null}
       </div>
-      {helperText ? <p className="text-xs text-slate-500">{helperText}</p> : null}
+      {helperText ? <p className="text-xs text-slate-500 dark:text-slate-400">{helperText}</p> : null}
       {isOpen ? (
-        <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg">
+        <div className="absolute z-20 mt-1 w-full rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
           <div className="max-h-48 overflow-auto p-2">
             {loading ? (
-              <div className="px-3 py-2 text-sm text-slate-500">{loadingLabel}</div>
+              <div className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">
+                {loadingLabel}
+              </div>
             ) : errorMessage ? (
               <div className="flex items-center justify-between gap-2 px-3 py-2 text-sm text-rose-500">
                 <span>{errorMessage}</span>
                 <button
                   type="button"
-                  className="rounded border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-500 hover:bg-rose-50"
+                  className="rounded border border-rose-200 px-2 py-1 text-xs font-semibold text-rose-500 transition hover:bg-rose-50 dark:border-rose-400/40 dark:hover:bg-rose-950/40"
                   onMouseDown={(event) => event.preventDefault()}
                   onClick={() => runSearch(query)}
                 >
@@ -203,7 +205,7 @@ export default function LocationSearchField({
                       <button
                         type="button"
                         style={style}
-                        className="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                        className="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
                         onMouseDown={(event) => event.preventDefault()}
                         onClick={() => handleSelect(option)}
                       >
@@ -217,7 +219,7 @@ export default function LocationSearchField({
                   <button
                     key={option}
                     type="button"
-                    className="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                    className="w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 transition hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800"
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={() => handleSelect(option)}
                   >
@@ -226,7 +228,7 @@ export default function LocationSearchField({
                 ))
               )
             ) : showEmptyState ? (
-              <div className="px-3 py-2 text-sm text-slate-500">{emptyMessage}</div>
+              <div className="px-3 py-2 text-sm text-slate-500 dark:text-slate-400">{emptyMessage}</div>
             ) : null}
           </div>
         </div>

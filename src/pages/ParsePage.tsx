@@ -413,11 +413,11 @@ export default function ParsePage() {
     <AppShell title="PropertyParse" subtitle="Address Parsing Workflow">
       <div className="grid w-full gap-6 lg:grid-cols-[1fr_1.2fr]">
         <div className="space-y-6">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="space-y-4">
               <div>
                 <h2 className="text-lg font-semibold">Location Context</h2>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   Select the required location fields to improve parsing accuracy.
                 </p>
               </div>
@@ -464,14 +464,14 @@ export default function ParsePage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <FileUploadCard file={file} onChange={setFile} />
-            <div className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
               <div>
-                <p className="text-sm font-semibold text-slate-800">
+                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                   Force re-verify (ignore cache)
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   Uses more API calls. Only enable if you suspect cached results are stale.
                 </p>
               </div>
@@ -481,13 +481,13 @@ export default function ParsePage() {
                 className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border transition ${
                   forceRefresh
                     ? 'border-indigo-600 bg-indigo-600'
-                    : 'border-slate-300 bg-slate-200'
+                    : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
                 }`}
                 role="switch"
                 aria-checked={forceRefresh}
               >
                 <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition ${
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
                     forceRefresh ? 'translate-x-5' : 'translate-x-1'
                   }`}
                 />
@@ -495,7 +495,7 @@ export default function ParsePage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <button
               type="button"
               onClick={handleParse}
@@ -503,13 +503,13 @@ export default function ParsePage() {
               className={`w-full rounded-xl px-4 py-3 text-sm font-semibold transition ${
                 canParse && !busy
                   ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                  : 'bg-slate-200 text-slate-400'
+                  : 'bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
               }`}
             >
               {busy ? 'Parsing...' : 'Parse Addresses'}
             </button>
             {error ? (
-              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
+              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
                 {error}
               </div>
             ) : null}
@@ -517,11 +517,11 @@ export default function ParsePage() {
         </div>
 
         <div className="space-y-6">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Parsing Status</h2>
-                <p className="text-sm text-slate-500">
+                <p className="text-sm text-slate-500 dark:text-slate-400">
                   Track progress and review parsed results in real time.
                 </p>
               </div>
@@ -529,28 +529,28 @@ export default function ParsePage() {
                 <button
                   type="button"
                   onClick={handleCopyDebugInfo}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                   Copy debug info
                 </button>
                 <button
                   type="button"
                   onClick={() => setShowRaw((prev) => !prev)}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                   {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
                 </button>
               </div>
             </div>
             {noAddressesDetected ? (
-              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600">
+              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
                 No addresses were detected in this file. This usually means the file has unusual
                 headers or split columns.
               </div>
             ) : null}
             {metadataWarnings.length ? (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                <p className="font-semibold text-amber-800">Warnings</p>
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
+                <p className="font-semibold text-amber-800 dark:text-amber-100">Warnings</p>
                 <ul className="mt-2 list-disc space-y-1 pl-4">
                   {metadataWarnings.map((warning, index) => (
                     <li key={`${warning}-${index}`}>{warning}</li>
@@ -559,59 +559,73 @@ export default function ParsePage() {
               </div>
             ) : null}
             {cityValue && unmatchedCount > 0 ? (
-              <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700">
+              <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
                 Some addresses failed because Google returned a different city. Leave City blank if
                 your file spans multiple cities.
               </div>
             ) : null}
             <div className="mt-6 grid gap-4 sm:grid-cols-3">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-xs uppercase text-slate-500">Rows Received</p>
-                <p className="text-lg font-semibold text-slate-800">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Rows Received</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                   {rowsReceived ?? '--'}
                 </p>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-xs uppercase text-slate-500">Matched / Unmatched</p>
-                <p className="text-lg font-semibold text-slate-800">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                  Matched / Unmatched
+                </p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                   {dedupedMatched.length} / {dedupedUnmatched.length}
                 </p>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                <p className="text-xs uppercase text-slate-500">API Calls Used</p>
-                <p className="text-lg font-semibold text-slate-800">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">API Calls Used</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                   {apiCallsUsed ?? '--'}
                 </p>
               </div>
               {candidatesExtracted !== null ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase text-slate-500">Candidates Extracted</p>
-                  <p className="text-lg font-semibold text-slate-800">
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                    Candidates Extracted
+                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {candidatesExtracted}
                   </p>
                 </div>
               ) : null}
               {dedupedCount !== null ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase text-slate-500">Deduped Count</p>
-                  <p className="text-lg font-semibold text-slate-800">{dedupedCount}</p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                    Deduped Count
+                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {dedupedCount}
+                  </p>
                 </div>
               ) : null}
               {cacheHits !== null ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase text-slate-500">Cache Hits</p>
-                  <p className="text-lg font-semibold text-slate-800">{cacheHits}</p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Cache Hits</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {cacheHits}
+                  </p>
                 </div>
               ) : null}
               {googleCallsUsed !== null ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="text-xs uppercase text-slate-500">Google Calls Used</p>
-                  <p className="text-lg font-semibold text-slate-800">{googleCallsUsed}</p>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                    Google Calls Used
+                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {googleCallsUsed}
+                  </p>
                 </div>
               ) : null}
             </div>
             {verificationSourcesSummary ? (
-              <p className="mt-3 text-xs text-slate-500">
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
                 Sources: {verificationSourcesSummary}
               </p>
             ) : null}
@@ -624,7 +638,7 @@ export default function ParsePage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div className="flex gap-3">
                 <button
@@ -633,7 +647,7 @@ export default function ParsePage() {
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${
                     activeTab === 'matched'
                       ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 text-slate-600'
+                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
                   Matched ({dedupedMatched.length})
@@ -644,7 +658,7 @@ export default function ParsePage() {
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${
                     activeTab === 'unmatched'
                       ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 text-slate-600'
+                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
                   Unmatched ({dedupedUnmatched.length})
@@ -656,7 +670,7 @@ export default function ParsePage() {
                     type="button"
                     onClick={handleRetryMarked}
                     disabled={!dedupedUnmatched.some((row) => row.needsRetry)}
-                    className="rounded-lg border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-700 disabled:border-slate-200 disabled:text-slate-400"
+                    className="rounded-lg border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-700 transition disabled:border-slate-200 disabled:text-slate-400 dark:border-amber-400/40 dark:text-amber-200 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
                   >
                     Retry marked
                   </button>
@@ -670,7 +684,7 @@ export default function ParsePage() {
                       activeTab === 'unmatched',
                     )
                   }
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                 >
                   Download {activeTab === 'matched' ? 'Matched' : 'Unmatched'} CSV
                 </button>
@@ -694,7 +708,7 @@ export default function ParsePage() {
                 />
               )}
               {retryAvailable === 'unavailable' ? (
-                <p className="mt-3 text-xs text-amber-600">
+                <p className="mt-3 text-xs text-amber-600 dark:text-amber-300">
                   Retry endpoint unavailable. Marked rows can be re-sent later using the Retry
                   marked button.
                 </p>

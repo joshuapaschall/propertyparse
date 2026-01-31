@@ -36,6 +36,10 @@ body {
   background-color: #f8fafc;
 }
 
+.dark body {
+  background-color: #020617;
+}
+
 #root {
   min-height: 100vh;
 }

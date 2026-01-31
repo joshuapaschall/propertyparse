@@ -13,7 +13,15 @@ type AuthContextValue = {
   logout: () => void;
 };
 
+type ThemeMode = 'light' | 'dark';
+
+type ThemeContextValue = {
+  theme: ThemeMode;
+  toggleTheme: () => void;
+};
+
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 function useAuth() {
   const ctx = useContext(AuthContext);
@@ -44,6 +52,34 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function ThemeProvider({ children }: { children: React.ReactNode }) {
+  const [theme, setTheme] = useState<ThemeMode>(() => {
+    const stored = window.localStorage.getItem('pp-theme') as ThemeMode | null;
+    if (stored) return stored;
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    } else {
+      root.classList.remove('dark');
+    }
+    window.localStorage.setItem('pp-theme', theme);
+  }, [theme]);
+
+  const value = useMemo<ThemeContextValue>(
+    () => ({
+      theme,
+      toggleTheme: () => setTheme((prev) => (prev === 'dark' ? 'light' : 'dark')),
+    }),
+    [theme],
+  );
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
@@ -111,12 +147,22 @@ export function useAuthControls() {
   return useAuth();
 }
 
+export function useThemeControls() {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) {
+    throw new Error('useThemeControls must be used within ThemeProvider.');
+  }
+  return ctx;
+}
+
 function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <AppRoutes />
-      </BrowserRouter>
+      <ThemeProvider>
+        <BrowserRouter>
+          <AppRoutes />
+        </BrowserRouter>
+      </ThemeProvider>
     </AuthProvider>
   );
 }
