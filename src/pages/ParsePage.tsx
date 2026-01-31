@@ -267,6 +267,15 @@ export default function ParsePage() {
     return (metadata.google_calls_used as number) || (metadata.googleCallsUsed as number) || null;
   }, [metadata]);
 
+  const extractionMethod = useMemo(() => {
+    if (!metadata) return null;
+    return (
+      (metadata.extraction_method as string) ||
+      (metadata.extractionMethod as string) ||
+      null
+    );
+  }, [metadata]);
+
   const verificationSourceCounts = useMemo(() => {
     if (!metadata) return null;
     return (metadata.verification_source_counts as Record<string, number>) || null;
@@ -334,10 +343,17 @@ export default function ParsePage() {
 
   const rowAccountingMismatch = useMemo(() => {
     if (!parseSummary) return false;
-    return rowResults.length !== parseSummary.rows_received;
-  }, [parseSummary, rowResults.length]);
+    const responseRows =
+      (metadata?.rows_received as number) ||
+      (metadata?.rowsReceived as number) ||
+      parseSummary.rows_received;
+    return rowResults.length !== responseRows;
+  }, [metadata, parseSummary, rowResults.length]);
 
   const accountedRowsFromSummary = useMemo(() => {
+    const accountedRows =
+      (metadata?.accounted_rows as number) || (metadata?.accountedRows as number);
+    if (typeof accountedRows === 'number') return accountedRows;
     if (!parseSummary) return null;
     return (
       parseSummary.valid_total +
@@ -345,7 +361,15 @@ export default function ParsePage() {
       parseSummary.skipped +
       (parseSummary.out_of_scope ?? 0)
     );
-  }, [parseSummary]);
+  }, [metadata, parseSummary]);
+
+  const responseRowsReceived = useMemo(() => {
+    const metaRows =
+      (metadata?.rows_received as number) || (metadata?.rowsReceived as number) || null;
+    if (typeof metaRows === 'number') return metaRows;
+    if (parseSummary) return parseSummary.rows_received;
+    return rowsReceived;
+  }, [metadata, parseSummary, rowsReceived]);
 
   const handleCopyDebugInfo = () => {
     const debugInfo = [
@@ -417,14 +441,41 @@ export default function ParsePage() {
       setProgressStep(4);
       const hasRowAccounting = Boolean(parsed.summary && parsed.row_results);
       if (hasRowAccounting) {
+        const parsedRecord = parsed as Record<string, unknown>;
         const summary = parsed.summary as ParseSummary;
+        const rowAccountingMetadata: Record<string, unknown> = {
+          ...((parsedRecord.metadata as Record<string, unknown>) ?? {}),
+        };
+        const responseRowsReceived =
+          typeof parsedRecord.rows_received === 'number'
+            ? parsedRecord.rows_received
+            : summary.rows_received ?? upload.rowsReceived ?? null;
+
+        rowAccountingMetadata.rows_received = responseRowsReceived;
+        if (typeof parsedRecord.accounted_rows === 'number') {
+          rowAccountingMetadata.accounted_rows = parsedRecord.accounted_rows;
+        }
+        if (typeof parsedRecord.extraction_method === 'string') {
+          rowAccountingMetadata.extraction_method = parsedRecord.extraction_method;
+        }
+        if (parsedRecord.warnings) {
+          rowAccountingMetadata.warnings = parsedRecord.warnings;
+        }
+        if (typeof parsedRecord.google_calls_used === 'number') {
+          rowAccountingMetadata.google_calls_used = parsedRecord.google_calls_used;
+        }
+        if (typeof parsedRecord.cache_hits === 'number') {
+          rowAccountingMetadata.cache_hits = parsedRecord.cache_hits;
+        }
+
         setParseSummary(summary);
-        setRowsReceived(summary.rows_received ?? upload.rowsReceived ?? null);
+        setRowsReceived(responseRowsReceived);
         const canonicalRows = (parsed.canonical_addresses ?? []) as CanonicalAddress[];
         setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
         setRowResults((parsed.row_results ?? []) as RowResult[]);
         setDuplicateGroups((parsed.duplicate_groups ?? []) as DuplicateGroup[]);
         setDebugInfo((parsed.debug ?? null) as ParseDebugInfo | null);
+        setMetadata(Object.keys(rowAccountingMetadata).length ? rowAccountingMetadata : null);
         setLegacyMode(false);
       } else {
         setLegacyMode(true);
@@ -807,9 +858,9 @@ export default function ParsePage() {
               <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <p>
-                    Processing mismatch: received {parseSummary.rows_received} rows but only{' '}
-                    {rowResults.length} were accounted for. Please retry. (This is a bug; contact
-                    support.)
+                    Processing mismatch: received {responseRowsReceived ?? parseSummary.rows_received}{' '}
+                    rows but only {rowResults.length} were accounted for. Please retry. (This is a
+                    bug; contact support.)
                   </p>
                   <button
                     type="button"
@@ -854,10 +905,10 @@ export default function ParsePage() {
                     Rows Received
                   </p>
                   <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {parseSummary.rows_received}
+                    {responseRowsReceived ?? parseSummary.rows_received}
                   </p>
                   <AccountedRowsIndicator
-                    rowsReceived={parseSummary.rows_received}
+                    rowsReceived={responseRowsReceived}
                     accountedRows={accountedRowsFromSummary ?? 0}
                   />
                 </button>
@@ -991,6 +1042,16 @@ export default function ParsePage() {
             {verificationSourcesSummary ? (
               <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
                 Sources: {verificationSourcesSummary}
+              </p>
+            ) : null}
+            {parseSummary && extractionMethod ? (
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                Extraction method: {extractionMethod}
+              </p>
+            ) : null}
+            {parseSummary && (googleCallsUsed !== null || cacheHits !== null) ? (
+              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                Google calls used: {googleCallsUsed ?? '--'} • Cache hits: {cacheHits ?? '--'}
               </p>
             ) : null}
             {parseSummary && errorRows.length > 0 ? (

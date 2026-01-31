@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FixedSizeList as List } from 'react-window';
 
 type Props = {
@@ -12,7 +12,15 @@ type Props = {
 
 export default function VirtualDropdown({ label, value, placeholder, items, disabled, onChange }: Props) {
   const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
   const boxRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+
+  const filteredItems = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return items;
+    return items.filter((item) => item.toLowerCase().includes(query));
+  }, [items, search]);
 
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
@@ -29,6 +37,12 @@ export default function VirtualDropdown({ label, value, placeholder, items, disa
       document.removeEventListener('mousedown', onDocClick);
       document.removeEventListener('keydown', onEsc);
     };
+  }, [open]);
+
+  useEffect(() => {
+    if (open) {
+      searchInputRef.current?.focus();
+    }
   }, [open]);
 
   return (
@@ -68,9 +82,25 @@ export default function VirtualDropdown({ label, value, placeholder, items, disa
             overflow: 'hidden',
           }}
         >
-          <List height={260} itemCount={items.length} itemSize={38} width="100%">
+          <div style={{ padding: 10, borderBottom: '1px solid #f3f4f6', background: '#f9fafb' }}>
+            <input
+              ref={searchInputRef}
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search..."
+              style={{
+                width: '100%',
+                height: 34,
+                borderRadius: 8,
+                border: '1px solid #d1d5db',
+                padding: '0 10px',
+                fontSize: 14,
+              }}
+            />
+          </div>
+          <List height={260} itemCount={filteredItems.length} itemSize={38} width="100%">
             {({ index, style }) => {
-              const item = items[index];
+              const item = filteredItems[index];
               return (
                 <div
                   style={{
@@ -84,6 +114,7 @@ export default function VirtualDropdown({ label, value, placeholder, items, disa
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => {
                     onChange(item);
+                    setSearch('');
                     setOpen(false);
                   }}
                 >
