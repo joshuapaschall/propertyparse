@@ -31,13 +31,13 @@ const joinUrl = (path: string) =>
 
 const getAuthHeaders = () => {
   const { accessToken, orgId, userId } = getAuthHeaderState();
-  if (!accessToken || !orgId || !userId) {
+  if (!accessToken) {
     throw new Error('Missing auth context. Please sign in again.');
   }
   return {
     Authorization: `Bearer ${accessToken}`,
-    'X-Org-Id': orgId,
-    'X-User-Id': userId,
+    ...(orgId ? { 'X-Org-Id': orgId } : {}),
+    ...(userId ? { 'X-User-Id': userId } : {}),
   };
 };
 

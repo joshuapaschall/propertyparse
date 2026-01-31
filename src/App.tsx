@@ -16,6 +16,7 @@ type AuthContextValue = {
   accessToken: string | null;
   orgId: string | null;
   userId: string | null;
+  role: string | null;
   isAuthenticated: boolean;
   isReady: boolean;
   isSessionLoading: boolean;
@@ -37,6 +38,7 @@ type ThemeContextValue = {
 type BootstrapResponse = {
   orgId: string;
   userId: string;
+  role: string;
 };
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -64,6 +66,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [orgId, setOrgId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [role, setRole] = useState<string | null>(null);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isBootstrapping, setIsBootstrapping] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -85,17 +88,24 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       const data = (await res.json()) as BootstrapResponse;
       setOrgId(data.orgId);
       setUserId(data.userId);
+      setRole(data.role);
       setAuthHeaderState({
         accessToken: currentSession.access_token,
         orgId: data.orgId,
         userId: data.userId,
+        role: data.role,
       });
+      window.localStorage.setItem('pp-role', data.role);
+      window.localStorage.setItem('pp-user-role', data.role);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to bootstrap session.';
       setBootstrapError(message);
       setOrgId(null);
       setUserId(null);
+      setRole(null);
       clearAuthHeaderState();
+      window.localStorage.removeItem('pp-role');
+      window.localStorage.removeItem('pp-user-role');
     } finally {
       setIsBootstrapping(false);
     }
@@ -127,9 +137,12 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     } else {
       setOrgId(null);
       setUserId(null);
+      setRole(null);
       setBootstrapError(null);
       setIsBootstrapping(false);
       clearAuthHeaderState();
+      window.localStorage.removeItem('pp-role');
+      window.localStorage.removeItem('pp-user-role');
     }
   }, [session, bootstrapSession]);
 
@@ -155,8 +168,11 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     setSession(null);
     setOrgId(null);
     setUserId(null);
+    setRole(null);
     setBootstrapError(null);
     clearAuthHeaderState();
+    window.localStorage.removeItem('pp-role');
+    window.localStorage.removeItem('pp-user-role');
   }, []);
 
   const refreshBootstrap = useCallback(async () => {
@@ -166,7 +182,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const accessToken = session?.access_token ?? null;
   const isAuthenticated = Boolean(session);
-  const isReady = Boolean(session && orgId && userId && !isBootstrapping);
+  const isReady = Boolean(session && orgId && userId && role && !isBootstrapping);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -174,6 +190,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       accessToken,
       orgId,
       userId,
+      role,
       isAuthenticated,
       isReady,
       isSessionLoading,
@@ -189,6 +206,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       accessToken,
       orgId,
       userId,
+      role,
       isAuthenticated,
       isReady,
       isSessionLoading,
