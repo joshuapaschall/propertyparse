@@ -30,6 +30,18 @@ import type {
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Finalizing'];
 
+type CanonicalAddressComponents = {
+  street_address?: string;
+  address2?: string;
+  city?: string;
+  state?: string;
+  zip?: string;
+};
+
+type NormalizedCanonicalAddress = CanonicalAddress & {
+  fullAddress: string;
+};
+
 const createId = (row: Record<string, unknown>, index: number) =>
   (row.id as string) || (row.uuid as string) || `${crypto.randomUUID?.() ?? `row-${index}`}`;
 
@@ -81,6 +93,28 @@ const normalizeRow = (row: Record<string, unknown>, index: number): ParsedRow =>
 const normalizeRows = (items: unknown[]) =>
   items.map((item, index) => normalizeRow(item as Record<string, unknown>, index));
 
+const normalizeCanonicalAddress = (row: CanonicalAddress): NormalizedCanonicalAddress => {
+  const components = row.components as CanonicalAddressComponents | undefined;
+  const fullAddress =
+    (row as { full_address?: string }).full_address || row.formatted_address || '';
+  const street1 = row.street1 || components?.street_address || '';
+  const street2 = row.street2 || components?.address2 || '';
+  const city = row.city || components?.city || '';
+  const state = row.state || components?.state || '';
+  const zip = row.zip || components?.zip || '';
+
+  return {
+    ...row,
+    formatted_address: row.formatted_address || fullAddress,
+    fullAddress,
+    street1,
+    street2,
+    city,
+    state,
+    zip,
+  };
+};
+
 const buildKey = (row: ParsedRow) =>
   `${row.streetAddress} ${row.city} ${row.state} ${row.zipCode}`
     .toLowerCase()
@@ -129,7 +163,7 @@ const buildProcessingReportRows = (rows: RowResult[]) =>
     raw_row_json: row.raw_row ? JSON.stringify(row.raw_row) : '',
   }));
 
-const buildCanonicalCsvRows = (rows: CanonicalAddress[]) =>
+const buildCanonicalCsvRows = (rows: NormalizedCanonicalAddress[]) =>
   rows.map((row) => ({
     canonical_id: row.canonical_id,
     formatted_address: row.formatted_address,
@@ -151,7 +185,7 @@ export default function ParsePage() {
   const [parseTimestamp, setParseTimestamp] = useState<string | null>(null);
   const [rowsReceived, setRowsReceived] = useState<number | null>(null);
   const [parseSummary, setParseSummary] = useState<ParseSummary | null>(null);
-  const [canonicalAddresses, setCanonicalAddresses] = useState<CanonicalAddress[]>([]);
+  const [canonicalAddresses, setCanonicalAddresses] = useState<NormalizedCanonicalAddress[]>([]);
   const [rowResults, setRowResults] = useState<RowResult[]>([]);
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
   const [debugInfo, setDebugInfo] = useState<ParseDebugInfo | null>(null);
@@ -182,6 +216,7 @@ export default function ParsePage() {
   );
   const [parsePayload, setParsePayload] = useState<Record<string, unknown> | null>(null);
   const didLogLocations = useRef(false);
+  const resultsRef = useRef<HTMLDivElement | null>(null);
 
   const canParse = Boolean(file && stateValue && countyValue);
 
@@ -273,10 +308,14 @@ export default function ParsePage() {
   }, [metadata]);
 
   const noAddressesDetected = useMemo(() => {
-    if (candidatesExtracted === 0) return true;
-    if (!rowsReceived || rowsReceived <= 0) return false;
-    return dedupedMatched.length + dedupedUnmatched.length === 0;
-  }, [rowsReceived, candidatesExtracted, dedupedMatched.length, dedupedUnmatched.length]);
+    if (debugInfo?.no_addresses_detected === true) return true;
+    if (!parseSummary) return false;
+    return (
+      parseSummary.rows_received > 0 &&
+      parseSummary.valid_total === 0 &&
+      parseSummary.unmatched === 0
+    );
+  }, [debugInfo?.no_addresses_detected, parseSummary]);
 
   const needsReviewRows = useMemo(() => rowResults.filter(isNeedsReviewRow), [rowResults]);
   const skippedRows = useMemo(() => rowResults.filter(isSkippedRow), [rowResults]);
@@ -288,10 +327,25 @@ export default function ParsePage() {
     return map;
   }, [rowResults]);
 
+  const filteredDuplicateGroups = useMemo(
+    () => duplicateGroups.filter((group) => (group.source_row_ids?.length || 0) > 1),
+    [duplicateGroups],
+  );
+
   const rowAccountingMismatch = useMemo(() => {
     if (!parseSummary) return false;
     return rowResults.length !== parseSummary.rows_received;
   }, [parseSummary, rowResults.length]);
+
+  const accountedRowsFromSummary = useMemo(() => {
+    if (!parseSummary) return null;
+    return (
+      parseSummary.valid_total +
+      parseSummary.unmatched +
+      parseSummary.skipped +
+      (parseSummary.out_of_scope ?? 0)
+    );
+  }, [parseSummary]);
 
   const handleCopyDebugInfo = () => {
     const debugInfo = [
@@ -366,7 +420,8 @@ export default function ParsePage() {
         const summary = parsed.summary as ParseSummary;
         setParseSummary(summary);
         setRowsReceived(summary.rows_received ?? upload.rowsReceived ?? null);
-        setCanonicalAddresses((parsed.canonical_addresses ?? []) as CanonicalAddress[]);
+        const canonicalRows = (parsed.canonical_addresses ?? []) as CanonicalAddress[];
+        setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
         setRowResults((parsed.row_results ?? []) as RowResult[]);
         setDuplicateGroups((parsed.duplicate_groups ?? []) as DuplicateGroup[]);
         setDebugInfo((parsed.debug ?? null) as ParseDebugInfo | null);
@@ -522,6 +577,20 @@ export default function ParsePage() {
   const openProcessingReport = (filter: ProcessingReportFilter) => {
     setProcessingReportFilter(filter);
     setProcessingReportOpen(true);
+  };
+
+  const scrollToResults = () => {
+    resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const handleKpiTabClick = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    scrollToResults();
+  };
+
+  const handleRowsReceivedClick = () => {
+    openProcessingReport('all');
+    scrollToResults();
   };
 
   const renderDuplicateRows = (group: DuplicateGroup) => {
@@ -689,7 +758,10 @@ export default function ParsePage() {
         </div>
 
         <div className="space-y-6">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div
+            ref={resultsRef}
+            className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+          >
             <div className="flex flex-wrap items-center justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Parsing Status</h2>
@@ -773,7 +845,11 @@ export default function ParsePage() {
             ) : null}
             {parseSummary ? (
               <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <button
+                  type="button"
+                  onClick={handleRowsReceivedClick}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+                >
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
                     Rows Received
                   </p>
@@ -782,46 +858,66 @@ export default function ParsePage() {
                   </p>
                   <AccountedRowsIndicator
                     rowsReceived={parseSummary.rows_received}
-                    accountedRows={rowResults.length}
+                    accountedRows={accountedRowsFromSummary ?? 0}
                   />
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleKpiTabClick('valid')}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+                >
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
                     Unique Valid Addresses
                   </p>
                   <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {parseSummary.valid_unique}
                   </p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleKpiTabClick('needs_review')}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+                >
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
                     Needs Review
                   </p>
                   <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {parseSummary.unmatched}
                   </p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleKpiTabClick('skipped')}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+                >
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Skipped</p>
                   <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {parseSummary.skipped}
                   </p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleKpiTabClick('duplicates')}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+                >
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Duplicates</p>
                   <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {parseSummary.duplicates}
                   </p>
-                </div>
+                </button>
                 {typeof parseSummary.out_of_scope === 'number' ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <button
+                    type="button"
+                    onClick={() => handleKpiTabClick('out_of_scope')}
+                    className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+                  >
                     <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
                       Out of Scope
                     </p>
                     <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                       {parseSummary.out_of_scope}
                     </p>
-                  </div>
+                  </button>
                 ) : null}
               </div>
             ) : (
@@ -1019,6 +1115,7 @@ export default function ParsePage() {
                         <table className="min-w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                             <tr>
+                              <th className="px-4 py-3">#</th>
                               <th className="px-4 py-3">Full Address</th>
                               <th className="px-4 py-3">Street Address</th>
                               <th className="px-4 py-3">Address 2</th>
@@ -1032,31 +1129,37 @@ export default function ParsePage() {
                               <tr>
                                 <td
                                   className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={6}
+                                  colSpan={7}
                                 >
                                   No unique valid addresses yet.
                                 </td>
                               </tr>
                             ) : (
-                              canonicalAddresses.map((row) => (
-                                <tr key={row.canonical_id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
+                              canonicalAddresses.map((row, index) => (
+                                <tr
+                                  key={row.canonical_id}
+                                  className="hover:bg-slate-50 dark:hover:bg-slate-900"
+                                >
+                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                    {index + 1}
+                                  </td>
                                   <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
-                                    {row.formatted_address}
+                                    {row.fullAddress || row.formatted_address || '--'}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.street1 ?? '--'}
+                                    {row.street1 || '--'}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.street2 ?? '--'}
+                                    {row.street2 || '--'}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.city ?? '--'}
+                                    {row.city || '--'}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.state ?? '--'}
+                                    {row.state || '--'}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.zip ?? '--'}
+                                    {row.zip || '--'}
                                   </td>
                                 </tr>
                               ))
@@ -1072,7 +1175,7 @@ export default function ParsePage() {
                         <table className="min-w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                             <tr>
-                              <th className="px-4 py-3">Source Row #</th>
+                              <th className="px-4 py-3">Row #</th>
                               <th className="px-4 py-3">Detected Address</th>
                               <th className="px-4 py-3">Reason</th>
                               <th className="px-4 py-3">Raw Preview</th>
@@ -1127,7 +1230,7 @@ export default function ParsePage() {
                         <table className="min-w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                             <tr>
-                              <th className="px-4 py-3">Source Row #</th>
+                              <th className="px-4 py-3">Row #</th>
                               <th className="px-4 py-3">Detected Address</th>
                               <th className="px-4 py-3">Reason</th>
                               <th className="px-4 py-3">Raw Preview</th>
@@ -1178,13 +1281,16 @@ export default function ParsePage() {
                   ) : null}
                   {activeTab === 'duplicates' ? (
                     <div className="space-y-4">
-                      {duplicateGroups.length === 0 ? (
+                      {filteredDuplicateGroups.length === 0 ? (
                         <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
                           No duplicate groups detected.
                         </div>
                       ) : (
-                        duplicateGroups.map((group) => {
+                        filteredDuplicateGroups.map((group, index) => {
                           const isExpanded = expandedDuplicateGroups.has(group.canonical_id);
+                          const rowCount = group.source_row_ids.length;
+                          const duplicateCount =
+                            group.duplicate_rows_count ?? Math.max(0, rowCount - 1);
                           return (
                             <div
                               key={group.canonical_id}
@@ -1192,6 +1298,9 @@ export default function ParsePage() {
                             >
                               <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                                 <div>
+                                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                    Group {index + 1}
+                                  </p>
                                   <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                                     {group.canonical_formatted_address}
                                   </p>
@@ -1201,7 +1310,7 @@ export default function ParsePage() {
                                 </div>
                                 <div className="flex items-center gap-3">
                                   <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-                                    {group.source_row_ids.length} duplicates
+                                    Rows: {rowCount} • Duplicates: {duplicateCount}
                                   </span>
                                   <button
                                     type="button"
@@ -1225,7 +1334,7 @@ export default function ParsePage() {
                         <table className="min-w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                             <tr>
-                              <th className="px-4 py-3">Source Row #</th>
+                              <th className="px-4 py-3">Row #</th>
                               <th className="px-4 py-3">Detected Address</th>
                               <th className="px-4 py-3">Reason</th>
                               <th className="px-4 py-3">Raw Preview</th>
