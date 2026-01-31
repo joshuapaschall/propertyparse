@@ -1,3 +1,11 @@
+import type {
+  CanonicalAddress,
+  DuplicateGroup,
+  ParseDebugInfo,
+  ParseSummary,
+  RowResult,
+} from '../types/parse';
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
 if (!API_BASE_URL) {
@@ -55,6 +63,11 @@ export type UploadResponse = {
 };
 
 export type ParseResponse = {
+  summary?: ParseSummary;
+  canonical_addresses?: CanonicalAddress[];
+  row_results?: RowResult[];
+  duplicate_groups?: DuplicateGroup[];
+  debug?: ParseDebugInfo;
   matched?: unknown[];
   unmatched?: unknown[];
   items?: unknown[];
