@@ -5,6 +5,7 @@ import type {
   ParseSummary,
   RowResult,
 } from '../types/parse';
+import { getOrCreateOrgId, getOrCreateUserId } from './identity';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -28,11 +29,34 @@ const normalizedApiBaseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_
 const joinUrl = (path: string) =>
   new URL(path.startsWith('/') ? path.slice(1) : path, normalizedApiBaseUrl).toString();
 
+const getAuthHeaders = () => ({
+  'X-Org-Id': getOrCreateOrgId(),
+  'X-User-Id': getOrCreateUserId(),
+});
+
+const getErrorMessage = async (res: Response) => {
+  const text = await res.text();
+  if (!text) {
+    return `HTTP ${res.status}`;
+  }
+  try {
+    const parsed = JSON.parse(text) as { detail?: string };
+    if (typeof parsed.detail === 'string') {
+      return parsed.detail;
+    }
+  } catch {
+    return text;
+  }
+  return text;
+};
+
 async function requestJson<T>(path: string, options: RequestInit) {
-  const res = await fetch(joinUrl(path), options);
+  const res = await fetch(joinUrl(path), {
+    ...options,
+    headers: { ...getAuthHeaders(), ...(options.headers ?? {}) },
+  });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    throw new Error(await getErrorMessage(res));
   }
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
@@ -45,7 +69,7 @@ async function postJson<T>(path: string, body: unknown, options: RequestInit = {
   return requestJson<T>(path, {
     ...options,
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...(options.headers ?? {}) },
+    headers: { 'content-type': 'application/json', ...getAuthHeaders(), ...(options.headers ?? {}) },
     body: JSON.stringify(body),
   });
 }
@@ -104,14 +128,18 @@ export async function searchCities(state: string, county: string, query: string,
 export async function uploadFile(file: File) {
   const fd = new FormData();
   fd.append('file', file);
-  return requestJson<UploadResponse>('/upload/file', { method: 'POST', body: fd });
+  return requestJson<UploadResponse>('/upload/file', {
+    method: 'POST',
+    body: fd,
+    headers: getAuthHeaders(),
+  });
 }
 
 export async function parseFile(
   fileId: string,
   payload: { state: string; county: string; city?: string; force_refresh?: boolean },
 ) {
-  return postJson<ParseResponse>('/parse', { fileId, ...payload });
+  return postJson<ParseResponse>('/parse', { fileId, ...payload }, { headers: getAuthHeaders() });
 }
 
 export async function retryParseRow(payload: unknown) {
@@ -131,20 +159,25 @@ export async function validateApiKeys() {
 }
 
 export async function getJobs() {
-  const res = await requestJson<ApiResponse<JobRecord[]>>('/jobs', { method: 'GET' });
+  const res = await requestJson<ApiResponse<JobRecord[]>>('/jobs', { method: 'GET', headers: getAuthHeaders() });
   return (res.items ?? res.data ?? res) as JobRecord[];
 }
 
 export async function getJob(jobId: string) {
-  const res = await requestJson<ApiResponse<JobRecord>>(`/jobs/${jobId}`, { method: 'GET' });
+  const res = await requestJson<ApiResponse<JobRecord>>(`/jobs/${jobId}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
   return (res.data ?? res.items ?? res) as JobRecord;
 }
 
 export async function downloadJobExport(jobId: string, type: JobExportType) {
-  const res = await fetch(joinUrl(`/jobs/${jobId}/export?type=${type}`), { method: 'GET' });
+  const res = await fetch(joinUrl(`/jobs/${jobId}/export?type=${type}`), {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `HTTP ${res.status}`);
+    throw new Error(await getErrorMessage(res));
   }
   const filename =
     getFilenameFromDisposition(res.headers.get('content-disposition')) ??
