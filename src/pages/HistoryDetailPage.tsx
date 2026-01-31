@@ -1,16 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
-import { downloadJobExport, getJob, JobRecord } from '../lib/api';
+import { downloadJobExport, getJob, getJobRows, JobRecord } from '../lib/api';
 
 type ParsedPreviewRow = {
   id: string;
-  fullAddress: string;
-  streetAddress: string;
-  city: string;
-  state: string;
-  zipCode: string;
-  sourceRaw: string;
+  rowIndex: number | null;
+  addressRaw: string;
+  matchedAddress: string;
+  status: string;
+  source: string;
 };
 
 const PREVIEW_LIMIT = 50;
@@ -47,8 +46,10 @@ const formatDateTime = (value: string | null) => {
   return date.toLocaleString();
 };
 
-const createId = (row: Record<string, unknown>, index: number) =>
-  (row.id as string) || (row.uuid as string) || `${crypto.randomUUID?.() ?? `row-${index}`}`;
+const createId = (row: Record<string, unknown>, index: number, rowIndex: number | null) =>
+  (row.id as string) ||
+  (row.uuid as string) ||
+  `${rowIndex ?? index}-${crypto.randomUUID?.() ?? `row-${index}`}`;
 
 const stringifyValue = (value: unknown) => {
   if (typeof value === 'string') return value;
@@ -58,42 +59,36 @@ const stringifyValue = (value: unknown) => {
 };
 
 const normalizeRow = (row: Record<string, unknown>, index: number): ParsedPreviewRow => {
-  const fullAddress =
-    (row.full_address as string) ||
-    (row.fullAddress as string) ||
-    (row.address_full as string) ||
-    (row.address as string) ||
-    (row.address_raw as string) ||
+  const rowIndexValue = row.row_index ?? row.rowIndex ?? row.index ?? null;
+  const rowIndex =
+    typeof rowIndexValue === 'number'
+      ? rowIndexValue
+      : typeof rowIndexValue === 'string'
+        ? Number(rowIndexValue)
+        : null;
+  const addressRaw =
+    (row.address_raw as string) || (row.addressRaw as string) || (row.address as string) || '';
+  const matchedAddress =
+    (row.matched_address as string) ||
+    (row.matchedAddress as string) ||
+    (row.address_matched as string) ||
     '';
-  const streetAddress =
-    (row.street_address as string) ||
-    (row.streetAddress as string) ||
-    (row.address_line1 as string) ||
-    (row.street as string) ||
-    '';
-  const city = (row.city as string) || (row.city_raw as string) || '';
-  const state = (row.state as string) || (row.state_raw as string) || '';
-  const zipCode =
-    (row.zip as string) ||
-    (row.zip_code as string) ||
-    (row.zipCode as string) ||
-    (row.zip_raw as string) ||
-    '';
-  const sourceRaw =
+  const status =
+    (row.status as string) || (row.match_status as string) || (row.matchStatus as string) || '';
+  const source =
+    (row.source as string) ||
     (row.source_raw as string) ||
     (row.raw as string) ||
-    (row.source as string) ||
     (row.address_raw as string) ||
     stringifyValue(row);
 
   return {
-    id: createId(row, index),
-    fullAddress,
-    streetAddress,
-    city,
-    state,
-    zipCode,
-    sourceRaw,
+    id: createId(row, index, Number.isNaN(rowIndex as number) ? null : rowIndex),
+    rowIndex: Number.isNaN(rowIndex as number) ? null : rowIndex,
+    addressRaw,
+    matchedAddress,
+    status,
+    source,
   };
 };
 
@@ -117,6 +112,8 @@ export default function HistoryDetailPage() {
   const [activeTab, setActiveTab] = useState<'matched' | 'unmatched'>('matched');
   const [showRaw, setShowRaw] = useState(false);
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
+  const [matchedRows, setMatchedRows] = useState<ParsedPreviewRow[]>([]);
+  const [unmatchedRows, setUnmatchedRows] = useState<ParsedPreviewRow[]>([]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -125,8 +122,16 @@ export default function HistoryDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const response = await getJob(jobId);
-        if (active) setJob(response ?? null);
+        const [jobResponse, matchedResponse, unmatchedResponse] = await Promise.all([
+          getJob(jobId),
+          getJobRows(jobId, 'Matched', PREVIEW_LIMIT, 0),
+          getJobRows(jobId, 'Unmatched', PREVIEW_LIMIT, 0),
+        ]);
+        if (active) {
+          setJob(jobResponse ?? null);
+          setMatchedRows(normalizeRows(matchedResponse ?? []));
+          setUnmatchedRows(normalizeRows(unmatchedResponse ?? []));
+        }
       } catch (err) {
         if (active) setError((err as Error).message ?? 'Unable to load job details.');
       } finally {
@@ -160,20 +165,6 @@ export default function HistoryDetailPage() {
         'googleCalls',
         'apiCallsUsed',
       ]),
-    };
-  }, [job]);
-
-  const { matchedRows, unmatchedRows } = useMemo(() => {
-    if (!job) return { matchedRows: [], unmatchedRows: [] };
-    const rawMatched =
-      (pickValue(job, ['matchedRows', 'matched', 'items']) as unknown[]) ?? [];
-    const rawUnmatched = (pickValue(job, ['unmatchedRows', 'unmatched']) as unknown[]) ?? [];
-    return {
-      matchedRows: normalizeRows(Array.isArray(rawMatched) ? rawMatched : []).slice(0, PREVIEW_LIMIT),
-      unmatchedRows: normalizeRows(Array.isArray(rawUnmatched) ? rawUnmatched : []).slice(
-        0,
-        PREVIEW_LIMIT,
-      ),
     };
   }, [job]);
 
@@ -318,11 +309,10 @@ export default function HistoryDetailPage() {
               <table className="min-w-full text-left text-sm">
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                   <tr>
-                    <th className="px-4 py-3">Full Address</th>
-                    <th className="px-4 py-3">Street Address</th>
-                    <th className="px-4 py-3">City</th>
-                    <th className="px-4 py-3">State</th>
-                    <th className="px-4 py-3">Zip Code</th>
+                    <th className="px-4 py-3">Row</th>
+                    <th className="px-4 py-3">Address Raw</th>
+                    <th className="px-4 py-3">Matched Address</th>
+                    <th className="px-4 py-3">Status</th>
                     {showRaw ? <th className="px-4 py-3">Source / Raw</th> : null}
                   </tr>
                 </thead>
@@ -331,7 +321,7 @@ export default function HistoryDetailPage() {
                     <tr>
                       <td
                         className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                        colSpan={showRaw ? 6 : 5}
+                        colSpan={showRaw ? 5 : 4}
                       >
                         No preview rows available. Download the CSV for the full dataset.
                       </td>
@@ -340,21 +330,20 @@ export default function HistoryDetailPage() {
                     (activeTab === 'matched' ? matchedRows : unmatchedRows).map((row) => (
                       <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
                         <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
-                          {row.fullAddress}
+                          {row.rowIndex ?? '--'}
                         </td>
                         <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                          {row.streetAddress}
-                        </td>
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.city}</td>
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                          {row.state}
+                          {row.addressRaw}
                         </td>
                         <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                          {row.zipCode}
+                          {row.matchedAddress}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                          {row.status}
                         </td>
                         {showRaw ? (
                           <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                            {row.sourceRaw}
+                            {row.source}
                           </td>
                         ) : null}
                       </tr>
