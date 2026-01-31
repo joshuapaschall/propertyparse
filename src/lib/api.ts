@@ -125,9 +125,12 @@ export async function searchCities(state: string, county: string, query: string,
   return res.items ?? (res.data as string[]) ?? [];
 }
 
-export async function uploadFile(file: File) {
+export async function uploadFile(file: File, displayName?: string) {
   const fd = new FormData();
   fd.append('file', file);
+  if (displayName) {
+    fd.append('displayName', displayName);
+  }
   return requestJson<UploadResponse>('/upload/file', {
     method: 'POST',
     body: fd,
@@ -137,7 +140,14 @@ export async function uploadFile(file: File) {
 
 export async function parseFile(
   fileId: string,
-  payload: { state: string; county: string; city?: string; force_refresh?: boolean },
+  payload: {
+    state: string;
+    county: string;
+    city?: string;
+    force_refresh?: boolean;
+    jobId?: string;
+    jobName?: string;
+  },
 ) {
   return postJson<ParseResponse>('/parse', { fileId, ...payload }, { headers: getAuthHeaders() });
 }
@@ -168,7 +178,14 @@ export async function getJob(jobId: string) {
     method: 'GET',
     headers: getAuthHeaders(),
   });
-  return (res.data ?? res.items ?? res) as JobRecord;
+  return (res.job ?? res.data ?? res.items ?? res) as JobRecord;
+}
+
+export async function getJobDetail(jobId: string) {
+  return requestJson<{ job?: JobRecord; summary?: JobRecord }>(`/jobs/${jobId}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
 }
 
 export async function getJobRows(
