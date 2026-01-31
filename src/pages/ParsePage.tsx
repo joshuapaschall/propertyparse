@@ -18,7 +18,7 @@ import {
   isSkippedRow,
   stringifyPreview,
 } from '../lib/parseUtils';
-import { getJob, parseFile, retryParseBatch, retryParseRow, uploadFile } from '../lib/api';
+import { getJobWithStatus, parseFile, retryParseBatch, retryParseRow, uploadFile } from '../lib/api';
 import { listCitiesByState, listCounties, listStates50 } from '../lib/locations';
 import type {
   CanonicalAddress,
@@ -262,6 +262,8 @@ export default function ParsePage() {
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [pollErrorCount, setPollErrorCount] = useState(0);
   const [metadata, setMetadata] = useState<Record<string, unknown> | null>(null);
   const [editingRow, setEditingRow] = useState<ParsedRow | null>(null);
   const [retryAvailable, setRetryAvailable] = useState<'unknown' | 'available' | 'unavailable'>(
@@ -459,7 +461,12 @@ export default function ParsePage() {
     return rowsReceived;
   }, [metadata, parseSummary, rowsReceived]);
 
+  const isStartingParse = busy && progressInfo.phase === null;
+
   const progressDetail = useMemo(() => {
+    if (isStartingParse) {
+      return 'Starting parse…';
+    }
     const done = progressInfo.done;
     const total = progressInfo.total;
     const cacheHitsValue = progressInfo.cacheHits;
@@ -477,7 +484,7 @@ export default function ParsePage() {
       googleCallsValue ?? '--'
     } • Cache hits ${cacheHitsValue ?? '--'}`;
     return progressInfo.eta ? `${detail} • ETA ~ ${progressInfo.eta}` : detail;
-  }, [progressInfo]);
+  }, [isStartingParse, progressInfo]);
 
   const handleCopyDebugInfo = () => {
     const debugInfo = [
@@ -525,7 +532,7 @@ export default function ParsePage() {
     progressSamplesRef.current = [];
     pollingRef.current = window.setInterval(async () => {
       try {
-        const job = await getJob(jobId);
+        const { job } = await getJobWithStatus(jobId);
         const phase = normalizePhase(job.phase);
         const done =
           normalizeNumber(job.progress_done) ?? normalizeNumber(job.progressDone) ?? null;
@@ -573,13 +580,17 @@ export default function ParsePage() {
           googleCallsUsed: googleCallsValue,
           eta,
         });
+        setPollErrorCount(0);
+        setPollError(null);
         if (phase === 'DONE') {
           setProgressPercent(100);
           setProgressStep(mapPhaseToStep(phase));
           stopPolling();
         }
-      } catch {
-        // Ignore polling errors; we'll continue polling until parse resolves.
+      } catch (err) {
+        const message = (err as Error).message ?? 'Polling failed.';
+        setPollErrorCount((prev) => prev + 1);
+        setPollError(message);
       }
     }, 900);
   };
@@ -600,7 +611,9 @@ export default function ParsePage() {
     setMetadata(null);
     setLegacyMode(false);
     setProgressStep(0);
-    setProgressPercent(0);
+    setProgressPercent(5);
+    setPollError(null);
+    setPollErrorCount(0);
     setProgressInfo({
       phase: null,
       done: null,
@@ -1294,9 +1307,19 @@ export default function ParsePage() {
                 percent={progressPercent}
               />
               {progressDetail ? (
-                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                  {progressDetail}
-                </p>
+                <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                  {isStartingParse ? (
+                    <span className="inline-flex h-3 w-3 items-center justify-center">
+                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-500 dark:border-slate-700 dark:border-t-indigo-400" />
+                    </span>
+                  ) : null}
+                  <span>{progressDetail}</span>
+                </div>
+              ) : null}
+              {pollErrorCount >= 8 && pollError ? (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
+                  Still working, but live progress is unavailable. Last error: {pollError}
+                </div>
               ) : null}
             </div>
           </div>
