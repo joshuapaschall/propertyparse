@@ -40,11 +40,13 @@ export type DuplicateGroup = {
   canonical_id: string;
   canonical_formatted_address: string;
   source_row_ids: string[];
+  duplicate_rows_count?: number;
 };
 
 export type ParseDebugInfo = {
   detected_address_column?: string;
   detection_method?: 'header_match' | 'content_scoring' | 'fallback';
+  no_addresses_detected?: boolean;
 };
 
 export type ParseResponseV2 = {
