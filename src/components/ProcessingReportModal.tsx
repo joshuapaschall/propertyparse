@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { RowResult } from '../types/parse';
+import { retryJobBatch, retryJobRow } from '../lib/api';
 import {
   isDuplicateRow,
   isErrorRow,
@@ -23,8 +24,14 @@ export type ProcessingReportFilter =
 type ProcessingReportModalProps = {
   open: boolean;
   rows: RowResult[];
+  jobId?: string | null;
   onClose: () => void;
   initialFilter?: ProcessingReportFilter;
+  onApplyUpdates: (payload: {
+    updatedRows: RowResult[];
+    updatedJob?: Record<string, unknown>;
+  }) => void;
+  forceReverify?: boolean;
 };
 
 const STATUS_OPTIONS: Array<{ value: ProcessingReportFilter; label: string }> = [
@@ -88,11 +95,21 @@ const copyRowJson = (row: RowResult) => {
 export default function ProcessingReportModal({
   open,
   rows,
+  jobId,
   onClose,
   initialFilter = 'all',
+  onApplyUpdates,
+  forceReverify = false,
 }: ProcessingReportModalProps) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ProcessingReportFilter>(initialFilter);
+  const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(() => new Set());
+  const [pendingEditsByRowId, setPendingEditsByRowId] = useState<Record<string, string>>({});
+  const [editingRow, setEditingRow] = useState<RowResult | null>(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const [retrying, setRetrying] = useState(false);
+  const [savingRow, setSavingRow] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -100,130 +117,354 @@ export default function ProcessingReportModal({
     setQuery('');
   }, [initialFilter, open]);
 
+  useEffect(() => {
+    if (!editingRow) return;
+    const rowId = editingRow.source_row_id;
+    setEditingValue(
+      pendingEditsByRowId[rowId] ??
+        editingRow.detected_address ??
+        editingRow.formatted_address ??
+        '',
+    );
+  }, [editingRow, pendingEditsByRowId]);
+
+  useEffect(() => {
+    const rowIds = new Set(rows.map((row) => row.source_row_id));
+    setSelectedRowIds((prev) => new Set([...prev].filter((id) => rowIds.has(id))));
+    setPendingEditsByRowId((prev) => {
+      const next: Record<string, string> = {};
+      Object.entries(prev).forEach(([rowId, value]) => {
+        if (rowIds.has(rowId)) {
+          next[rowId] = value;
+        }
+      });
+      return next;
+    });
+  }, [rows]);
+
   const filteredRows = useMemo(() => {
     const statusFiltered = filterRows(rows, filter);
     return statusFiltered.filter((row) => matchesSearch(row, query));
   }, [rows, filter, query]);
 
+  const selectedRowsWithEdits = useMemo(
+    () =>
+      Array.from(selectedRowIds)
+        .map((rowId) => ({
+          rowId,
+          fullAddress: pendingEditsByRowId[rowId]?.trim() ?? '',
+        }))
+        .filter((row) => row.fullAddress.length > 0),
+    [pendingEditsByRowId, selectedRowIds],
+  );
+
+  const canRetrySelected = selectedRowsWithEdits.length > 0 && !retrying && !savingRow;
+
+  const toggleRowSelection = (rowId: string) => {
+    setSelectedRowIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(rowId)) {
+        next.delete(rowId);
+      } else {
+        next.add(rowId);
+      }
+      return next;
+    });
+  };
+
+  const handleRetrySelected = async () => {
+    if (!jobId) {
+      setRetryError('Missing job ID. Please re-run the parse job.');
+      return;
+    }
+    if (!selectedRowsWithEdits.length) return;
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const response = await retryJobBatch(jobId, selectedRowsWithEdits, forceReverify);
+      onApplyUpdates({
+        updatedRows: response.updated_rows ?? [],
+        updatedJob: response.updated_job as Record<string, unknown> | undefined,
+      });
+      setPendingEditsByRowId((prev) => {
+        const next = { ...prev };
+        selectedRowsWithEdits.forEach((row) => {
+          delete next[row.rowId];
+        });
+        return next;
+      });
+      setSelectedRowIds((prev) => {
+        const next = new Set(prev);
+        selectedRowsWithEdits.forEach((row) => {
+          next.delete(row.rowId);
+        });
+        return next;
+      });
+    } catch (err) {
+      setRetryError((err as Error).message ?? 'Retry selected failed.');
+    } finally {
+      setRetrying(false);
+    }
+  };
+
+  const handleEditRetry = async () => {
+    if (!editingRow) return;
+    const rowId = editingRow.source_row_id;
+    const trimmedAddress = editingValue.trim();
+    if (!trimmedAddress) {
+      setRetryError('Full address is required.');
+      return;
+    }
+    setPendingEditsByRowId((prev) => ({ ...prev, [rowId]: trimmedAddress }));
+    setSelectedRowIds((prev) => new Set(prev).add(rowId));
+    if (!jobId) {
+      setRetryError('Missing job ID. Please re-run the parse job.');
+      return;
+    }
+    setSavingRow(true);
+    setRetryError(null);
+    try {
+      const response = await retryJobRow(jobId, rowId, trimmedAddress, forceReverify);
+      onApplyUpdates({
+        updatedRows: response.updated_rows ?? [],
+        updatedJob: response.updated_job as Record<string, unknown> | undefined,
+      });
+      setPendingEditsByRowId((prev) => {
+        const next = { ...prev };
+        delete next[rowId];
+        return next;
+      });
+      setSelectedRowIds((prev) => {
+        const next = new Set(prev);
+        next.delete(rowId);
+        return next;
+      });
+      setEditingRow(null);
+    } catch (err) {
+      setRetryError((err as Error).message ?? 'Retry failed.');
+    } finally {
+      setSavingRow(false);
+    }
+  };
+
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 dark:bg-slate-950/70">
-      <div className="flex w-full max-w-6xl flex-col gap-4 rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-              Processing Report
-            </h3>
-            <p className="text-sm text-slate-500 dark:text-slate-400">
-              Inspect every row and its final disposition.
-            </p>
+    <>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 dark:bg-slate-950/70">
+        <div className="flex w-full max-w-6xl flex-col gap-4 rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                Processing Report
+              </h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Inspect every row and its final disposition.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="text-sm font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+            >
+              Close
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="text-sm font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-          >
-            Close
-          </button>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <input
-            type="search"
-            placeholder="Search addresses, reasons, raw values..."
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            className="w-full max-w-md rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-          />
-          <select
-            value={filter}
-            onChange={(event) => setFilter(event.target.value as ProcessingReportFilter)}
-            className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            Showing {filteredRows.length} of {rows.length}
-          </span>
-        </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="search"
+              placeholder="Search addresses, reasons, raw values..."
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              className="w-full max-w-md rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
+            <select
+              value={filter}
+              onChange={(event) => setFilter(event.target.value as ProcessingReportFilter)}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              {STATUS_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleRetrySelected}
+              disabled={!canRetrySelected}
+              className="rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:border-slate-200 disabled:text-slate-400 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-500/10 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
+            >
+              {retrying ? 'Retrying...' : 'Retry Selected'}
+            </button>
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              Showing {filteredRows.length} of {rows.length}
+            </span>
+          </div>
 
-        <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
-          <div className="max-h-[60vh] overflow-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                <tr>
-                  <th className="px-4 py-3">Row #</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3">Detected Address</th>
-                  <th className="px-4 py-3">Canonical Address</th>
-                  <th className="px-4 py-3">Reason Code</th>
-                  <th className="px-4 py-3">Reason Detail</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {filteredRows.length === 0 ? (
+          {retryError ? (
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
+              {retryError}
+            </div>
+          ) : null}
+
+          <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+            <div className="max-h-[60vh] overflow-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                   <tr>
-                    <td
-                      className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                      colSpan={7}
-                    >
-                      No rows match this filter.
-                    </td>
+                    <th className="px-4 py-3">Select</th>
+                    <th className="px-4 py-3">Row #</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Detected Address</th>
+                    <th className="px-4 py-3">Canonical Address</th>
+                    <th className="px-4 py-3">Reason Code</th>
+                    <th className="px-4 py-3">Reason Detail</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
-                ) : (
-                  filteredRows.map((row) => (
-                    <tr key={row.source_row_id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
-                      <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                        {row.source_row_index}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getStatusClasses(
-                            row,
-                          )}`}
-                        >
-                          {row.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                        {row.detected_address || '--'}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                        {row.formatted_address || '--'}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                        {row.reason_code || '--'}
-                      </td>
-                      <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                        {stringifyPreview(row.reason_detail ?? '--', 120)}
-                      </td>
-                      <td className="px-4 py-3 text-right">
-                        <button
-                          type="button"
-                          onClick={() => copyRowJson(row)}
-                          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                        >
-                          Copy JSON
-                        </button>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredRows.length === 0 ? (
+                    <tr>
+                      <td
+                        className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
+                        colSpan={8}
+                      >
+                        No rows match this filter.
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    filteredRows.map((row) => {
+                      const needsReview = isNeedsReviewRow(row);
+                      return (
+                        <tr
+                          key={row.source_row_id}
+                          className="hover:bg-slate-50 dark:hover:bg-slate-900"
+                        >
+                          <td className="px-4 py-3">
+                            {needsReview ? (
+                              <input
+                                type="checkbox"
+                                checked={selectedRowIds.has(row.source_row_id)}
+                                onChange={() => toggleRowSelection(row.source_row_id)}
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600"
+                              />
+                            ) : null}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                            {row.source_row_index}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`inline-flex items-center rounded-full px-2 py-1 text-xs font-semibold ${getStatusClasses(
+                                row,
+                              )}`}
+                            >
+                              {row.status}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                            {row.detected_address || '--'}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                            {row.formatted_address || '--'}
+                          </td>
+                          <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                            {row.reason_code || '--'}
+                          </td>
+                          <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                            {stringifyPreview(row.reason_detail ?? '--', 120)}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex flex-wrap justify-end gap-2">
+                              {needsReview ? (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setRetryError(null);
+                                    setEditingRow(row);
+                                  }}
+                                  className="rounded-md border border-indigo-200 px-2 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-500/10"
+                                >
+                                  Edit + Retry
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                onClick={() => copyRowJson(row)}
+                                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                              >
+                                Copy JSON
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Tip: search scans detected + formatted addresses, reasons, status, IDs, and raw row JSON.
           </div>
         </div>
-
-        <div className="text-xs text-slate-500 dark:text-slate-400">
-          Tip: search scans detected + formatted addresses, reasons, status, IDs, and raw row JSON.
-        </div>
       </div>
-    </div>
+
+      {editingRow ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 px-4 py-8 dark:bg-slate-950/80">
+          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950 dark:shadow-slate-950/50">
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                Edit full address
+              </h3>
+              <button
+                type="button"
+                onClick={() => setEditingRow(null)}
+                className="text-sm font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-4 space-y-2">
+              <label className="text-sm font-semibold text-slate-600 dark:text-slate-300">
+                Full address
+              </label>
+              <input
+                value={editingValue}
+                onChange={(event) => setEditingValue(event.target.value)}
+                className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              />
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                This edit will be saved and retried for verification.
+              </p>
+              {retryError ? (
+                <p className="text-xs text-rose-600 dark:text-rose-300">{retryError}</p>
+              ) : null}
+            </div>
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setEditingRow(null)}
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleEditRetry}
+                disabled={savingRow}
+                className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300"
+              >
+                {savingRow ? 'Retrying...' : 'Save + Retry'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
