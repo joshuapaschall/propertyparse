@@ -183,7 +183,7 @@ export default function ProcessingReportModal({
     try {
       const response = await retryJobBatch(jobId, selectedRowsWithEdits, forceReverify);
       onApplyUpdates({
-        updatedRows: response.updated_rows ?? [],
+        updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
         updatedJob: response.updated_job as Record<string, unknown> | undefined,
       });
       setPendingEditsByRowId((prev) => {
@@ -226,7 +226,7 @@ export default function ProcessingReportModal({
     try {
       const response = await retryJobRow(jobId, rowId, trimmedAddress, forceReverify);
       onApplyUpdates({
-        updatedRows: response.updated_rows ?? [],
+        updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
         updatedJob: response.updated_job as Record<string, unknown> | undefined,
       });
       setPendingEditsByRowId((prev) => {

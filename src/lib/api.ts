@@ -173,7 +173,11 @@ export async function retryJobRow(
   fullAddress: string,
   forceReverify = false,
 ) {
-  return postJson<{ updated_rows?: RowResult[]; updated_job?: JobRecord }>(
+  return postJson<{
+    updated_row_results?: RowResult[];
+    updated_rows?: RowResult[];
+    updated_job?: JobRecord;
+  }>(
     `/jobs/${jobId}/retry-row`,
     {
       row_id: rowId,
@@ -188,7 +192,11 @@ export async function retryJobBatch(
   rows: Array<{ rowId: string; fullAddress: string }>,
   forceReverify = false,
 ) {
-  return postJson<{ updated_rows?: RowResult[]; updated_job?: JobRecord }>(
+  return postJson<{
+    updated_row_results?: RowResult[];
+    updated_rows?: RowResult[];
+    updated_job?: JobRecord;
+  }>(
     `/jobs/${jobId}/retry-batch`,
     {
       rows: rows.map((row) => ({
