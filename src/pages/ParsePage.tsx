@@ -817,7 +817,9 @@ export default function ParsePage() {
         if (!updates.size) return prev;
         return prev.map((row) => {
           const id = getRowIdentifier(row as Record<string, unknown>);
-          return id && updates.has(id) ? (updates.get(id) as RowResult) : row;
+          if (!id || !updates.has(id)) return row;
+          const updatedRow = updates.get(id) as RowResult;
+          return { ...row, ...updatedRow };
         });
       });
     }
