@@ -8,8 +8,11 @@ const features = [
   'Export clean CSVs for downstream workflows.',
 ];
 
+type AuthMode = 'sign-in' | 'create-account';
+
 export default function AuthPage() {
-  const { loginWithPassword, loginWithMagicLink } = useAuthControls();
+  const { loginWithPassword, loginWithMagicLink, signUpWithPassword } = useAuthControls();
+  const [authMode, setAuthMode] = useState<AuthMode>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [status, setStatus] = useState<string | null>(null);
@@ -45,6 +48,25 @@ export default function AuthPage() {
     }
   };
 
+  const handleCreateAccount = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError(null);
+    setStatus(null);
+    setIsSubmitting(true);
+    try {
+      const { needsEmailConfirmation } = await signUpWithPassword(email, password);
+      if (needsEmailConfirmation) {
+        setStatus('Check your email to confirm your account.');
+      } else {
+        setStatus('Account created! Redirecting...');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to create account.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-white flex items-center justify-center px-6 py-12">
       <div className="w-full max-w-5xl grid gap-10 lg:grid-cols-[1.1fr_0.9fr]">
@@ -53,12 +75,50 @@ export default function AuthPage() {
             <span className="h-2 w-2 rounded-full bg-emerald-400" />
             PropertyParse Secure Login
           </div>
-          <h1 className="text-4xl font-semibold leading-tight">Sign in to launch the address parsing workspace.</h1>
+          <h1 className="text-4xl font-semibold leading-tight">
+            {authMode === 'sign-in'
+              ? 'Sign in to launch the address parsing workspace.'
+              : 'Create your PropertyParse account to get started.'}
+          </h1>
           <p className="text-lg text-white/70">
-            Use your Supabase credentials to access PropertyParse. Magic links are available if you
-            prefer passwordless sign-in.
+            {authMode === 'sign-in'
+              ? 'Use your Supabase credentials to access PropertyParse. Magic links are available if you prefer passwordless sign-in.'
+              : 'Create an account with email and password. We will send a confirmation link if required.'}
           </p>
-          <form onSubmit={handlePasswordLogin} className="space-y-4">
+          <div className="inline-flex rounded-full border border-white/15 bg-white/5 p-1 text-sm">
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('sign-in');
+                setStatus(null);
+                setError(null);
+              }}
+              className={`rounded-full px-4 py-1.5 font-semibold transition ${
+                authMode === 'sign-in' ? 'bg-white text-slate-900' : 'text-white/70 hover:text-white'
+              }`}
+            >
+              Sign in
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAuthMode('create-account');
+                setStatus(null);
+                setError(null);
+              }}
+              className={`rounded-full px-4 py-1.5 font-semibold transition ${
+                authMode === 'create-account'
+                  ? 'bg-white text-slate-900'
+                  : 'text-white/70 hover:text-white'
+              }`}
+            >
+              Create account
+            </button>
+          </div>
+          <form
+            onSubmit={authMode === 'sign-in' ? handlePasswordLogin : handleCreateAccount}
+            className="space-y-4"
+          >
             <div className="space-y-2">
               <label className="text-sm font-semibold text-white/80" htmlFor="email">
                 Email address
@@ -94,20 +154,28 @@ export default function AuthPage() {
               disabled={isSubmitting}
               className="w-full sm:w-auto rounded-lg bg-white px-6 py-3 text-slate-900 font-semibold hover:bg-slate-100 transition disabled:opacity-60"
             >
-              {isSubmitting ? 'Signing in...' : 'Sign in'}
+              {isSubmitting
+                ? authMode === 'sign-in'
+                  ? 'Signing in...'
+                  : 'Creating account...'
+                : authMode === 'sign-in'
+                  ? 'Sign in'
+                  : 'Create account'}
             </button>
           </form>
-          <div className="flex flex-wrap items-center gap-3">
-            <button
-              type="button"
-              onClick={handleMagicLink}
-              disabled={isSubmitting || !email}
-              className="rounded-lg border border-white/20 px-5 py-2 text-sm font-semibold hover:bg-white/10 transition disabled:opacity-60"
-            >
-              Send magic link
-            </button>
-            <span className="text-xs text-white/50">No password needed — check your email.</span>
-          </div>
+          {authMode === 'sign-in' ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={handleMagicLink}
+                disabled={isSubmitting || !email}
+                className="rounded-lg border border-white/20 px-5 py-2 text-sm font-semibold hover:bg-white/10 transition disabled:opacity-60"
+              >
+                Send magic link
+              </button>
+              <span className="text-xs text-white/50">No password needed — check your email.</span>
+            </div>
+          ) : null}
           {status ? <p className="text-sm text-emerald-300">{status}</p> : null}
           {error ? <p className="text-sm text-red-300">{error}</p> : null}
         </div>

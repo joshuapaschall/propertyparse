@@ -24,6 +24,7 @@ type AuthContextValue = {
   bootstrapError: string | null;
   loginWithPassword: (email: string, password: string) => Promise<void>;
   loginWithMagicLink: (email: string) => Promise<void>;
+  signUpWithPassword: (email: string, password: string) => Promise<{ needsEmailConfirmation: boolean }>;
   logout: () => Promise<void>;
   refreshBootstrap: () => Promise<void>;
 };
@@ -163,6 +164,21 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const signUpWithPassword = useCallback(async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    if (error) {
+      throw error;
+    }
+    if (data.session) {
+      setSession(data.session);
+    }
+    return { needsEmailConfirmation: !data.session };
+  }, []);
+
   const logout = useCallback(async () => {
     await supabase.auth.signOut();
     setSession(null);
@@ -198,6 +214,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       bootstrapError,
       loginWithPassword,
       loginWithMagicLink,
+      signUpWithPassword,
       logout,
       refreshBootstrap,
     }),
@@ -214,6 +231,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       bootstrapError,
       loginWithPassword,
       loginWithMagicLink,
+      signUpWithPassword,
       logout,
       refreshBootstrap,
     ],
