@@ -167,6 +167,39 @@ export async function retryParseBatch(payload: unknown) {
   return postJson<ParseResponse>('/parse/retry-batch', payload);
 }
 
+export async function retryJobRow(
+  jobId: string,
+  rowId: string,
+  fullAddress: string,
+  forceReverify = false,
+) {
+  return postJson<{ updated_rows?: RowResult[]; updated_job?: JobRecord }>(
+    `/jobs/${jobId}/retry-row`,
+    {
+      row_id: rowId,
+      edited: { full_address: fullAddress },
+      force_reverify: forceReverify ?? false,
+    },
+  );
+}
+
+export async function retryJobBatch(
+  jobId: string,
+  rows: Array<{ rowId: string; fullAddress: string }>,
+  forceReverify = false,
+) {
+  return postJson<{ updated_rows?: RowResult[]; updated_job?: JobRecord }>(
+    `/jobs/${jobId}/retry-batch`,
+    {
+      rows: rows.map((row) => ({
+        row_id: row.rowId,
+        edited: { full_address: row.fullAddress },
+      })),
+      force_reverify: forceReverify ?? false,
+    },
+  );
+}
+
 export async function getHealth() {
   return requestJson<JsonValue>('/health', { method: 'GET' });
 }

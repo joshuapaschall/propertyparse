@@ -185,6 +185,19 @@ const normalizeNumber = (value: unknown) => {
   return null;
 };
 
+const getRowIdentifier = (row: Record<string, unknown>) => {
+  const candidate = row.id ?? row.source_row_id ?? row.row_id;
+  return typeof candidate === 'string' ? candidate : null;
+};
+
+const pickNumberFromRecord = (record: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = normalizeNumber(record[key]);
+    if (typeof value === 'number') return value;
+  }
+  return null;
+};
+
 const normalizePhase = (value: unknown) => {
   if (typeof value === 'string') return value.toUpperCase();
   return null;
@@ -784,6 +797,89 @@ export default function ParsePage() {
       applyRetryResponse(response);
     } catch {
       setRetryAvailable('unavailable');
+    }
+  };
+
+  const handleRetryUpdates = (payload: {
+    updatedRows: RowResult[];
+    updatedJob?: Record<string, unknown>;
+  }) => {
+    const { updatedRows, updatedJob } = payload;
+    if (updatedRows?.length) {
+      setRowResults((prev) => {
+        const updates = new Map<string, RowResult>();
+        updatedRows.forEach((row) => {
+          const id = getRowIdentifier(row as Record<string, unknown>);
+          if (id) {
+            updates.set(id, row);
+          }
+        });
+        if (!updates.size) return prev;
+        return prev.map((row) => {
+          const id = getRowIdentifier(row as Record<string, unknown>);
+          return id && updates.has(id) ? (updates.get(id) as RowResult) : row;
+        });
+      });
+    }
+
+    if (updatedJob) {
+      const totalRows = pickNumberFromRecord(updatedJob, [
+        'rows_received',
+        'rowsReceived',
+        'total_rows',
+        'rows',
+        'rowCount',
+      ]);
+      const matchedCount = pickNumberFromRecord(updatedJob, [
+        'matched_count',
+        'matched',
+        'matchedCount',
+      ]);
+      const unmatchedCount = pickNumberFromRecord(updatedJob, [
+        'unmatched_count',
+        'unmatched',
+        'unmatchedCount',
+      ]);
+      const dedupedCountValue = pickNumberFromRecord(updatedJob, [
+        'deduped_count',
+        'dedupedCount',
+      ]);
+      const cacheHitsValue = pickNumberFromRecord(updatedJob, [
+        'cache_hits',
+        'cacheHits',
+        'cache_hit_count',
+      ]);
+      const googleCallsValue = pickNumberFromRecord(updatedJob, [
+        'google_calls_used',
+        'googleCallsUsed',
+        'googleCalls',
+        'apiCallsUsed',
+      ]);
+
+      setRowsReceived((prev) =>
+        typeof totalRows === 'number' ? totalRows : prev,
+      );
+      setMetadata((prev) => {
+        const next = { ...(prev ?? {}) };
+        if (typeof totalRows === 'number') next.rows_received = totalRows;
+        if (typeof matchedCount === 'number') next.matched_count = matchedCount;
+        if (typeof unmatchedCount === 'number') next.unmatched_count = unmatchedCount;
+        if (typeof dedupedCountValue === 'number') next.deduped_count = dedupedCountValue;
+        if (typeof cacheHitsValue === 'number') next.cache_hits = cacheHitsValue;
+        if (typeof googleCallsValue === 'number') next.google_calls_used = googleCallsValue;
+        return next;
+      });
+      setParseSummary((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          rows_received: typeof totalRows === 'number' ? totalRows : prev.rows_received,
+          valid_total: typeof matchedCount === 'number' ? matchedCount : prev.valid_total,
+          valid_unique:
+            typeof dedupedCountValue === 'number' ? dedupedCountValue : prev.valid_unique,
+          unmatched: typeof unmatchedCount === 'number' ? unmatchedCount : prev.unmatched,
+        };
+      });
     }
   };
 
@@ -1793,8 +1889,11 @@ export default function ParsePage() {
       <ProcessingReportModal
         open={processingReportOpen}
         rows={rowResults}
+        jobId={jobId}
         initialFilter={processingReportFilter}
         onClose={() => setProcessingReportOpen(false)}
+        onApplyUpdates={handleRetryUpdates}
+        forceReverify={forceRefresh}
       />
     </AppShell>
   );
