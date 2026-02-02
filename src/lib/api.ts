@@ -181,7 +181,7 @@ export async function retryJobRow(
     `/jobs/${jobId}/retry-row`,
     {
       row_id: rowId,
-      edited: { full_address: fullAddress },
+      overrides: { address: fullAddress },
       force_reverify: forceReverify ?? false,
     },
   );

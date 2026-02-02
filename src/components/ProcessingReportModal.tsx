@@ -76,6 +76,17 @@ const filterRows = (rows: RowResult[], filter: ProcessingReportFilter) => {
   }
 };
 
+const getRowDisplayId = (row: RowResult) => {
+  const rawRow = row.raw_row as Record<string, unknown> | undefined;
+  const recordId = rawRow?.record_id ?? rawRow?.recordId ?? rawRow?.recordID;
+  if (recordId === null || recordId === undefined) {
+    return `Row (data) ${row.source_row_index}`;
+  }
+  return typeof recordId === 'string' || typeof recordId === 'number'
+    ? String(recordId)
+    : `Row (data) ${row.source_row_index}`;
+};
+
 const copyRowJson = (row: RowResult) => {
   const payload = JSON.stringify(row, null, 2);
   if (navigator.clipboard?.writeText) {
@@ -315,7 +326,7 @@ export default function ProcessingReportModal({
                 <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                   <tr>
                     <th className="px-4 py-3">Select</th>
-                    <th className="px-4 py-3">Row #</th>
+                    <th className="px-4 py-3">Record ID / Row (data)</th>
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Detected Address</th>
                     <th className="px-4 py-3">Canonical Address</th>
@@ -353,7 +364,7 @@ export default function ProcessingReportModal({
                             ) : null}
                           </td>
                           <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                            {row.source_row_index}
+                            {getRowDisplayId(row)}
                           </td>
                           <td className="px-4 py-3">
                             <span
