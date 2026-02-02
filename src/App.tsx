@@ -6,6 +6,7 @@ import AdminPage from './pages/AdminPage';
 import HistoryDetailPage from './pages/HistoryDetailPage';
 import HistoryPage from './pages/HistoryPage';
 import ParsePage from './pages/ParsePage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 import LoadingSpinner from './LoadingSpinner';
 import { clearAuthHeaderState, setAuthHeaderState } from './lib/authState';
 import { supabase } from './lib/supabase';
@@ -368,6 +369,7 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<LoginGate />} />
       <Route path="/login" element={<LoginGate />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route
         path="/parse"
         element={
