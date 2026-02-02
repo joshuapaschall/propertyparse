@@ -548,7 +548,14 @@ export default function ParsePage() {
   const progressSamplesRef = useRef<{ timestamp: number; done: number }[]>([]);
   const reviewInputRef = useRef<HTMLInputElement | null>(null);
 
+  const hasFileSelected = Boolean(file);
   const canParse = Boolean(file && stateValue && countyValue);
+  const parseCtaLabel = useMemo(() => {
+    if (busy) return 'Processing…';
+    if (!hasFileSelected) return 'Select a file to process';
+    if (!canParse) return 'Complete required fields';
+    return 'Process File';
+  }, [busy, canParse, hasFileSelected]);
 
   const dedupedMatched = useMemo(() => dedupeRows(legacyMatchedRows), [legacyMatchedRows]);
   const dedupedUnmatched = useMemo(() => dedupeRows(legacyUnmatchedRows), [legacyUnmatchedRows]);
@@ -1851,7 +1858,7 @@ export default function ParsePage() {
                       : 'bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
                   }`}
                 >
-                  {busy ? 'Parsing...' : 'Parse Addresses'}
+                  {parseCtaLabel}
                 </button>
               </div>
               {error ? (
@@ -1907,189 +1914,193 @@ export default function ParsePage() {
           ref={resultsRef}
           className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950"
         >
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-semibold">Processing Results</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                Review parsed rows, fix issues, and export results.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                <span>Debug mode</span>
-                <button
-                  type="button"
-                  onClick={() => setShowDebugMode((prev) => !prev)}
-                  className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                    showDebugMode
-                      ? 'border-indigo-600 bg-indigo-600'
-                      : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
-                  }`}
-                  role="switch"
-                  aria-checked={showDebugMode}
-                >
-                  <span
-                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
-                      showDebugMode ? 'translate-x-4' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
+          <div className="sticky top-16 z-20 -mx-6 mb-6 border-b border-slate-200 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold">Processing Results</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Review parsed rows, fix issues, and export results.
+                </p>
               </div>
-              {parseSummary ? (
-                <button
-                  type="button"
-                  onClick={() => openProcessingReport('all')}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Processing Report
-                </button>
-              ) : null}
-              {parseSummary ? (
-                <button
-                  type="button"
-                  onClick={handleDownloadUnique}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Download Unique Valid CSV
-                </button>
-              ) : null}
-              {parseSummary ? (
-                <button
-                  type="button"
-                  onClick={() => handleDownloadProcessingReport(rowResults, 'processing-report.csv')}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Download Full Processing Report CSV
-                </button>
-              ) : null}
-              {parseSummary ? (
-                <button
-                  type="button"
-                  onClick={() =>
-                    handleDownloadProcessingReport(needsReviewRows, 'needs-review.csv')
-                  }
-                  disabled={needsReviewRows.length === 0}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:border-slate-200 disabled:text-slate-400 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
-                >
-                  Download Needs Review CSV
-                </button>
-              ) : null}
-              {hasPersistableResults ? (
-                <button
-                  type="button"
-                  onClick={handleClearResults}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Clear results / Start new parse
-                </button>
-              ) : null}
-              {showDebugMode ? (
-                <button
-                  type="button"
-                  onClick={handleCopyDebugInfo}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Copy debug info
-                </button>
-              ) : null}
-              {showDebugMode && legacyMode ? (
-                <button
-                  type="button"
-                  onClick={() => setShowRaw((prev) => !prev)}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
-                </button>
-              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                  <span>Debug mode</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowDebugMode((prev) => !prev)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
+                      showDebugMode
+                        ? 'border-indigo-600 bg-indigo-600'
+                        : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
+                    }`}
+                    role="switch"
+                    aria-checked={showDebugMode}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
+                        showDebugMode ? 'translate-x-4' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
+                {parseSummary ? (
+                  <button
+                    type="button"
+                    onClick={() => openProcessingReport('all')}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Processing Report
+                  </button>
+                ) : null}
+                {parseSummary ? (
+                  <button
+                    type="button"
+                    onClick={handleDownloadUnique}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Download Unique Valid CSV
+                  </button>
+                ) : null}
+                {parseSummary ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleDownloadProcessingReport(rowResults, 'processing-report.csv')
+                    }
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Download Full Processing Report CSV
+                  </button>
+                ) : null}
+                {parseSummary ? (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleDownloadProcessingReport(needsReviewRows, 'needs-review.csv')
+                    }
+                    disabled={needsReviewRows.length === 0}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:border-slate-200 disabled:text-slate-400 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
+                  >
+                    Download Needs Review CSV
+                  </button>
+                ) : null}
+                {hasPersistableResults ? (
+                  <button
+                    type="button"
+                    onClick={handleClearResults}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Clear results / Start new parse
+                  </button>
+                ) : null}
+                {showDebugMode ? (
+                  <button
+                    type="button"
+                    onClick={handleCopyDebugInfo}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Copy debug info
+                  </button>
+                ) : null}
+                {showDebugMode && legacyMode ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowRaw((prev) => !prev)}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
+                  </button>
+                ) : null}
+              </div>
             </div>
-          </div>
 
-          {parseSummary ? (
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => setActiveTab('valid')}
-                className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  activeTab === 'valid'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                }`}
-              >
-                Valid (Unique) ({parseSummary.valid_unique})
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('needs_review')}
-                className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  activeTab === 'needs_review'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                }`}
-              >
-                Needs Review ({parseSummary.unmatched})
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('skipped')}
-                className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  activeTab === 'skipped'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                }`}
-              >
-                Skipped ({parseSummary.skipped})
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('duplicates')}
-                className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  activeTab === 'duplicates'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                }`}
-              >
-                Duplicates ({parseSummary.duplicates})
-              </button>
-              {typeof parseSummary.out_of_scope === 'number' ? (
+            {parseSummary ? (
+              <div className="mt-4 flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('out_of_scope')}
+                  onClick={() => setActiveTab('valid')}
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                    activeTab === 'out_of_scope'
+                    activeTab === 'valid'
                       ? 'bg-indigo-600 text-white'
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  Out of Scope ({parseSummary.out_of_scope})
+                  Valid (Unique) ({parseSummary.valid_unique})
                 </button>
-              ) : null}
-            </div>
-          ) : (
-            <div className="mt-6 flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={() => setLegacyTab('matched')}
-                className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  legacyTab === 'matched'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                }`}
-              >
-                Matched ({dedupedMatched.length})
-              </button>
-              <button
-                type="button"
-                onClick={() => setLegacyTab('unmatched')}
-                className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  legacyTab === 'unmatched'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                }`}
-              >
-                Unmatched ({dedupedUnmatched.length})
-              </button>
-            </div>
-          )}
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('needs_review')}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                    activeTab === 'needs_review'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  Needs Review ({parseSummary.unmatched})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('skipped')}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                    activeTab === 'skipped'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  Skipped ({parseSummary.skipped})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('duplicates')}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                    activeTab === 'duplicates'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  Duplicates ({parseSummary.duplicates})
+                </button>
+                {typeof parseSummary.out_of_scope === 'number' ? (
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('out_of_scope')}
+                    className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                      activeTab === 'out_of_scope'
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    Out of Scope ({parseSummary.out_of_scope})
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => setLegacyTab('matched')}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                    legacyTab === 'matched'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  Matched ({dedupedMatched.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setLegacyTab('unmatched')}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                    legacyTab === 'unmatched'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  Unmatched ({dedupedUnmatched.length})
+                </button>
+              </div>
+            )}
+          </div>
 
           {legacyMode ? (
             <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
