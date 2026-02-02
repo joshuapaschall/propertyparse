@@ -69,7 +69,7 @@ export default function FileUploadCard({ file, onChange }: FileUploadCardProps) 
             <button
               type="button"
               onClick={() => inputRef.current?.click()}
-              className="rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600 shadow-sm transition hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="text-xs font-semibold text-indigo-600 underline-offset-2 transition hover:text-indigo-700 hover:underline dark:text-indigo-300 dark:hover:text-indigo-200"
             >
               Change file
             </button>
