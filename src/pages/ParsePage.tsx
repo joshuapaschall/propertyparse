@@ -21,7 +21,10 @@ import {
   stringifyPreview,
 } from '../lib/parseUtils';
 import {
+  getJobDetail,
+  getJobRows,
   getJobWithStatus,
+  JobRecord,
   parseFile,
   retryJobRow,
   retryParseBatch,
@@ -38,8 +41,8 @@ import type {
 } from '../types/parse';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Finalizing'];
-const SESSION_STORAGE_KEY = 'pp-parse-last-job';
-const SESSION_STORAGE_VERSION = 1;
+const LAST_JOB_STORAGE_KEY = 'pp-parse-last-job';
+const LAST_JOB_STORAGE_VERSION = 1;
 
 type CanonicalAddressComponents = {
   street_address?: string;
@@ -53,31 +56,13 @@ type NormalizedCanonicalAddress = CanonicalAddress & {
   fullAddress: string;
 };
 
-type PersistedParseState = {
+type PersistedLastJobState = {
   version: number;
   jobId: string;
-  fileId: string | null;
   stateValue: string;
   countyValue: string;
   cityValue: string;
   campaignName: string;
-  parseTimestamp: string | null;
-  rowsReceived: number | null;
-  parseSummary: ParseSummary | null;
-  canonicalAddresses: NormalizedCanonicalAddress[];
-  rowResults: RowResult[];
-  duplicateGroups: DuplicateGroup[];
-  debugInfo: ParseDebugInfo | null;
-  legacyMatchedRows: ParsedRow[];
-  legacyUnmatchedRows: ParsedRow[];
-  metadata: Record<string, unknown> | null;
-  legacyMode: boolean;
-  activeTab: 'valid' | 'needs_review' | 'skipped' | 'duplicates' | 'out_of_scope';
-  legacyTab: 'matched' | 'unmatched';
-  showRaw: boolean;
-  showDebugMode: boolean;
-  forceRefresh: boolean;
-  parsePayload: Record<string, unknown> | null;
 };
 
 const createId = (row: Record<string, unknown>, index: number) =>
@@ -223,6 +208,178 @@ const normalizeNumber = (value: unknown) => {
   return null;
 };
 
+const pickValue = (record: JobRecord, keys: string[]) => {
+  for (const key of keys) {
+    const value = record[key];
+    if (value !== null && value !== undefined && value !== '') {
+      return value;
+    }
+  }
+  return null;
+};
+
+const pickString = (record: JobRecord, keys: string[]) => {
+  const value = pickValue(record, keys);
+  return typeof value === 'string' ? value : value != null ? String(value) : null;
+};
+
+const pickNumber = (record: JobRecord, keys: string[]) => {
+  const value = pickValue(record, keys);
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+  return null;
+};
+
+const buildParseSummaryFromJob = (record: JobRecord | null) => {
+  if (!record) return null;
+  const rowsReceived = pickNumber(record, [
+    'rows_received',
+    'rowsReceived',
+    'total_rows',
+    'rows',
+    'rowCount',
+  ]);
+  const validTotal = pickNumber(record, ['valid_total', 'validTotal', 'matched', 'matched_count', 'matchedCount']);
+  const validUnique = pickNumber(record, [
+    'valid_unique',
+    'validUnique',
+    'deduped_count',
+    'dedupedCount',
+    'unique_valid',
+  ]);
+  const unmatched = pickNumber(record, ['unmatched', 'unmatched_count', 'unmatchedCount']);
+  const skipped = pickNumber(record, ['skipped', 'skipped_count', 'skippedCount']) ?? 0;
+  const duplicates = pickNumber(record, ['duplicates', 'duplicates_count', 'duplicate_count']) ?? 0;
+  const outOfScope = pickNumber(record, ['out_of_scope', 'outOfScope']);
+  if (
+    typeof rowsReceived !== 'number' ||
+    typeof validTotal !== 'number' ||
+    typeof validUnique !== 'number' ||
+    typeof unmatched !== 'number'
+  ) {
+    return null;
+  }
+  return {
+    rows_received: rowsReceived,
+    valid_total: validTotal,
+    valid_unique: validUnique,
+    unmatched,
+    skipped,
+    duplicates,
+    out_of_scope: outOfScope ?? undefined,
+  };
+};
+
+const getRowIdValue = (row: JobRecord, index: number) => {
+  const candidate =
+    row.source_row_id ??
+    row.sourceRowId ??
+    row.row_id ??
+    row.rowId ??
+    row.id ??
+    row.uuid ??
+    row.record_id ??
+    row.recordId ??
+    row.recordID;
+  if (candidate === null || candidate === undefined) return `row-${index}`;
+  return typeof candidate === 'string' || typeof candidate === 'number' ? String(candidate) : `row-${index}`;
+};
+
+const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
+  const rowIndexValue =
+    row.source_row_index ??
+    row.sourceRowIndex ??
+    row.row_index ??
+    row.rowIndex ??
+    row.index ??
+    row.row_number ??
+    row.rowNumber;
+  const rowIndex = normalizeNumber(rowIndexValue) ?? index;
+  const status =
+    (row.status as string) ||
+    (row.match_status as string) ||
+    (row.matchStatus as string) ||
+    (row.result_status as string) ||
+    'Unknown';
+  return {
+    source_row_index: rowIndex,
+    source_row_id: getRowIdValue(row, index),
+    raw_row:
+      (row.raw_row as Record<string, unknown>) ||
+      (row.rawRow as Record<string, unknown>) ||
+      (row.raw as Record<string, unknown>) ||
+      (row.source_raw as Record<string, unknown>) ||
+      undefined,
+    detected_address:
+      (row.detected_address as string) ||
+      (row.detectedAddress as string) ||
+      (row.address as string) ||
+      (row.full_address as string) ||
+      (row.fullAddress as string) ||
+      undefined,
+    status,
+    reason_code: (row.reason_code as string) || (row.reasonCode as string) || undefined,
+    reason_detail: (row.reason_detail as string) || (row.reasonDetail as string) || undefined,
+    formatted_address:
+      (row.formatted_address as string) ||
+      (row.formattedAddress as string) ||
+      (row.matched_address as string) ||
+      (row.matchedAddress as string) ||
+      undefined,
+    place_id: (row.place_id as string) || (row.placeId as string) || undefined,
+    components: (row.components as unknown) || undefined,
+    canonical_id: (row.canonical_id as string) || (row.canonicalId as string) || undefined,
+    is_duplicate:
+      typeof row.is_duplicate === 'boolean'
+        ? row.is_duplicate
+        : typeof row.isDuplicate === 'boolean'
+          ? row.isDuplicate
+          : undefined,
+    duplicate_of_source_row_id:
+      (row.duplicate_of_source_row_id as string) ||
+      (row.duplicateOfSourceRowId as string) ||
+      undefined,
+  };
+};
+
+const buildDuplicateGroupsFromRows = (rows: RowResult[]) => {
+  const groups = new Map<string, DuplicateGroup>();
+  rows.forEach((row) => {
+    if (!row.canonical_id) return;
+    const key = row.canonical_id;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.source_row_ids.push(row.source_row_id);
+      existing.duplicate_rows_count = existing.source_row_ids.length;
+    } else {
+      groups.set(key, {
+        canonical_id: key,
+        canonical_formatted_address: row.formatted_address ?? row.detected_address ?? '',
+        source_row_ids: [row.source_row_id],
+        duplicate_rows_count: 1,
+      });
+    }
+  });
+  return Array.from(groups.values()).filter((group) => group.source_row_ids.length > 1);
+};
+
+const buildCanonicalAddressesFromRows = (rows: RowResult[]) => {
+  const canonicalMap = new Map<string, CanonicalAddress>();
+  rows.forEach((row) => {
+    if (!row.canonical_id || canonicalMap.has(row.canonical_id)) return;
+    canonicalMap.set(row.canonical_id, {
+      canonical_id: row.canonical_id,
+      formatted_address: row.formatted_address ?? row.detected_address ?? '',
+      place_id: row.place_id,
+      components: row.components,
+    });
+  });
+  return Array.from(canonicalMap.values()).map(normalizeCanonicalAddress);
+};
+
 const getRowIdentifier = (row: Record<string, unknown>) => {
   const candidate = row.id ?? row.source_row_id ?? row.row_id;
   return typeof candidate === 'string' ? candidate : null;
@@ -287,21 +444,29 @@ const formatEta = (seconds: number) => {
   return `${minutes.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`;
 };
 
-const readStoredParseState = () => {
+const readLastJobState = () => {
   try {
-    const stored = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+    const stored = window.localStorage.getItem(LAST_JOB_STORAGE_KEY);
     if (!stored) return null;
-    const parsed = JSON.parse(stored) as PersistedParseState;
-    if (!parsed || parsed.version !== SESSION_STORAGE_VERSION) return null;
+    const parsed = JSON.parse(stored) as PersistedLastJobState;
+    if (!parsed || parsed.version !== LAST_JOB_STORAGE_VERSION) return null;
     return parsed;
   } catch {
     return null;
   }
 };
 
-const writeStoredParseState = (state: PersistedParseState) => {
+const writeLastJobState = (state: PersistedLastJobState) => {
   try {
-    window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(LAST_JOB_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore storage errors
+  }
+};
+
+const clearLastJobState = () => {
+  try {
+    window.localStorage.removeItem(LAST_JOB_STORAGE_KEY);
   } catch {
     // ignore storage errors
   }
@@ -335,6 +500,7 @@ export default function ParsePage() {
   const [progressStep, setProgressStep] = useState(0);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [rehydrating, setRehydrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
   const [pollErrorCount, setPollErrorCount] = useState(0);
@@ -406,46 +572,6 @@ export default function ParsePage() {
     };
   }, []);
 
-  const restoreFromStoredState = useCallback((stored: PersistedParseState) => {
-    setJobId(stored.jobId);
-    setFileId(stored.fileId);
-    setStateValue(stored.stateValue);
-    setCountyValue(stored.countyValue);
-    setCityValue(stored.cityValue);
-    setCampaignName(stored.campaignName);
-    setParseTimestamp(stored.parseTimestamp);
-    setRowsReceived(stored.rowsReceived);
-    setParseSummary(stored.parseSummary);
-    setCanonicalAddresses(stored.canonicalAddresses);
-    setRowResults(stored.rowResults);
-    setDuplicateGroups(stored.duplicateGroups);
-    setDebugInfo(stored.debugInfo);
-    setLegacyMatchedRows(stored.legacyMatchedRows);
-    setLegacyUnmatchedRows(stored.legacyUnmatchedRows);
-    setMetadata(stored.metadata);
-    setLegacyMode(stored.legacyMode);
-    setActiveTab(stored.activeTab);
-    setLegacyTab(stored.legacyTab);
-    setShowRaw(stored.showRaw);
-    setShowDebugMode(stored.showDebugMode);
-    setForceRefresh(stored.forceRefresh);
-    setParsePayload(stored.parsePayload);
-    setProgressStep(4);
-    setProgressPercent(100);
-    setProgressInfo({
-      phase: 'DONE',
-      done: stored.parseSummary?.rows_received ?? null,
-      total: stored.parseSummary?.rows_received ?? null,
-      cacheHits: null,
-      googleCallsUsed: null,
-      eta: null,
-    });
-    setBusy(false);
-    setError(null);
-    setPollError(null);
-    setPollErrorCount(0);
-  }, []);
-
   const updateJobQueryParam = useCallback(
     (nextJobId: string) => {
       const params = new URLSearchParams(location.search);
@@ -462,23 +588,119 @@ export default function ParsePage() {
     [location.pathname, location.search, navigate],
   );
 
+  const clearJobQueryParam = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has('job')) return;
+    params.delete('job');
+    const search = params.toString();
+    navigate(
+      {
+        pathname: location.pathname,
+        search: search ? `?${search}` : '',
+      },
+      { replace: true },
+    );
+  }, [location.pathname, location.search, navigate]);
+
+  const loadJobResults = useCallback(
+    async (jobIdToLoad: string, storedState: PersistedLastJobState | null) => {
+      setRehydrating(true);
+      setError(null);
+      setPollError(null);
+      setPollErrorCount(0);
+      try {
+        const [jobDetail, jobRows] = await Promise.all([
+          getJobDetail(jobIdToLoad),
+          getJobRows(jobIdToLoad),
+        ]);
+        const combinedJob: JobRecord = {
+          ...(jobDetail.summary ?? {}),
+          ...(jobDetail.job ?? {}),
+        };
+        const normalizedRows = (jobRows ?? []).map((row, index) =>
+          normalizeJobRowResult(row as JobRecord, index),
+        );
+        const summary = buildParseSummaryFromJob(combinedJob);
+        const createdAt = pickString(combinedJob, [
+          'created_at',
+          'createdAt',
+          'created',
+          'timestamp',
+          'date',
+          'updated_at',
+          'updatedAt',
+        ]);
+        const cacheHitsValue = pickNumber(combinedJob, [
+          'cache_hits',
+          'cacheHits',
+          'cache_hit_count',
+        ]);
+        const googleCallsValue = pickNumber(combinedJob, [
+          'google_calls_used',
+          'googleCallsUsed',
+          'googleCalls',
+          'apiCallsUsed',
+        ]);
+        setJobId(jobIdToLoad);
+        setFile(null);
+        setFileId(pickString(combinedJob, ['file_id', 'fileId', 'fileID', 'file']));
+        if (storedState) {
+          setStateValue(storedState.stateValue);
+          setCountyValue(storedState.countyValue);
+          setCityValue(storedState.cityValue);
+          setCampaignName(storedState.campaignName);
+        }
+        setParseTimestamp(createdAt);
+        setRowsReceived(
+          summary?.rows_received ??
+            pickNumber(combinedJob, ['rows_received', 'rowsReceived', 'total_rows', 'rows', 'rowCount']) ??
+            normalizedRows.length,
+        );
+        setParseSummary(summary);
+        setCanonicalAddresses(buildCanonicalAddressesFromRows(normalizedRows));
+        setRowResults(normalizedRows);
+        setDuplicateGroups(buildDuplicateGroupsFromRows(normalizedRows));
+        setDebugInfo((combinedJob.debug as ParseDebugInfo | null) ?? null);
+        setLegacyMatchedRows([]);
+        setLegacyUnmatchedRows([]);
+        setMetadata(Object.keys(combinedJob).length ? (combinedJob as Record<string, unknown>) : null);
+        setLegacyMode(false);
+        setActiveTab('valid');
+        setLegacyTab('matched');
+        setShowRaw(false);
+        setShowDebugMode(false);
+        setParsePayload(null);
+        setProgressStep(4);
+        setProgressPercent(100);
+        setProgressInfo({
+          phase: 'DONE',
+          done: summary?.rows_received ?? normalizedRows.length,
+          total: summary?.rows_received ?? normalizedRows.length,
+          cacheHits: cacheHitsValue,
+          googleCallsUsed: googleCallsValue,
+          eta: null,
+        });
+      } catch (err) {
+        setError((err as Error).message ?? 'Unable to load job results.');
+      } finally {
+        setRehydrating(false);
+      }
+    },
+    [],
+  );
+
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const jobParam = params.get('job');
-    const stored = readStoredParseState();
-
-    if (jobParam && stored?.jobId === jobParam) {
-      if (jobId !== jobParam || !parseSummary) {
-        restoreFromStoredState(stored);
-      }
-      return;
-    }
-
+    const stored = readLastJobState();
+    const resolvedJobId = jobParam ?? stored?.jobId ?? null;
+    if (!resolvedJobId || busy || rehydrating) return;
+    if (jobId === resolvedJobId && parseSummary) return;
     if (!jobParam && stored?.jobId) {
-      restoreFromStoredState(stored);
       updateJobQueryParam(stored.jobId);
     }
-  }, [jobId, location.search, parseSummary, restoreFromStoredState, updateJobQueryParam]);
+    void loadJobResults(resolvedJobId, stored ?? null);
+  }, [busy, jobId, loadJobResults, location.search, parseSummary, rehydrating, updateJobQueryParam]);
 
   const apiCallsUsed = useMemo(() => {
     if (!metadata) return null;
@@ -504,62 +726,6 @@ export default function ParsePage() {
         rowResults.length > 0,
     );
   }, [legacyMatchedRows.length, legacyUnmatchedRows.length, parseSummary, rowResults.length]);
-
-  useEffect(() => {
-    if (!jobId || !hasPersistableResults || busy) return;
-    writeStoredParseState({
-      version: SESSION_STORAGE_VERSION,
-      jobId,
-      fileId,
-      stateValue,
-      countyValue,
-      cityValue,
-      campaignName,
-      parseTimestamp,
-      rowsReceived,
-      parseSummary,
-      canonicalAddresses,
-      rowResults,
-      duplicateGroups,
-      debugInfo,
-      legacyMatchedRows,
-      legacyUnmatchedRows,
-      metadata,
-      legacyMode,
-      activeTab,
-      legacyTab,
-      showRaw,
-      showDebugMode,
-      forceRefresh,
-      parsePayload,
-    });
-  }, [
-    activeTab,
-    busy,
-    campaignName,
-    canonicalAddresses,
-    cityValue,
-    countyValue,
-    debugInfo,
-    duplicateGroups,
-    fileId,
-    forceRefresh,
-    hasPersistableResults,
-    jobId,
-    legacyMatchedRows,
-    legacyMode,
-    legacyTab,
-    legacyUnmatchedRows,
-    metadata,
-    parsePayload,
-    parseSummary,
-    parseTimestamp,
-    rowResults,
-    rowsReceived,
-    showDebugMode,
-    showRaw,
-    stateValue,
-  ]);
 
   const dedupedCount = useMemo(() => {
     if (!metadata) return null;
@@ -1081,6 +1247,14 @@ export default function ParsePage() {
         }
       }
       updateJobQueryParam(newJobId);
+      writeLastJobState({
+        version: LAST_JOB_STORAGE_VERSION,
+        jobId: newJobId,
+        stateValue,
+        countyValue,
+        cityValue,
+        campaignName: trimmedCampaignName,
+      });
     } catch (err) {
       setError((err as Error).message ?? 'Parsing failed.');
     } finally {
@@ -1240,6 +1414,58 @@ export default function ParsePage() {
         };
       });
     }
+  };
+
+  const handleClearResults = () => {
+    stopPolling();
+    clearLastJobState();
+    clearJobQueryParam();
+    setFile(null);
+    setFileId(null);
+    setJobId(null);
+    setParseTimestamp(null);
+    setRowsReceived(null);
+    setParseSummary(null);
+    setCanonicalAddresses([]);
+    setRowResults([]);
+    setDuplicateGroups([]);
+    setDebugInfo(null);
+    setLegacyMatchedRows([]);
+    setLegacyUnmatchedRows([]);
+    setMetadata(null);
+    setLegacyMode(false);
+    setActiveTab('valid');
+    setLegacyTab('matched');
+    setShowRaw(false);
+    setShowDebugMode(false);
+    setProgressStep(0);
+    setProgressPercent(null);
+    setProgressInfo({
+      phase: null,
+      done: null,
+      total: null,
+      cacheHits: null,
+      googleCallsUsed: null,
+      eta: null,
+    });
+    setError(null);
+    setPollError(null);
+    setPollErrorCount(0);
+    setParsePayload(null);
+    setProcessingReportOpen(false);
+    setProcessingReportFilter('all');
+    setExpandedDuplicateGroups(new Set());
+    setReviewRow(null);
+    setReviewAddress('');
+    setReviewError(null);
+    setReviewSaving(false);
+    setReviewAutoFocus(false);
+    setStateValue('');
+    setCountyValue('');
+    setCityValue('');
+    setCampaignName('');
+    setForceRefresh(false);
+    setBusy(false);
   };
 
   const handleReviewRetry = async () => {
@@ -1531,9 +1757,9 @@ export default function ParsePage() {
             <button
               type="button"
               onClick={handleParse}
-              disabled={!canParse || busy}
+              disabled={!canParse || busy || rehydrating}
               className={`w-full rounded-xl px-4 py-3 text-sm font-semibold transition ${
-                canParse && !busy
+                canParse && !busy && !rehydrating
                   ? 'bg-indigo-600 text-white hover:bg-indigo-700'
                   : 'bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
               }`}
@@ -1588,6 +1814,15 @@ export default function ParsePage() {
                     className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
                     Processing Report
+                  </button>
+                ) : null}
+                {hasPersistableResults ? (
+                  <button
+                    type="button"
+                    onClick={handleClearResults}
+                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Clear results / Start new parse
                   </button>
                 ) : null}
                 {showDebugMode ? (
