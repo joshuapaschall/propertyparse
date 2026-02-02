@@ -32,6 +32,7 @@ type ProcessingReportModalProps = {
     updatedJob?: Record<string, unknown>;
   }) => void;
   forceReverify?: boolean;
+  showDebugMode?: boolean;
 };
 
 const STATUS_OPTIONS: Array<{ value: ProcessingReportFilter; label: string }> = [
@@ -111,6 +112,7 @@ export default function ProcessingReportModal({
   initialFilter = 'all',
   onApplyUpdates,
   forceReverify = false,
+  showDebugMode = false,
 }: ProcessingReportModalProps) {
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<ProcessingReportFilter>(initialFilter);
@@ -401,13 +403,15 @@ export default function ProcessingReportModal({
                                   Edit + Retry
                                 </button>
                               ) : null}
-                              <button
-                                type="button"
-                                onClick={() => copyRowJson(row)}
-                                className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                              >
-                                Copy JSON
-                              </button>
+                              {showDebugMode ? (
+                                <button
+                                  type="button"
+                                  onClick={() => copyRowJson(row)}
+                                  className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                >
+                                  Copy JSON
+                                </button>
+                              ) : null}
                             </div>
                           </td>
                         </tr>
