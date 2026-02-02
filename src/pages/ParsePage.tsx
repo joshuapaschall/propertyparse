@@ -11,14 +11,22 @@ import ResultsTable from '../components/ResultsTable';
 import EditRowModal, { ParsedRow } from '../components/EditRowModal';
 import { downloadCsv } from '../lib/csv';
 import {
-  buildReasonLabel,
+  getReasonMetadata,
   isErrorRow,
   isNeedsReviewRow,
   isOutOfScopeRow,
   isSkippedRow,
+  isValidRow,
   stringifyPreview,
 } from '../lib/parseUtils';
-import { getJobWithStatus, parseFile, retryParseBatch, retryParseRow, uploadFile } from '../lib/api';
+import {
+  getJobWithStatus,
+  parseFile,
+  retryJobRow,
+  retryParseBatch,
+  retryParseRow,
+  uploadFile,
+} from '../lib/api';
 import { listCitiesByState, listCounties, listStates50 } from '../lib/locations';
 import type {
   CanonicalAddress,
@@ -271,6 +279,7 @@ export default function ParsePage() {
   >('valid');
   const [legacyTab, setLegacyTab] = useState<'matched' | 'unmatched'>('matched');
   const [showRaw, setShowRaw] = useState(false);
+  const [showDebugMode, setShowDebugMode] = useState(false);
   const [progressStep, setProgressStep] = useState(0);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -292,6 +301,11 @@ export default function ParsePage() {
     () => new Set(),
   );
   const [parsePayload, setParsePayload] = useState<Record<string, unknown> | null>(null);
+  const [reviewRow, setReviewRow] = useState<RowResult | null>(null);
+  const [reviewAddress, setReviewAddress] = useState('');
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [reviewAutoFocus, setReviewAutoFocus] = useState(false);
   const [progressInfo, setProgressInfo] = useState<{
     phase: string | null;
     done: number | null;
@@ -311,6 +325,7 @@ export default function ParsePage() {
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const pollingRef = useRef<number | null>(null);
   const progressSamplesRef = useRef<{ timestamp: number; done: number }[]>([]);
+  const reviewInputRef = useRef<HTMLInputElement | null>(null);
 
   const canParse = Boolean(file && stateValue && countyValue);
 
@@ -498,6 +513,98 @@ export default function ParsePage() {
     } • Cache hits ${cacheHitsValue ?? '--'}`;
     return progressInfo.eta ? `${detail} • ETA ~ ${progressInfo.eta}` : detail;
   }, [isStartingParse, progressInfo]);
+
+  const getRecordId = (row: RowResult) => {
+    const rawRow = row.raw_row as Record<string, unknown> | undefined;
+    const candidate = rawRow?.record_id ?? rawRow?.recordId ?? rawRow?.recordID;
+    if (candidate === null || candidate === undefined) return null;
+    return typeof candidate === 'string' || typeof candidate === 'number'
+      ? String(candidate)
+      : null;
+  };
+
+  const getRowDisplayId = (row: RowResult) => {
+    const recordId = getRecordId(row);
+    return recordId ? recordId : `Row (data) ${row.source_row_index}`;
+  };
+
+  const getInputAddress = (row: RowResult) => {
+    const rawRow = row.raw_row as Record<string, unknown> | undefined;
+    const candidate =
+      row.detected_address ??
+      rawRow?.address ??
+      rawRow?.full_address ??
+      rawRow?.fullAddress ??
+      rawRow?.property_address ??
+      rawRow?.propertyAddress;
+    if (typeof candidate === 'string') return candidate;
+    if (typeof candidate === 'number') return candidate.toString();
+    return row.detected_address ?? row.formatted_address ?? '';
+  };
+
+  const getDebugLocation = (row: RowResult) => {
+    const rawRow = row.raw_row as Record<string, unknown> | undefined;
+    const candidate =
+      (row as Record<string, unknown>).debug_location ??
+      rawRow?.debug_location ??
+      rawRow?.detected_location;
+    if (!candidate) return null;
+    if (typeof candidate === 'string') return candidate;
+    if (typeof candidate === 'object') {
+      const location = candidate as Record<string, unknown>;
+      const parts = [
+        location.city,
+        location.county,
+        location.state,
+        location.zip,
+        location.zip_code,
+      ]
+        .map((value) => (typeof value === 'string' ? value : null))
+        .filter(Boolean);
+      if (parts.length) return parts.join(', ');
+    }
+    return null;
+  };
+
+  const getStatusLabel = (row: RowResult) => {
+    if (isValidRow(row)) return 'Valid';
+    if (isNeedsReviewRow(row)) return 'Needs Review';
+    if (isOutOfScopeRow(row)) return 'Out of Scope';
+    if (isSkippedRow(row)) return 'Skipped';
+    return row.status || 'Unknown';
+  };
+
+  const renderReasonCell = (row: RowResult) => {
+    const { label, description, fix_hint: fixHint } = getReasonMetadata(row);
+    const tooltip = `${description}${fixHint ? `\nHow to fix: ${fixHint}` : ''}`;
+    return (
+      <span
+        className="font-medium text-slate-700 underline decoration-dotted decoration-slate-300 underline-offset-4 dark:text-slate-200 dark:decoration-slate-600"
+        title={tooltip}
+      >
+        {label}
+      </span>
+    );
+  };
+
+  const openReviewDrawer = (row: RowResult, focusEdit = false) => {
+    setReviewRow(row);
+    setReviewAddress(getInputAddress(row));
+    setReviewError(null);
+    setReviewAutoFocus(focusEdit);
+  };
+
+  const closeReviewDrawer = () => {
+    setReviewRow(null);
+    setReviewError(null);
+    setReviewSaving(false);
+  };
+
+  useEffect(() => {
+    if (!reviewRow || !reviewAutoFocus) return;
+    reviewInputRef.current?.focus();
+    setReviewAutoFocus(false);
+  }, [reviewRow, reviewAutoFocus]);
 
   const handleCopyDebugInfo = () => {
     const debugInfo = [
@@ -885,6 +992,33 @@ export default function ParsePage() {
     }
   };
 
+  const handleReviewRetry = async () => {
+    if (!reviewRow) return;
+    const trimmedAddress = reviewAddress.trim();
+    if (!trimmedAddress) {
+      setReviewError('Address is required.');
+      return;
+    }
+    if (!jobId) {
+      setReviewError('Missing job ID. Please re-run the parse job.');
+      return;
+    }
+    setReviewSaving(true);
+    setReviewError(null);
+    try {
+      const response = await retryJobRow(jobId, reviewRow.source_row_id, trimmedAddress, forceRefresh);
+      handleRetryUpdates({
+        updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
+        updatedJob: response.updated_job as Record<string, unknown> | undefined,
+      });
+      closeReviewDrawer();
+    } catch (err) {
+      setReviewError((err as Error).message ?? 'Retry failed.');
+    } finally {
+      setReviewSaving(false);
+    }
+  };
+
   const toggleDuplicateGroup = (canonicalId: string) => {
     setExpandedDuplicateGroups((prev) => {
       const next = new Set(prev);
@@ -968,10 +1102,10 @@ export default function ParsePage() {
           <table className="min-w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
               <tr>
-                <th className="px-4 py-3">Row #</th>
+                <th className="px-4 py-3">Record ID / Row (data)</th>
                 <th className="px-4 py-3">Detected Address</th>
                 <th className="px-4 py-3">Reason</th>
-                <th className="px-4 py-3">Raw Preview</th>
+                {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -979,25 +1113,38 @@ export default function ParsePage() {
               {rows.map((row) => (
                 <tr key={row.source_row_id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                    {row.source_row_index}
+                    {getRowDisplayId(row)}
                   </td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                     {row.detected_address || '--'}
                   </td>
                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                    {buildReasonLabel(row)}
+                    {renderReasonCell(row)}
                   </td>
-                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                    {stringifyPreview(row.raw_row)}
-                  </td>
+                  {showDebugMode ? (
+                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                      {stringifyPreview(row.raw_row)}
+                    </td>
+                  ) : null}
                   <td className="px-4 py-3 text-right">
-                    <button
-                      type="button"
-                      onClick={() => copyJsonPayload(row)}
-                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
-                      Copy JSON
-                    </button>
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => openReviewDrawer(row)}
+                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        Review
+                      </button>
+                      {showDebugMode ? (
+                        <button
+                          type="button"
+                          onClick={() => copyJsonPayload(row)}
+                          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                        >
+                          Copy JSON
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -1007,6 +1154,13 @@ export default function ParsePage() {
       </div>
     );
   };
+
+  const reviewReason = reviewRow ? getReasonMetadata(reviewRow) : null;
+  const reviewRecordId = reviewRow ? getRecordId(reviewRow) : null;
+  const reviewDetectedLocation = reviewRow ? getDebugLocation(reviewRow) : null;
+  const reviewStatusLabel = reviewRow ? getStatusLabel(reviewRow) : '';
+  const reviewInputAddress = reviewRow ? getInputAddress(reviewRow) : '';
+  const canEditReview = reviewRow ? isNeedsReviewRow(reviewRow) : false;
 
   return (
     <AppShell title="PropertyParse" subtitle="Address Parsing Workflow">
@@ -1486,6 +1640,26 @@ export default function ParsePage() {
                     ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                      <span>Debug mode</span>
+                      <button
+                        type="button"
+                        onClick={() => setShowDebugMode((prev) => !prev)}
+                        className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
+                          showDebugMode
+                            ? 'border-indigo-600 bg-indigo-600'
+                            : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
+                        }`}
+                        role="switch"
+                        aria-checked={showDebugMode}
+                      >
+                        <span
+                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
+                            showDebugMode ? 'translate-x-4' : 'translate-x-1'
+                          }`}
+                        />
+                      </button>
+                    </div>
                     <button
                       type="button"
                       onClick={handleDownloadUnique}
@@ -1579,10 +1753,10 @@ export default function ParsePage() {
                         <table className="min-w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                             <tr>
-                              <th className="px-4 py-3">Row #</th>
+                              <th className="px-4 py-3">Record ID / Row (data)</th>
                               <th className="px-4 py-3">Detected Address</th>
                               <th className="px-4 py-3">Reason</th>
-                              <th className="px-4 py-3">Raw Preview</th>
+                              {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
                               <th className="px-4 py-3 text-right">Actions</th>
                             </tr>
                           </thead>
@@ -1591,34 +1765,62 @@ export default function ParsePage() {
                               <tr>
                                 <td
                                   className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={5}
+                                  colSpan={showDebugMode ? 5 : 4}
                                 >
                                   No rows need review.
                                 </td>
                               </tr>
                             ) : (
                               needsReviewRows.map((row) => (
-                                <tr key={row.source_row_id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
+                                <tr
+                                  key={row.source_row_id}
+                                  className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
+                                  onClick={() => openReviewDrawer(row)}
+                                >
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.source_row_index}
+                                    {getRowDisplayId(row)}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                                     {row.detected_address || '--'}
                                   </td>
                                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                    {buildReasonLabel(row)}
+                                    {renderReasonCell(row)}
                                   </td>
-                                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                                    {stringifyPreview(row.raw_row)}
-                                  </td>
+                                  {showDebugMode ? (
+                                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                                      {stringifyPreview(row.raw_row)}
+                                    </td>
+                                  ) : null}
                                   <td className="px-4 py-3 text-right">
-                                    <button
-                                      type="button"
-                                      onClick={() => copyJsonPayload(row)}
-                                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                    <div
+                                      className="flex flex-wrap justify-end gap-2"
+                                      onClick={(event) => event.stopPropagation()}
+                                      role="presentation"
                                     >
-                                      Copy row JSON
-                                    </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => openReviewDrawer(row)}
+                                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                      >
+                                        Review
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => openReviewDrawer(row, true)}
+                                        className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-indigo-700"
+                                      >
+                                        Edit & Retry
+                                      </button>
+                                      {showDebugMode ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => copyJsonPayload(row)}
+                                          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                        >
+                                          Copy JSON
+                                        </button>
+                                      ) : null}
+                                    </div>
                                   </td>
                                 </tr>
                               ))
@@ -1634,10 +1836,10 @@ export default function ParsePage() {
                         <table className="min-w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                             <tr>
-                              <th className="px-4 py-3">Row #</th>
+                              <th className="px-4 py-3">Record ID / Row (data)</th>
                               <th className="px-4 py-3">Detected Address</th>
                               <th className="px-4 py-3">Reason</th>
-                              <th className="px-4 py-3">Raw Preview</th>
+                              {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
                               <th className="px-4 py-3 text-right">Actions</th>
                             </tr>
                           </thead>
@@ -1646,34 +1848,55 @@ export default function ParsePage() {
                               <tr>
                                 <td
                                   className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={5}
+                                  colSpan={showDebugMode ? 5 : 4}
                                 >
                                   No rows were skipped.
                                 </td>
                               </tr>
                             ) : (
                               skippedRows.map((row) => (
-                                <tr key={row.source_row_id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
+                                <tr
+                                  key={row.source_row_id}
+                                  className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
+                                  onClick={() => openReviewDrawer(row)}
+                                >
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.source_row_index}
+                                    {getRowDisplayId(row)}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                                     {row.detected_address || '--'}
                                   </td>
                                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                    {buildReasonLabel(row)}
+                                    {renderReasonCell(row)}
                                   </td>
-                                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                                    {stringifyPreview(row.raw_row)}
-                                  </td>
+                                  {showDebugMode ? (
+                                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                                      {stringifyPreview(row.raw_row)}
+                                    </td>
+                                  ) : null}
                                   <td className="px-4 py-3 text-right">
-                                    <button
-                                      type="button"
-                                      onClick={() => copyJsonPayload(row)}
-                                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                    <div
+                                      className="flex flex-wrap justify-end gap-2"
+                                      onClick={(event) => event.stopPropagation()}
+                                      role="presentation"
                                     >
-                                      Copy row JSON
-                                    </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => openReviewDrawer(row)}
+                                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                      >
+                                        Review
+                                      </button>
+                                      {showDebugMode ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => copyJsonPayload(row)}
+                                          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                        >
+                                          Copy JSON
+                                        </button>
+                                      ) : null}
+                                    </div>
                                   </td>
                                 </tr>
                               ))
@@ -1738,10 +1961,10 @@ export default function ParsePage() {
                         <table className="min-w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                             <tr>
-                              <th className="px-4 py-3">Row #</th>
+                              <th className="px-4 py-3">Record ID / Row (data)</th>
                               <th className="px-4 py-3">Detected Address</th>
                               <th className="px-4 py-3">Reason</th>
-                              <th className="px-4 py-3">Raw Preview</th>
+                              {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
                               <th className="px-4 py-3 text-right">Actions</th>
                             </tr>
                           </thead>
@@ -1750,34 +1973,55 @@ export default function ParsePage() {
                               <tr>
                                 <td
                                   className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={5}
+                                  colSpan={showDebugMode ? 5 : 4}
                                 >
                                   No out-of-scope rows.
                                 </td>
                               </tr>
                             ) : (
                               outOfScopeRows.map((row) => (
-                                <tr key={row.source_row_id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
+                                <tr
+                                  key={row.source_row_id}
+                                  className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
+                                  onClick={() => openReviewDrawer(row)}
+                                >
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.source_row_index}
+                                    {getRowDisplayId(row)}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                                     {row.detected_address || '--'}
                                   </td>
                                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                    {buildReasonLabel(row)}
+                                    {renderReasonCell(row)}
                                   </td>
-                                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                                    {stringifyPreview(row.raw_row)}
-                                  </td>
+                                  {showDebugMode ? (
+                                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                                      {stringifyPreview(row.raw_row)}
+                                    </td>
+                                  ) : null}
                                   <td className="px-4 py-3 text-right">
-                                    <button
-                                      type="button"
-                                      onClick={() => copyJsonPayload(row)}
-                                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                    <div
+                                      className="flex flex-wrap justify-end gap-2"
+                                      onClick={(event) => event.stopPropagation()}
+                                      role="presentation"
                                     >
-                                      Copy row JSON
-                                    </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => openReviewDrawer(row)}
+                                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                      >
+                                        Review
+                                      </button>
+                                      {showDebugMode ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => copyJsonPayload(row)}
+                                          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                        >
+                                          Copy JSON
+                                        </button>
+                                      ) : null}
+                                    </div>
                                   </td>
                                 </tr>
                               ))
@@ -1897,6 +2141,147 @@ export default function ParsePage() {
         onApplyUpdates={handleRetryUpdates}
         forceReverify={forceRefresh}
       />
+
+      {reviewRow ? (
+        <div className="fixed inset-0 z-[60] flex justify-end bg-slate-900/60 px-4 py-6 dark:bg-slate-950/80">
+          <div className="flex h-full w-full max-w-xl flex-col overflow-y-auto rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                  Review &amp; Fix
+                </h3>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Understand what happened and correct the row if needed.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeReviewDrawer}
+                className="text-sm font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-6 space-y-4">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-900">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Status</p>
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      {reviewStatusLabel}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                      Record ID
+                    </p>
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      {reviewRecordId ?? '—'}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                    Input address
+                  </p>
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    {reviewInputAddress || '—'}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Reason</p>
+                <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {reviewReason?.label ?? 'Needs review'}
+                </p>
+                <div className="mt-3 space-y-2 text-sm text-slate-600 dark:text-slate-300">
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-slate-400">What happened</p>
+                    <p>{reviewReason?.description ?? 'Review the row for more context.'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold uppercase text-slate-400">How to fix</p>
+                    <p>{reviewReason?.fix_hint ?? 'Update the address and retry if needed.'}</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                  Location context
+                </p>
+                <div className="mt-2 grid gap-2 text-sm text-slate-700 dark:text-slate-200">
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">Selected state</span>
+                    <span>{stateValue || '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">Selected county</span>
+                    <span>{countyValue || '—'}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">Selected city</span>
+                    <span>{cityValue || '—'}</span>
+                  </div>
+                  {reviewDetectedLocation ? (
+                    <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-sm dark:border-slate-800">
+                      <span className="text-slate-500 dark:text-slate-400">
+                        Detected location
+                      </span>
+                      <span>{reviewDetectedLocation}</span>
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    Edit address &amp; retry
+                  </p>
+                  {!canEditReview ? (
+                    <span className="text-xs text-slate-400">Only for Needs Review rows</span>
+                  ) : null}
+                </div>
+                <div className="mt-3 space-y-2">
+                  <label className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                    Address
+                  </label>
+                  <input
+                    ref={reviewInputRef}
+                    value={reviewAddress}
+                    onChange={(event) => setReviewAddress(event.target.value)}
+                    disabled={!canEditReview}
+                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-900/40"
+                  />
+                  {reviewError ? (
+                    <p className="text-xs text-rose-600 dark:text-rose-300">{reviewError}</p>
+                  ) : null}
+                </div>
+                <div className="mt-4 flex flex-wrap justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={closeReviewDrawer}
+                    className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Close
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleReviewRetry}
+                    disabled={!canEditReview || reviewSaving}
+                    className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300"
+                  >
+                    {reviewSaving ? 'Retrying...' : 'Edit & Retry'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </AppShell>
   );
 }
