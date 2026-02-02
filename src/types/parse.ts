@@ -28,6 +28,7 @@ export type RowResult = {
   status: string;
   reason_code?: string;
   reason_detail?: string;
+  scope_debug?: unknown;
   formatted_address?: string;
   place_id?: string;
   components?: unknown;

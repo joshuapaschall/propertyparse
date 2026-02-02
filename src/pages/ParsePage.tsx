@@ -324,6 +324,7 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
     status,
     reason_code: (row.reason_code as string) || (row.reasonCode as string) || undefined,
     reason_detail: (row.reason_detail as string) || (row.reasonDetail as string) || undefined,
+    scope_debug: row.scope_debug ?? row.scopeDebug ?? undefined,
     formatted_address:
       (row.formatted_address as string) ||
       (row.formattedAddress as string) ||
@@ -1066,10 +1067,97 @@ export default function ParsePage() {
     return row.status || 'Unknown';
   };
 
+  const humanizeReasonDetail = (detail: string) => {
+    const trimmed = detail.trim();
+    if (!trimmed) return '';
+    if (/^[A-Z0-9_]+$/.test(trimmed)) {
+      const spaced = trimmed.replace(/_/g, ' ').toLowerCase();
+      return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+    }
+    return trimmed;
+  };
+
+  const pickScopeValue = (scope: Record<string, unknown> | null, keys: string[]) => {
+    if (!scope) return null;
+    for (const key of keys) {
+      const value = scope[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    return null;
+  };
+
+  const pickScopeGroup = (scope: Record<string, unknown>, keys: string[]) => {
+    for (const key of keys) {
+      const value = scope[key];
+      if (value && typeof value === 'object') {
+        return value as Record<string, unknown>;
+      }
+    }
+    return null;
+  };
+
+  const formatOutOfScopeDetail = (scopeDebug: unknown) => {
+    if (typeof scopeDebug === 'string') return scopeDebug.trim();
+    if (!scopeDebug || typeof scopeDebug !== 'object') return null;
+    const scopeRecord = scopeDebug as Record<string, unknown>;
+    const detectedGroup = pickScopeGroup(scopeRecord, [
+      'detected',
+      'detected_scope',
+      'detectedScope',
+      'detected_location',
+      'detectedLocation',
+    ]);
+    const selectedGroup = pickScopeGroup(scopeRecord, [
+      'selected',
+      'selected_scope',
+      'selectedScope',
+      'selected_location',
+      'selectedLocation',
+      'requested',
+      'input',
+      'target',
+      'target_scope',
+    ]);
+    const readPair = (key: 'county' | 'city' | 'state') => {
+      const capitalized = `${key.charAt(0).toUpperCase()}${key.slice(1)}`;
+      const detected =
+        pickScopeValue(scopeRecord, [`detected_${key}`, `detected${capitalized}`]) ||
+        pickScopeValue(detectedGroup, [key, `${key}_name`, `${key}_value`]);
+      const selected =
+        pickScopeValue(scopeRecord, [`selected_${key}`, `selected${capitalized}`]) ||
+        pickScopeValue(selectedGroup, [key, `${key}_name`, `${key}_value`]);
+      return { detected, selected };
+    };
+    const candidates: Array<{ label: string; detected: string | null; selected: string | null }> =
+      [
+        { label: 'County', ...readPair('county') },
+        { label: 'City', ...readPair('city') },
+        { label: 'State', ...readPair('state') },
+      ];
+    const match = candidates.find((candidate) => candidate.detected && candidate.selected);
+    if (match?.detected && match.selected) {
+      return `Detected ${match.detected} ${match.label}, but you selected ${match.selected} ${match.label}.`;
+    }
+    const fallback = candidates.find((candidate) => candidate.detected || candidate.selected);
+    if (fallback?.detected) {
+      return `Detected ${fallback.detected} ${fallback.label}, but it is outside your selection.`;
+    }
+    return null;
+  };
+
+  const getReasonDetailText = (row: RowResult) => {
+    if (isOutOfScopeRow(row) && showDebugMode && row.scope_debug) {
+      const scopeDetail = formatOutOfScopeDetail(row.scope_debug);
+      if (scopeDetail) return scopeDetail;
+    }
+    return row.reason_detail ? humanizeReasonDetail(row.reason_detail) : '';
+  };
+
   const renderReasonCell = (row: RowResult) => {
     const { label, description, fix_hint: fixHint } = getReasonMetadata(row);
     const reasonCode = row.reason_code?.trim();
     const tooltip = `${description}${fixHint ? `\nHow to fix: ${fixHint}` : ''}`;
+    const detailText = getReasonDetailText(row);
     return (
       <div className="space-y-1">
         <span
@@ -1078,6 +1166,11 @@ export default function ParsePage() {
         >
           {label}
         </span>
+        {detailText ? (
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            {isOutOfScopeRow(row) ? `Why? ${detailText}` : detailText}
+          </div>
+        ) : null}
         {showDebugMode && reasonCode ? (
           <div className="text-xs text-slate-400 dark:text-slate-500">{reasonCode}</div>
         ) : null}
