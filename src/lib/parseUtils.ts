@@ -19,14 +19,19 @@ const REASON_METADATA: Record<string, ReasonMetadata> = {
     description: 'We found a street match but could not confidently verify the street number.',
     fix_hint: 'Confirm the street number and include unit, building, or suffix details.',
   },
+  MISSING_STREET_NUMBER: {
+    label: "Street number couldn't be verified",
+    description: 'We found a street match but could not confidently verify the street number.',
+    fix_hint: 'Confirm the street number and include unit, building, or suffix details.',
+  },
   LOW_PRECISION_MATCH: {
-    label: 'Only a ZIP/route-level match was found',
-    description: 'We could only match the address at a broad ZIP or route level.',
+    label: 'Match too broad (ZIP/route/county-only)',
+    description: 'We could only match the address at a broad ZIP, route, or county level.',
     fix_hint: 'Provide the full street address for a precise match.',
   },
   LOW_PRECISION: {
-    label: 'Only a ZIP/route-level match was found',
-    description: 'We could only match the address at a broad ZIP or route level.',
+    label: 'Match too broad (ZIP/route/county-only)',
+    description: 'We could only match the address at a broad ZIP, route, or county level.',
     fix_hint: 'Provide the full street address for a precise match.',
   },
   OUT_OF_SCOPE: {
@@ -35,7 +40,7 @@ const REASON_METADATA: Record<string, ReasonMetadata> = {
     fix_hint: 'Adjust the selected location or run a new job for this area.',
   },
   PO_BOX: {
-    label: 'P.O. Box (skipped)',
+    label: 'PO Box (skipped)',
     description: 'P.O. Boxes are skipped because they are not physical property addresses.',
     fix_hint: 'Replace with a physical street address.',
   },

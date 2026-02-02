@@ -1,4 +1,6 @@
+import { useEffect, useMemo, useState } from 'react';
 import { ParsedRow } from './EditRowModal';
+import TablePagination from './TablePagination';
 
 type ResultsTableProps = {
   rows: ParsedRow[];
@@ -15,6 +17,21 @@ export default function ResultsTable({
   onEdit,
   onRetry,
 }: ResultsTableProps) {
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize, rows.length, variant]);
+
+  const totalPages = Math.max(1, Math.ceil(rows.length / pageSize));
+  const clampedPage = Math.min(page, totalPages);
+
+  const paginatedRows = useMemo(() => {
+    const start = (clampedPage - 1) * pageSize;
+    return rows.slice(start, start + pageSize);
+  }, [clampedPage, pageSize, rows]);
+
   const formatSourceRaw = (row: ParsedRow) => {
     return row.sourceRaw;
   };
@@ -70,7 +87,7 @@ export default function ResultsTable({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {rows.length === 0 ? (
+            {paginatedRows.length === 0 ? (
               <tr>
                 <td
                   className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
@@ -80,7 +97,7 @@ export default function ResultsTable({
                 </td>
               </tr>
             ) : (
-              rows.map((row) => (
+              paginatedRows.map((row) => (
                 <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
                   <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
                     {row.fullAddress}
@@ -130,6 +147,13 @@ export default function ResultsTable({
           </tbody>
         </table>
       </div>
+      <TablePagination
+        totalCount={rows.length}
+        page={clampedPage}
+        pageSize={pageSize}
+        onPageChange={setPage}
+        onPageSizeChange={setPageSize}
+      />
     </div>
   );
 }
