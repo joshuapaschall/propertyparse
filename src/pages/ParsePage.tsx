@@ -716,7 +716,7 @@ export default function ParsePage() {
 
   const getRowDisplayId = (row: RowResult) => {
     const recordId = getRecordId(row);
-    return recordId ? recordId : `Row (data) ${row.source_row_index}`;
+    return recordId ?? String(row.source_row_index);
   };
 
   const getInputAddress = (row: RowResult) => {
@@ -755,6 +755,58 @@ export default function ParsePage() {
       if (parts.length) return parts.join(', ');
     }
     return null;
+  };
+
+  const getMismatchActual = (row: RowResult) => {
+    const rowRecord = row as Record<string, unknown>;
+    const rawRow = row.raw_row as Record<string, unknown> | undefined;
+    const candidate =
+      rowRecord.mismatch_actual ??
+      rowRecord.mismatchActual ??
+      rawRow?.mismatch_actual ??
+      rawRow?.mismatchActual;
+    if (!candidate) return null;
+    if (typeof candidate === 'string') return candidate;
+    if (typeof candidate === 'object') {
+      const mismatch = candidate as Record<string, unknown>;
+      const parts = [
+        mismatch.city,
+        mismatch.county,
+        mismatch.state,
+        mismatch.zip,
+        mismatch.zip_code,
+      ]
+        .map((value) => (typeof value === 'string' ? value : null))
+        .filter(Boolean);
+      if (parts.length) return parts.join(', ');
+    }
+    return null;
+  };
+
+  const getOriginalRowFields = (row: RowResult) => {
+    const rawRow = row.raw_row as Record<string, unknown> | undefined;
+    const originalCity =
+      (rawRow?.city as string) ||
+      (rawRow?.property_city as string) ||
+      (rawRow?.propertyCity as string) ||
+      null;
+    const originalState =
+      (rawRow?.state as string) ||
+      (rawRow?.property_state as string) ||
+      (rawRow?.propertyState as string) ||
+      null;
+    const originalZip =
+      (rawRow?.zip as string) ||
+      (rawRow?.zip_code as string) ||
+      (rawRow?.postal_code as string) ||
+      null;
+    return [
+      { label: 'ID', value: getRowDisplayId(row) },
+      { label: 'Original address', value: getInputAddress(row) || '—' },
+      { label: 'City', value: originalCity ?? '—' },
+      { label: 'State', value: originalState ?? '—' },
+      { label: 'ZIP', value: originalZip ?? '—' },
+    ];
   };
 
   const getStatusLabel = (row: RowResult) => {
@@ -796,6 +848,12 @@ export default function ParsePage() {
     reviewInputRef.current?.focus();
     setReviewAutoFocus(false);
   }, [reviewRow, reviewAutoFocus]);
+
+  useEffect(() => {
+    if (!showDebugMode) {
+      setShowRaw(false);
+    }
+  }, [showDebugMode]);
 
   const handleCopyDebugInfo = () => {
     const debugInfo = [
@@ -1350,9 +1408,17 @@ export default function ParsePage() {
   const reviewReason = reviewRow ? getReasonMetadata(reviewRow) : null;
   const reviewRecordId = reviewRow ? getRecordId(reviewRow) : null;
   const reviewDetectedLocation = reviewRow ? getDebugLocation(reviewRow) : null;
+  const reviewMismatchActual = reviewRow ? getMismatchActual(reviewRow) : null;
   const reviewStatusLabel = reviewRow ? getStatusLabel(reviewRow) : '';
-  const reviewInputAddress = reviewRow ? getInputAddress(reviewRow) : '';
-  const canEditReview = reviewRow ? isNeedsReviewRow(reviewRow) : false;
+  const reviewDetectedAddress = reviewRow?.detected_address ?? reviewRow?.formatted_address ?? '';
+  const reviewVerifiedAddress = reviewRow?.formatted_address ?? '';
+  const reviewNeedsReview = reviewRow ? isNeedsReviewRow(reviewRow) : false;
+  const reviewOutOfScope = reviewRow ? isOutOfScopeRow(reviewRow) : false;
+  const reviewSkipped = reviewRow ? isSkippedRow(reviewRow) : false;
+  const selectedLocationSummary = [countyValue ?? cityValue ?? null, stateValue ?? null]
+    .filter(Boolean)
+    .join(', ');
+  const canEditReview = reviewNeedsReview;
 
   return (
     <AppShell title="PropertyParse" subtitle="Address Parsing Workflow">
@@ -1495,6 +1561,26 @@ export default function ParsePage() {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                  <span>Debug mode</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowDebugMode((prev) => !prev)}
+                    className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
+                      showDebugMode
+                        ? 'border-indigo-600 bg-indigo-600'
+                        : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
+                    }`}
+                    role="switch"
+                    aria-checked={showDebugMode}
+                  >
+                    <span
+                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
+                        showDebugMode ? 'translate-x-4' : 'translate-x-1'
+                      }`}
+                    />
+                  </button>
+                </div>
                 {parseSummary ? (
                   <button
                     type="button"
@@ -1504,21 +1590,25 @@ export default function ParsePage() {
                     Processing Report
                   </button>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={handleCopyDebugInfo}
-                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Copy debug info
-                </button>
-                {legacyMode ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowRaw((prev) => !prev)}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
-                  </button>
+                {showDebugMode ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={handleCopyDebugInfo}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      Copy debug info
+                    </button>
+                    {legacyMode ? (
+                      <button
+                        type="button"
+                        onClick={() => setShowRaw((prev) => !prev)}
+                        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                      >
+                        {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
+                      </button>
+                    ) : null}
+                  </>
                 ) : null}
               </div>
             </div>
@@ -1536,13 +1626,15 @@ export default function ParsePage() {
                     rows but only {rowResults.length} were accounted for. Please retry. (This is a
                     bug; contact support.)
                   </p>
-                  <button
-                    type="button"
-                    onClick={handleCopyDebugInfo}
-                    className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-400/40 dark:text-rose-200 dark:hover:bg-rose-500/20"
-                  >
-                    Copy Debug Info
-                  </button>
+                  {showDebugMode ? (
+                    <button
+                      type="button"
+                      onClick={handleCopyDebugInfo}
+                      className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-400/40 dark:text-rose-200 dark:hover:bg-rose-500/20"
+                    >
+                      Copy Debug Info
+                    </button>
+                  ) : null}
                 </div>
               </div>
             ) : null}
@@ -1832,26 +1924,6 @@ export default function ParsePage() {
                     ) : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-3">
-                    <div className="flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                      <span>Debug mode</span>
-                      <button
-                        type="button"
-                        onClick={() => setShowDebugMode((prev) => !prev)}
-                        className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                          showDebugMode
-                            ? 'border-indigo-600 bg-indigo-600'
-                            : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
-                        }`}
-                        role="switch"
-                        aria-checked={showDebugMode}
-                      >
-                        <span
-                          className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
-                            showDebugMode ? 'translate-x-4' : 'translate-x-1'
-                          }`}
-                        />
-                      </button>
-                    </div>
                     <button
                       type="button"
                       onClick={handleDownloadUnique}
@@ -1945,8 +2017,9 @@ export default function ParsePage() {
                         <table className="min-w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                             <tr>
-                              <th className="px-4 py-3">Record ID / Row (data)</th>
-                              <th className="px-4 py-3">Detected Address</th>
+                              <th className="px-4 py-3">ID</th>
+                              <th className="px-4 py-3">Original Address</th>
+                              <th className="px-4 py-3">Status</th>
                               <th className="px-4 py-3">Reason</th>
                               {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
                               <th className="px-4 py-3 text-right">Actions</th>
@@ -1957,7 +2030,7 @@ export default function ParsePage() {
                               <tr>
                                 <td
                                   className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={showDebugMode ? 5 : 4}
+                                  colSpan={showDebugMode ? 6 : 5}
                                 >
                                   No rows need review.
                                 </td>
@@ -1973,7 +2046,10 @@ export default function ParsePage() {
                                     {getRowDisplayId(row)}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.detected_address || '--'}
+                                    {getInputAddress(row) || '--'}
+                                  </td>
+                                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                    {getStatusLabel(row)}
                                   </td>
                                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                     {renderReasonCell(row)}
@@ -1995,13 +2071,6 @@ export default function ParsePage() {
                                         className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                                       >
                                         Review
-                                      </button>
-                                      <button
-                                        type="button"
-                                        onClick={() => openReviewDrawer(row, true)}
-                                        className="rounded-md bg-indigo-600 px-2 py-1 text-xs font-semibold text-white transition hover:bg-indigo-700"
-                                      >
-                                        Edit & Retry
                                       </button>
                                       {showDebugMode ? (
                                         <button
@@ -2028,8 +2097,9 @@ export default function ParsePage() {
                         <table className="min-w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                             <tr>
-                              <th className="px-4 py-3">Record ID / Row (data)</th>
-                              <th className="px-4 py-3">Detected Address</th>
+                              <th className="px-4 py-3">ID</th>
+                              <th className="px-4 py-3">Original Address</th>
+                              <th className="px-4 py-3">Status</th>
                               <th className="px-4 py-3">Reason</th>
                               {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
                               <th className="px-4 py-3 text-right">Actions</th>
@@ -2040,7 +2110,7 @@ export default function ParsePage() {
                               <tr>
                                 <td
                                   className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={showDebugMode ? 5 : 4}
+                                  colSpan={showDebugMode ? 6 : 5}
                                 >
                                   No rows were skipped.
                                 </td>
@@ -2056,7 +2126,10 @@ export default function ParsePage() {
                                     {getRowDisplayId(row)}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.detected_address || '--'}
+                                    {getInputAddress(row) || '--'}
+                                  </td>
+                                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                    {getStatusLabel(row)}
                                   </td>
                                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                     {renderReasonCell(row)}
@@ -2153,8 +2226,9 @@ export default function ParsePage() {
                         <table className="min-w-full text-left text-sm">
                           <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                             <tr>
-                              <th className="px-4 py-3">Record ID / Row (data)</th>
-                              <th className="px-4 py-3">Detected Address</th>
+                              <th className="px-4 py-3">ID</th>
+                              <th className="px-4 py-3">Original Address</th>
+                              <th className="px-4 py-3">Status</th>
                               <th className="px-4 py-3">Reason</th>
                               {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
                               <th className="px-4 py-3 text-right">Actions</th>
@@ -2165,7 +2239,7 @@ export default function ParsePage() {
                               <tr>
                                 <td
                                   className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={showDebugMode ? 5 : 4}
+                                  colSpan={showDebugMode ? 6 : 5}
                                 >
                                   No out-of-scope rows.
                                 </td>
@@ -2181,7 +2255,10 @@ export default function ParsePage() {
                                     {getRowDisplayId(row)}
                                   </td>
                                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.detected_address || '--'}
+                                    {getInputAddress(row) || '--'}
+                                  </td>
+                                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                    {getStatusLabel(row)}
                                   </td>
                                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                     {renderReasonCell(row)}
@@ -2332,6 +2409,7 @@ export default function ParsePage() {
         onClose={() => setProcessingReportOpen(false)}
         onApplyUpdates={handleRetryUpdates}
         forceReverify={forceRefresh}
+        showDebugMode={showDebugMode}
       />
 
       {reviewRow ? (
@@ -2373,85 +2451,111 @@ export default function ParsePage() {
                     </p>
                   </div>
                 </div>
-                <div className="mt-3">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                    Input address
-                  </p>
-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                    {reviewInputAddress || '—'}
-                  </p>
-                </div>
               </div>
 
               <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
-                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Reason</p>
-                <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  {reviewReason?.label ?? 'Needs review'}
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                  Original row (key fields)
                 </p>
-                <div className="mt-3 space-y-2 text-sm text-slate-600 dark:text-slate-300">
-                  <div>
-                    <p className="text-xs font-semibold uppercase text-slate-400">What happened</p>
-                    <p>{reviewReason?.description ?? 'Review the row for more context.'}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-semibold uppercase text-slate-400">How to fix</p>
-                    <p>{reviewReason?.fix_hint ?? 'Update the address and retry if needed.'}</p>
-                  </div>
+                <div className="mt-3 grid gap-3 text-sm text-slate-700 dark:text-slate-200">
+                  {reviewRow
+                    ? getOriginalRowFields(reviewRow).map((field) => (
+                        <div key={field.label} className="flex items-center justify-between gap-4">
+                          <span className="text-slate-500 dark:text-slate-400">{field.label}</span>
+                          <span className="text-right font-medium text-slate-800 dark:text-slate-100">
+                            {field.value}
+                          </span>
+                        </div>
+                      ))
+                    : null}
                 </div>
               </div>
 
               <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
                 <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                  Location context
+                  Detected address
                 </p>
-                <div className="mt-2 grid gap-2 text-sm text-slate-700 dark:text-slate-200">
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 dark:text-slate-400">Selected state</span>
-                    <span>{stateValue || '—'}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 dark:text-slate-400">Selected county</span>
-                    <span>{countyValue || '—'}</span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-slate-500 dark:text-slate-400">Selected city</span>
-                    <span>{cityValue || '—'}</span>
-                  </div>
-                  {reviewDetectedLocation ? (
-                    <div className="flex items-center justify-between border-t border-slate-100 pt-2 text-sm dark:border-slate-800">
-                      <span className="text-slate-500 dark:text-slate-400">
-                        Detected location
-                      </span>
-                      <span>{reviewDetectedLocation}</span>
+                <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {reviewDetectedAddress || '—'}
+                </p>
+                <p className="mt-3 text-xs uppercase text-slate-500 dark:text-slate-400">
+                  Verified address
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {reviewVerifiedAddress || '—'}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                  Why this happened
+                </p>
+                <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                  {reviewReason?.label ?? 'Needs review'}
+                </p>
+                <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+                  {reviewOutOfScope ? (
+                    <div className="space-y-3">
+                      <p>Out of scope for selected location.</p>
+                      <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-slate-500 dark:text-slate-400">Selected</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-100">
+                            {selectedLocationSummary || '—'}
+                          </span>
+                        </div>
+                        <div className="mt-2 flex items-center justify-between gap-3">
+                          <span className="text-slate-500 dark:text-slate-400">Detected</span>
+                          <span className="font-semibold text-slate-800 dark:text-slate-100">
+                            {reviewMismatchActual ?? reviewDetectedLocation ?? '—'}
+                          </span>
+                        </div>
+                      </div>
                     </div>
-                  ) : null}
+                  ) : reviewSkipped ? (
+                    <p>P.O. Boxes are skipped because they aren’t physical property addresses.</p>
+                  ) : (
+                    <p>
+                      {reviewReason?.description ??
+                        "We couldn’t verify this as a deliverable street address."}
+                    </p>
+                  )}
                 </div>
               </div>
 
               <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                    Edit address &amp; retry
-                  </p>
-                  {!canEditReview ? (
-                    <span className="text-xs text-slate-400">Only for Needs Review rows</span>
-                  ) : null}
-                </div>
-                <div className="mt-3 space-y-2">
-                  <label className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
-                    Address
-                  </label>
-                  <input
-                    ref={reviewInputRef}
-                    value={reviewAddress}
-                    onChange={(event) => setReviewAddress(event.target.value)}
-                    disabled={!canEditReview}
-                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-900/40"
-                  />
-                  {reviewError ? (
-                    <p className="text-xs text-rose-600 dark:text-rose-300">{reviewError}</p>
-                  ) : null}
-                </div>
+                {reviewNeedsReview ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                        Edit address &amp; retry
+                      </p>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      <label className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                        Address
+                      </label>
+                      <input
+                        ref={reviewInputRef}
+                        value={reviewAddress}
+                        onChange={(event) => setReviewAddress(event.target.value)}
+                        disabled={!canEditReview}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-900/40"
+                      />
+                      {reviewError ? (
+                        <p className="text-xs text-rose-600 dark:text-rose-300">{reviewError}</p>
+                      ) : null}
+                    </div>
+                  </>
+                ) : reviewOutOfScope ? (
+                  <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
+                    Change location context and re-run.
+                  </div>
+                ) : (
+                  <div className="text-sm text-slate-500 dark:text-slate-400">
+                    No action available for this row.
+                  </div>
+                )}
                 <div className="mt-4 flex flex-wrap justify-end gap-3">
                   <button
                     type="button"
@@ -2460,14 +2564,16 @@ export default function ParsePage() {
                   >
                     Close
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleReviewRetry}
-                    disabled={!canEditReview || reviewSaving}
-                    className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300"
-                  >
-                    {reviewSaving ? 'Retrying...' : 'Edit & Retry'}
-                  </button>
+                  {reviewNeedsReview ? (
+                    <button
+                      type="button"
+                      onClick={handleReviewRetry}
+                      disabled={!canEditReview || reviewSaving}
+                      className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300"
+                    >
+                      {reviewSaving ? 'Retrying...' : 'Edit & Retry'}
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </div>

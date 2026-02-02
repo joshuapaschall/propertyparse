@@ -9,30 +9,45 @@ type ReasonMetadata = {
 };
 
 const REASON_METADATA: Record<string, ReasonMetadata> = {
+  STREET_NUMBER_NOT_VERIFIED: {
+    label: "Street number couldn't be verified",
+    description: 'We found a street match but could not confidently verify the street number.',
+    fix_hint: 'Confirm the street number and include unit, building, or suffix details.',
+  },
   HOUSE_NUMBER_NOT_VERIFIED: {
     label: "Street number couldn't be verified",
-    description: 'We found a street match but could not confidently verify the house number.',
-    fix_hint: 'Confirm the street number and include any unit or suffix.',
+    description: 'We found a street match but could not confidently verify the street number.',
+    fix_hint: 'Confirm the street number and include unit, building, or suffix details.',
+  },
+  LOW_PRECISION_MATCH: {
+    label: 'Only a ZIP/route-level match was found',
+    description: 'We could only match the address at a broad ZIP or route level.',
+    fix_hint: 'Provide the full street address for a precise match.',
   },
   LOW_PRECISION: {
-    label: 'Match too broad (needs more detail)',
-    description: 'We could only match the address at a high level (city or ZIP).',
-    fix_hint: 'Add the street number and full street name.',
+    label: 'Only a ZIP/route-level match was found',
+    description: 'We could only match the address at a broad ZIP or route level.',
+    fix_hint: 'Provide the full street address for a precise match.',
   },
   OUT_OF_SCOPE: {
     label: 'Out of scope for selected location',
-    description: 'The detected address falls outside the selected location filters.',
-    fix_hint: 'Adjust the selected location or remove the row from this job.',
+    description: 'The detected address falls outside the selected location context.',
+    fix_hint: 'Adjust the selected location or run a new job for this area.',
   },
   PO_BOX: {
-    label: 'PO Boxes are skipped',
-    description: 'PO Boxes are not supported for validation.',
+    label: 'P.O. Box (skipped)',
+    description: 'P.O. Boxes are skipped because they are not physical property addresses.',
     fix_hint: 'Replace with a physical street address.',
   },
+  ADDRESS_NOT_FOUND: {
+    label: "Address couldn't be found",
+    description: "We couldn't verify this as a deliverable street address.",
+    fix_hint: 'Confirm the address and include street, city, and state.',
+  },
   INVALID_ADDRESS: {
-    label: 'Address could not be verified',
-    description: 'We could not match the address to a verified location.',
-    fix_hint: 'Check spelling and include full street + city + state.',
+    label: "Address couldn't be found",
+    description: "We couldn't verify this as a deliverable street address.",
+    fix_hint: 'Confirm the address and include street, city, and state.',
   },
   MISSING_ADDRESS: {
     label: 'Missing address data',
