@@ -133,9 +133,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (session) {
-      bootstrapSession(session);
-    } else {
+    if (!session) {
       setOrgId(null);
       setUserId(null);
       setRole(null);
@@ -144,8 +142,21 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       clearAuthHeaderState();
       window.localStorage.removeItem('pp-role');
       window.localStorage.removeItem('pp-user-role');
+      return;
     }
-  }, [session, bootstrapSession]);
+
+    if (orgId && userId && role) {
+      setAuthHeaderState({
+        accessToken: session.access_token,
+        orgId,
+        userId,
+        role,
+      });
+      return;
+    }
+
+    bootstrapSession(session);
+  }, [session, orgId, userId, role, bootstrapSession]);
 
   const loginWithPassword = useCallback(async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({ email, password });
@@ -198,7 +209,8 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const accessToken = session?.access_token ?? null;
   const isAuthenticated = Boolean(session);
-  const isReady = Boolean(session && orgId && userId && role && !isBootstrapping);
+  const hasOrgContext = Boolean(orgId && userId && role);
+  const isReady = Boolean(session && hasOrgContext);
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -279,7 +291,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     logout,
   } = useAuth();
 
-  if (isSessionLoading || (isAuthenticated && isBootstrapping)) {
+  if (isSessionLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
         <LoadingSpinner />
@@ -292,6 +304,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   if (!isReady) {
+    if (isBootstrapping) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
+          <LoadingSpinner />
+        </div>
+      );
+    }
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white px-6">
         <div className="max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 text-center">
