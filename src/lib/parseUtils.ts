@@ -59,6 +59,31 @@ const REASON_METADATA: Record<string, ReasonMetadata> = {
     description: 'We could not find a usable address in this row.',
     fix_hint: 'Ensure the address column is populated.',
   },
+  MISSING_COUNTY: {
+    label: 'County is missing',
+    description: 'We could not find a county for this row.',
+    fix_hint: 'Add the county or select one before retrying.',
+  },
+  MISSING_CITY: {
+    label: 'City is missing',
+    description: 'We could not find a city for this row.',
+    fix_hint: 'Add the city or select one before retrying.',
+  },
+  OUT_OF_SCOPE_STATE: {
+    label: 'Out of scope for selected state',
+    description: 'The detected state does not match the selected state.',
+    fix_hint: 'Update the state filter or rerun the job for the detected state.',
+  },
+  OUT_OF_SCOPE_COUNTY: {
+    label: 'Out of scope for selected county',
+    description: 'The detected county does not match the selected county.',
+    fix_hint: 'Update the county filter or rerun the job for the detected county.',
+  },
+  OUT_OF_SCOPE_CITY: {
+    label: 'Out of scope for selected city',
+    description: 'The detected city does not match the selected city.',
+    fix_hint: 'Update the city filter or rerun the job for the detected city.',
+  },
 };
 
 const humanizeReasonCode = (code: string) => {

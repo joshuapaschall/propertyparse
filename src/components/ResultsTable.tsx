@@ -36,6 +36,16 @@ export default function ResultsTable({
     return row.sourceRaw;
   };
 
+  const formatReason = (row: ParsedRow) => {
+    const reason = row.unmatchedReason?.trim();
+    if (!reason) return variant === 'unmatched' ? 'Needs review' : '—';
+    if (/^[A-Z0-9_]+$/.test(reason)) {
+      const spaced = reason.replace(/_/g, ' ').toLowerCase();
+      return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+    }
+    return reason;
+  };
+
   const renderSourceDetails = (row: ParsedRow) => {
     const details: Array<{ label: string; value: string }> = [
       {
@@ -82,6 +92,7 @@ export default function ResultsTable({
               <th className="px-4 py-3">City</th>
               <th className="px-4 py-3">State</th>
               <th className="px-4 py-3">Zip Code</th>
+              <th className="px-4 py-3">Reason</th>
               {showRaw ? <th className="px-4 py-3">Source / Raw</th> : null}
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
@@ -91,7 +102,7 @@ export default function ResultsTable({
               <tr>
                 <td
                   className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                  colSpan={showRaw ? 8 : 7}
+                  colSpan={showRaw ? 9 : 8}
                 >
                   No results yet.
                 </td>
@@ -111,6 +122,9 @@ export default function ResultsTable({
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.city}</td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.state}</td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.zipCode}</td>
+                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                    {formatReason(row)}
+                  </td>
                   {showRaw ? (
                     <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
                       <div>{formatSourceRaw(row)}</div>
