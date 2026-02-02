@@ -554,9 +554,8 @@ export default function ParsePage() {
   const parseCtaLabel = useMemo(() => {
     if (busy) return 'Processing…';
     if (!hasFileSelected) return 'Select a file to process';
-    if (!canParse) return 'Complete required fields';
     return 'Process File';
-  }, [busy, canParse, hasFileSelected]);
+  }, [busy, hasFileSelected]);
 
   const dedupedMatched = useMemo(() => dedupeRows(legacyMatchedRows), [legacyMatchedRows]);
   const dedupedUnmatched = useMemo(() => dedupeRows(legacyUnmatchedRows), [legacyUnmatchedRows]);
@@ -2007,7 +2006,7 @@ export default function ParsePage() {
           ref={resultsRef}
           className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950"
         >
-          <div className="sticky top-16 z-20 -mx-6 mb-6 border-b border-slate-200 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+          <div className="sticky top-16 z-20 -mx-6 mb-6 border-b border-slate-200/80 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Processing Results</h2>
