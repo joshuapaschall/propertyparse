@@ -9,6 +9,7 @@ import ProcessingReportModal, {
 } from '../components/ProcessingReportModal';
 import ProgressIndicator from '../components/ProgressIndicator';
 import ResultsTable from '../components/ResultsTable';
+import TablePagination from '../components/TablePagination';
 import EditRowModal, { ParsedRow } from '../components/EditRowModal';
 import { downloadCsv } from '../lib/csv';
 import {
@@ -497,6 +498,8 @@ export default function ParsePage() {
   const [legacyTab, setLegacyTab] = useState<'matched' | 'unmatched'>('matched');
   const [showRaw, setShowRaw] = useState(false);
   const [showDebugMode, setShowDebugMode] = useState(false);
+  const [resultsPage, setResultsPage] = useState(1);
+  const [resultsPageSize, setResultsPageSize] = useState(10);
   const [progressStep, setProgressStep] = useState(0);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -805,6 +808,66 @@ export default function ParsePage() {
   const skippedRows = useMemo(() => rowResults.filter(isSkippedRow), [rowResults]);
   const outOfScopeRows = useMemo(() => rowResults.filter(isOutOfScopeRow), [rowResults]);
   const errorRows = useMemo(() => rowResults.filter(isErrorRow), [rowResults]);
+
+  useEffect(() => {
+    setResultsPage(1);
+  }, [activeTab, legacyTab, resultsPageSize, parseSummary]);
+
+  const totalResultsForActiveTab = useMemo(() => {
+    if (!parseSummary) return 0;
+    switch (activeTab) {
+      case 'valid':
+        return canonicalAddresses.length;
+      case 'needs_review':
+        return needsReviewRows.length;
+      case 'skipped':
+        return skippedRows.length;
+      case 'out_of_scope':
+        return outOfScopeRows.length;
+      default:
+        return 0;
+    }
+  }, [
+    activeTab,
+    canonicalAddresses.length,
+    needsReviewRows.length,
+    outOfScopeRows.length,
+    parseSummary,
+    skippedRows.length,
+  ]);
+
+  useEffect(() => {
+    if (!totalResultsForActiveTab) return;
+    const totalPages = Math.max(1, Math.ceil(totalResultsForActiveTab / resultsPageSize));
+    if (resultsPage > totalPages) {
+      setResultsPage(totalPages);
+    }
+  }, [resultsPage, resultsPageSize, totalResultsForActiveTab]);
+
+  const paginateRows = useCallback(
+    <T,>(items: T[]) => {
+      const start = (resultsPage - 1) * resultsPageSize;
+      return items.slice(start, start + resultsPageSize);
+    },
+    [resultsPage, resultsPageSize],
+  );
+
+  const paginatedCanonicalAddresses = useMemo(
+    () => paginateRows(canonicalAddresses),
+    [canonicalAddresses, paginateRows],
+  );
+  const paginatedNeedsReviewRows = useMemo(
+    () => paginateRows(needsReviewRows),
+    [needsReviewRows, paginateRows],
+  );
+  const paginatedSkippedRows = useMemo(
+    () => paginateRows(skippedRows),
+    [paginateRows, skippedRows],
+  );
+  const paginatedOutOfScopeRows = useMemo(
+    () => paginateRows(outOfScopeRows),
+    [outOfScopeRows, paginateRows],
+  );
   const rowResultsById = useMemo(() => {
     const map = new Map<string, RowResult>();
     rowResults.forEach((row) => map.set(row.source_row_id, row));
@@ -871,6 +934,11 @@ export default function ParsePage() {
     return progressInfo.eta ? `${detail} • ETA ~ ${progressInfo.eta}` : detail;
   }, [isStartingParse, progressInfo]);
 
+  const shouldShowProgress = useMemo(
+    () => busy || progressInfo.phase !== null || progressPercent !== null || parseSummary !== null,
+    [busy, parseSummary, progressInfo.phase, progressPercent],
+  );
+
   const getRecordId = (row: RowResult) => {
     const rawRow = row.raw_row as Record<string, unknown> | undefined;
     const candidate = rawRow?.record_id ?? rawRow?.recordId ?? rawRow?.recordID;
@@ -882,7 +950,15 @@ export default function ParsePage() {
 
   const getRowDisplayId = (row: RowResult) => {
     const recordId = getRecordId(row);
-    return recordId ?? String(row.source_row_index);
+    if (recordId) return recordId;
+    if (typeof row.source_row_index === 'number') {
+      return String(row.source_row_index + 1);
+    }
+    const parsedIndex = normalizeNumber(row.source_row_index);
+    if (typeof parsedIndex === 'number') {
+      return String(parsedIndex + 1);
+    }
+    return row.source_row_id;
   };
 
   const getInputAddress = (row: RowResult) => {
@@ -985,14 +1061,20 @@ export default function ParsePage() {
 
   const renderReasonCell = (row: RowResult) => {
     const { label, description, fix_hint: fixHint } = getReasonMetadata(row);
+    const reasonCode = row.reason_code?.trim();
     const tooltip = `${description}${fixHint ? `\nHow to fix: ${fixHint}` : ''}`;
     return (
-      <span
-        className="font-medium text-slate-700 underline decoration-dotted decoration-slate-300 underline-offset-4 dark:text-slate-200 dark:decoration-slate-600"
-        title={tooltip}
-      >
-        {label}
-      </span>
+      <div className="space-y-1">
+        <span
+          className="font-medium text-slate-700 underline decoration-dotted decoration-slate-300 underline-offset-4 dark:text-slate-200 dark:decoration-slate-600"
+          title={tooltip}
+        >
+          {label}
+        </span>
+        {showDebugMode && reasonCode ? (
+          <div className="text-xs text-slate-400 dark:text-slate-500">{reasonCode}</div>
+        ) : null}
+      </div>
     );
   };
 
@@ -1581,7 +1663,7 @@ export default function ParsePage() {
                 <th className="px-4 py-3">Record ID / Row (data)</th>
                 <th className="px-4 py-3">Detected Address</th>
                 <th className="px-4 py-3">Reason</th>
-                {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
+                {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
                 <th className="px-4 py-3 text-right">Actions</th>
               </tr>
             </thead>
@@ -1617,7 +1699,7 @@ export default function ParsePage() {
                           onClick={() => copyJsonPayload(row)}
                           className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                         >
-                          Copy JSON
+                          Copy Row JSON
                         </button>
                       ) : null}
                     </div>
@@ -1647,431 +1729,156 @@ export default function ParsePage() {
   const canEditReview = reviewNeedsReview;
 
   return (
-    <AppShell title="PropertyParse" subtitle="Address Parsing Workflow">
-      <div className="grid w-full gap-6 lg:grid-cols-[1fr_1.2fr]">
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+    <AppShell
+      title="Address Parser"
+      subtitle="Upload a file, set your location context, and parse addresses."
+    >
+      <div className="space-y-8">
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
             <div className="space-y-4">
               <div>
-                <h2 className="text-lg font-semibold">Location Context</h2>
+                <h2 className="text-lg font-semibold">Upload file</h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Select the required location fields to improve parsing accuracy.
+                  Add a file to start parsing addresses.
                 </p>
               </div>
-              <LocationSelect
-                label="State"
-                value={stateValue}
-                placeholder="Select state"
-                required
-                onChange={(value) => {
-                  setStateValue(value);
-                  setCountyValue('');
-                  setCityValue('');
-                }}
-                onClear={() => {
-                  setStateValue('');
-                  setCountyValue('');
-                  setCityValue('');
-                }}
-                options={states}
-              />
-              <LocationSelect
-                label="County"
-                value={countyValue}
-                placeholder={stateValue ? 'Select county' : 'Select state first'}
-                required
-                disabled={!stateValue}
-                onChange={(value) => {
-                  setCountyValue(value);
-                  setCityValue('');
-                }}
-                onClear={() => setCountyValue('')}
-                options={counties}
-              />
-              <LocationSelect
-                label="City (optional)"
-                value={cityValue}
-                placeholder={stateValue ? 'Select city' : 'Select state first'}
-                disabled={!stateValue}
-                onChange={(value) => setCityValue(value)}
-                onClear={() => setCityValue('')}
-                options={cities}
-                helperText="Leave blank if the file spans multiple cities."
-              />
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <div className="space-y-2">
-              <label
-                htmlFor="campaign-name"
-                className="text-sm font-semibold text-slate-700 dark:text-slate-200"
-              >
-                Campaign name (optional)
-              </label>
-              <input
-                id="campaign-name"
-                type="text"
-                value={campaignName}
-                onChange={(event) => setCampaignName(event.target.value)}
-                placeholder="e.g. April absentee owners"
-                className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-indigo-400 dark:focus:ring-indigo-500/30"
-              />
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Shown in History so you can find this job later.
-              </p>
-            </div>
-            <div className="mt-4">
               <FileUploadCard file={file} onChange={setFile} />
             </div>
-            <div className="mt-4 flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-              <div>
-                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  Force re-verify (ignore cache)
-                </p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">
-                  Uses more API calls. Only enable if you suspect cached results are stale.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setForceRefresh((prev) => !prev)}
-                className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border transition ${
-                  forceRefresh
-                    ? 'border-indigo-600 bg-indigo-600'
-                    : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
-                }`}
-                role="switch"
-                aria-checked={forceRefresh}
-              >
-                <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
-                    forceRefresh ? 'translate-x-5' : 'translate-x-1'
-                  }`}
+            <div className="flex flex-col gap-4">
+              <div className="space-y-4">
+                <div>
+                  <h2 className="text-lg font-semibold">Location context</h2>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Select the required location fields to improve parsing accuracy.
+                  </p>
+                </div>
+                <LocationSelect
+                  label="State"
+                  value={stateValue}
+                  placeholder="Select state"
+                  required
+                  onChange={(value) => {
+                    setStateValue(value);
+                    setCountyValue('');
+                    setCityValue('');
+                  }}
+                  onClear={() => {
+                    setStateValue('');
+                    setCountyValue('');
+                    setCityValue('');
+                  }}
+                  options={states}
                 />
-              </button>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <button
-              type="button"
-              onClick={handleParse}
-              disabled={!canParse || busy || rehydrating}
-              className={`w-full rounded-xl px-4 py-3 text-sm font-semibold transition ${
-                canParse && !busy && !rehydrating
-                  ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                  : 'bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
-              }`}
-            >
-              {busy ? 'Parsing...' : 'Parse Addresses'}
-            </button>
-            {error ? (
-              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
-                {error}
+                <LocationSelect
+                  label="County"
+                  value={countyValue}
+                  placeholder={stateValue ? 'Select county' : 'Select state first'}
+                  required
+                  disabled={!stateValue}
+                  onChange={(value) => {
+                    setCountyValue(value);
+                    setCityValue('');
+                  }}
+                  onClear={() => setCountyValue('')}
+                  options={counties}
+                />
+                <LocationSelect
+                  label="City (optional)"
+                  value={cityValue}
+                  placeholder={stateValue ? 'Select city' : 'Select state first'}
+                  disabled={!stateValue}
+                  onChange={(value) => setCityValue(value)}
+                  onClear={() => setCityValue('')}
+                  options={cities}
+                  helperText="Leave blank if the file spans multiple cities."
+                />
               </div>
-            ) : null}
+              <div className="space-y-2">
+                <label
+                  htmlFor="campaign-name"
+                  className="text-sm font-semibold text-slate-700 dark:text-slate-200"
+                >
+                  Campaign name (optional)
+                </label>
+                <input
+                  id="campaign-name"
+                  type="text"
+                  value={campaignName}
+                  onChange={(event) => setCampaignName(event.target.value)}
+                  placeholder="e.g. April absentee owners"
+                  className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 shadow-sm transition focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-100 dark:focus:border-indigo-400 dark:focus:ring-indigo-500/30"
+                />
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Shown in History so you can find this job later.
+                </p>
+              </div>
+              <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    Force re-verify (ignore cache)
+                  </p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Uses more API calls. Only enable if you suspect cached results are stale.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setForceRefresh((prev) => !prev)}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full border transition ${
+                    forceRefresh
+                      ? 'border-indigo-600 bg-indigo-600'
+                      : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
+                  }`}
+                  role="switch"
+                  aria-checked={forceRefresh}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
+                      forceRefresh ? 'translate-x-5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+              <div className="mt-2 flex items-center justify-end">
+                <button
+                  type="button"
+                  onClick={handleParse}
+                  disabled={!canParse || busy || rehydrating}
+                  className={`rounded-xl px-5 py-3 text-sm font-semibold transition ${
+                    canParse && !busy && !rehydrating
+                      ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                      : 'bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                  }`}
+                >
+                  {busy ? 'Parsing...' : 'Parse Addresses'}
+                </button>
+              </div>
+              {error ? (
+                <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
+                  {error}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div
-            ref={resultsRef}
-            className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950"
-          >
-            <div className="flex flex-wrap items-center justify-between gap-4">
+        {shouldShowProgress ? (
+          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-semibold">Parsing Status</h2>
+                <h2 className="text-lg font-semibold">Parsing Progress</h2>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Track progress and review parsed results in real time.
+                  Live status updates while we process your file.
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                  <span>Debug mode</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowDebugMode((prev) => !prev)}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                      showDebugMode
-                        ? 'border-indigo-600 bg-indigo-600'
-                        : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
-                    }`}
-                    role="switch"
-                    aria-checked={showDebugMode}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
-                        showDebugMode ? 'translate-x-4' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
-                {parseSummary ? (
-                  <button
-                    type="button"
-                    onClick={() => openProcessingReport('all')}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Processing Report
-                  </button>
-                ) : null}
-                {hasPersistableResults ? (
-                  <button
-                    type="button"
-                    onClick={handleClearResults}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Clear results / Start new parse
-                  </button>
-                ) : null}
-                {showDebugMode ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleCopyDebugInfo}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
-                      Copy debug info
-                    </button>
-                    {legacyMode ? (
-                      <button
-                        type="button"
-                        onClick={() => setShowRaw((prev) => !prev)}
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                      >
-                        {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
-                      </button>
-                    ) : null}
-                  </>
-                ) : null}
-              </div>
+              {isStartingParse ? (
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                  Starting…
+                </span>
+              ) : null}
             </div>
-            {legacyMode ? (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
-                Legacy parse response detected. Upgrade the API to enable the full processing report
-                experience.
-              </div>
-            ) : null}
-            {parseSummary && rowAccountingMismatch ? (
-              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p>
-                    Processing mismatch: received {responseRowsReceived ?? parseSummary.rows_received}{' '}
-                    rows but only {rowResults.length} were accounted for. Please retry. (This is a
-                    bug; contact support.)
-                  </p>
-                  {showDebugMode ? (
-                    <button
-                      type="button"
-                      onClick={handleCopyDebugInfo}
-                      className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-400/40 dark:text-rose-200 dark:hover:bg-rose-500/20"
-                    >
-                      Copy Debug Info
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-            {noAddressesDetected ? (
-              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
-                No addresses were detected in this file. This usually means the file has unusual
-                headers or split columns.
-              </div>
-            ) : null}
-            {metadataWarnings.length ? (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
-                <p className="font-semibold text-amber-800 dark:text-amber-100">Warnings</p>
-                <ul className="mt-2 list-disc space-y-1 pl-4">
-                  {metadataWarnings.map((warning, index) => (
-                    <li key={`${warning}-${index}`}>{warning}</li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-            {cityValue && unmatchedCount > 0 ? (
-              <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
-                Some addresses failed because Google returned a different city. Leave City blank if
-                your file spans multiple cities.
-              </div>
-            ) : null}
-            {parseSummary ? (
-              <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                <button
-                  type="button"
-                  onClick={handleRowsReceivedClick}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
-                >
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                    Rows Received
-                  </p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {responseRowsReceived ?? parseSummary.rows_received}
-                  </p>
-                  <AccountedRowsIndicator
-                    rowsReceived={responseRowsReceived}
-                    accountedRows={accountedRowsFromSummary ?? 0}
-                  />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleKpiTabClick('valid')}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
-                >
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                    Unique Valid Addresses
-                  </p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {parseSummary.valid_unique}
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleKpiTabClick('needs_review')}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
-                >
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                    Needs Review
-                  </p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {parseSummary.unmatched}
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleKpiTabClick('skipped')}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
-                >
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Skipped</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {parseSummary.skipped}
-                  </p>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleKpiTabClick('duplicates')}
-                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
-                >
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Duplicates</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {parseSummary.duplicates}
-                  </p>
-                </button>
-                {typeof parseSummary.out_of_scope === 'number' ? (
-                  <button
-                    type="button"
-                    onClick={() => handleKpiTabClick('out_of_scope')}
-                    className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
-                  >
-                    <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                      Out of Scope
-                    </p>
-                    <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      {parseSummary.out_of_scope}
-                    </p>
-                  </button>
-                ) : null}
-              </div>
-            ) : (
-              <div className="mt-6 grid gap-4 sm:grid-cols-3">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Rows Received</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {rowsReceived ?? '--'}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                    Matched / Unmatched
-                  </p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {dedupedMatched.length} / {dedupedUnmatched.length}
-                  </p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">API Calls Used</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {apiCallsUsed ?? '--'}
-                  </p>
-                </div>
-                {candidatesExtracted !== null ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                    <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                      Candidates Extracted
-                    </p>
-                    <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      {candidatesExtracted}
-                    </p>
-                  </div>
-                ) : null}
-                {dedupedCount !== null ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                    <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                      Deduped Count
-                    </p>
-                    <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      {dedupedCount}
-                    </p>
-                  </div>
-                ) : null}
-                {cacheHits !== null ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                    <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Cache Hits</p>
-                    <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      {cacheHits}
-                    </p>
-                  </div>
-                ) : null}
-                {googleCallsUsed !== null ? (
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                    <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                      Google Calls Used
-                    </p>
-                    <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                      {googleCallsUsed}
-                    </p>
-                  </div>
-                ) : null}
-              </div>
-            )}
-            {parseSummary ? (
-              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                Unique valid addresses are deduped. Use Processing Report to see every input row’s
-                outcome.
-              </p>
-            ) : null}
-            {verificationSourcesSummary ? (
-              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                Sources: {verificationSourcesSummary}
-              </p>
-            ) : null}
-            {parseSummary && extractionMethod ? (
-              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                Extraction method: {extractionMethod}
-              </p>
-            ) : null}
-            {parseSummary && (googleCallsUsed !== null || cacheHits !== null) ? (
-              <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-                Google calls used: {googleCallsUsed ?? '--'} • Cache hits: {cacheHits ?? '--'}
-              </p>
-            ) : null}
-            {parseSummary && errorRows.length > 0 ? (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p>
-                    {errorRows.length} rows encountered errors. Review them in the Processing Report.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => openProcessingReport('errors')}
-                    className="rounded-lg border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 dark:border-amber-400/40 dark:text-amber-200 dark:hover:bg-amber-500/20"
-                  >
-                    View Errors
-                  </button>
-                </div>
-              </div>
-            ) : null}
-            <div className="mt-6">
+            <div className="mt-4">
               <ProgressIndicator
                 steps={PROGRESS_STEPS}
                 currentStep={progressStep}
@@ -2094,476 +1901,800 @@ export default function ParsePage() {
               ) : null}
             </div>
           </div>
+        ) : null}
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <div
+          ref={resultsRef}
+          className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <h2 className="text-lg font-semibold">Processing Results</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">
+                Review parsed rows, fix issues, and export results.
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                <span>Debug mode</span>
+                <button
+                  type="button"
+                  onClick={() => setShowDebugMode((prev) => !prev)}
+                  className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
+                    showDebugMode
+                      ? 'border-indigo-600 bg-indigo-600'
+                      : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
+                  }`}
+                  role="switch"
+                  aria-checked={showDebugMode}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
+                      showDebugMode ? 'translate-x-4' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+              {parseSummary ? (
+                <button
+                  type="button"
+                  onClick={() => openProcessingReport('all')}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Processing Report
+                </button>
+              ) : null}
+              {parseSummary ? (
+                <button
+                  type="button"
+                  onClick={handleDownloadUnique}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Download Unique Valid CSV
+                </button>
+              ) : null}
+              {parseSummary ? (
+                <button
+                  type="button"
+                  onClick={() => handleDownloadProcessingReport(rowResults, 'processing-report.csv')}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Download Full Processing Report CSV
+                </button>
+              ) : null}
+              {parseSummary ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    handleDownloadProcessingReport(needsReviewRows, 'needs-review.csv')
+                  }
+                  disabled={needsReviewRows.length === 0}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:border-slate-200 disabled:text-slate-400 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
+                >
+                  Download Needs Review CSV
+                </button>
+              ) : null}
+              {hasPersistableResults ? (
+                <button
+                  type="button"
+                  onClick={handleClearResults}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Clear results / Start new parse
+                </button>
+              ) : null}
+              {showDebugMode ? (
+                <button
+                  type="button"
+                  onClick={handleCopyDebugInfo}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Copy debug info
+                </button>
+              ) : null}
+              {showDebugMode && legacyMode ? (
+                <button
+                  type="button"
+                  onClick={() => setShowRaw((prev) => !prev)}
+                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
+                </button>
+              ) : null}
+            </div>
+          </div>
+
+          {parseSummary ? (
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => setActiveTab('valid')}
+                className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                  activeTab === 'valid'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                }`}
+              >
+                Valid (Unique) ({parseSummary.valid_unique})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('needs_review')}
+                className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                  activeTab === 'needs_review'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                }`}
+              >
+                Needs Review ({parseSummary.unmatched})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('skipped')}
+                className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                  activeTab === 'skipped'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                }`}
+              >
+                Skipped ({parseSummary.skipped})
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('duplicates')}
+                className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                  activeTab === 'duplicates'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                }`}
+              >
+                Duplicates ({parseSummary.duplicates})
+              </button>
+              {typeof parseSummary.out_of_scope === 'number' ? (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('out_of_scope')}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                    activeTab === 'out_of_scope'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                  }`}
+                >
+                  Out of Scope ({parseSummary.out_of_scope})
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => setLegacyTab('matched')}
+                className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                  legacyTab === 'matched'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                }`}
+              >
+                Matched ({dedupedMatched.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setLegacyTab('unmatched')}
+                className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                  legacyTab === 'unmatched'
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                }`}
+              >
+                Unmatched ({dedupedUnmatched.length})
+              </button>
+            </div>
+          )}
+
+          {legacyMode ? (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
+              Legacy parse response detected. Upgrade the API to enable the full processing report
+              experience.
+            </div>
+          ) : null}
+          {parseSummary && rowAccountingMismatch ? (
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p>
+                  Processing mismatch: received {responseRowsReceived ?? parseSummary.rows_received}{' '}
+                  rows but only {rowResults.length} were accounted for. Please retry. (This is a
+                  bug; contact support.)
+                </p>
+                {showDebugMode ? (
+                  <button
+                    type="button"
+                    onClick={handleCopyDebugInfo}
+                    className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-400/40 dark:text-rose-200 dark:hover:bg-rose-500/20"
+                  >
+                    Copy Debug Info
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          {noAddressesDetected ? (
+            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
+              No addresses were detected in this file. This usually means the file has unusual
+              headers or split columns.
+            </div>
+          ) : null}
+          {metadataWarnings.length ? (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
+              <p className="font-semibold text-amber-800 dark:text-amber-100">Warnings</p>
+              <ul className="mt-2 list-disc space-y-1 pl-4">
+                {metadataWarnings.map((warning, index) => (
+                  <li key={`${warning}-${index}`}>{warning}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {cityValue && unmatchedCount > 0 ? (
+            <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
+              Some addresses failed because Google returned a different city. Leave City blank if
+              your file spans multiple cities.
+            </div>
+          ) : null}
+          {parseSummary ? (
+            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+              <button
+                type="button"
+                onClick={handleRowsReceivedClick}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+              >
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Rows Received</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                  {responseRowsReceived ?? parseSummary.rows_received}
+                </p>
+                <AccountedRowsIndicator
+                  rowsReceived={responseRowsReceived}
+                  accountedRows={accountedRowsFromSummary ?? 0}
+                />
+              </button>
+              <button
+                type="button"
+                onClick={() => handleKpiTabClick('valid')}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+              >
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                  Unique Valid Addresses
+                </p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                  {parseSummary.valid_unique}
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleKpiTabClick('needs_review')}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+              >
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Needs Review</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                  {parseSummary.unmatched}
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleKpiTabClick('skipped')}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+              >
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Skipped</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                  {parseSummary.skipped}
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleKpiTabClick('duplicates')}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+              >
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Duplicates</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                  {parseSummary.duplicates}
+                </p>
+              </button>
+              {typeof parseSummary.out_of_scope === 'number' ? (
+                <button
+                  type="button"
+                  onClick={() => handleKpiTabClick('out_of_scope')}
+                  className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
+                >
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                    Out of Scope
+                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {parseSummary.out_of_scope}
+                  </p>
+                </button>
+              ) : null}
+            </div>
+          ) : (
+            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Rows Received</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                  {rowsReceived ?? '--'}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                  Matched / Unmatched
+                </p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                  {dedupedMatched.length} / {dedupedUnmatched.length}
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">API Calls Used</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                  {apiCallsUsed ?? '--'}
+                </p>
+              </div>
+              {candidatesExtracted !== null ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                    Candidates Extracted
+                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {candidatesExtracted}
+                  </p>
+                </div>
+              ) : null}
+              {dedupedCount !== null ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                    Deduped Count
+                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {dedupedCount}
+                  </p>
+                </div>
+              ) : null}
+              {cacheHits !== null ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Cache Hits</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {cacheHits}
+                  </p>
+                </div>
+              ) : null}
+              {googleCallsUsed !== null ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                    Google Calls Used
+                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {googleCallsUsed}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          )}
+          {parseSummary ? (
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+              Unique valid addresses are deduped. Use Processing Report to see every input row’s
+              outcome.
+            </p>
+          ) : null}
+          {verificationSourcesSummary ? (
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+              Sources: {verificationSourcesSummary}
+            </p>
+          ) : null}
+          {parseSummary && extractionMethod ? (
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+              Extraction method: {extractionMethod}
+            </p>
+          ) : null}
+          {parseSummary && (googleCallsUsed !== null || cacheHits !== null) ? (
+            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+              Google calls used: {googleCallsUsed ?? '--'} • Cache hits: {cacheHits ?? '--'}
+            </p>
+          ) : null}
+          {parseSummary && errorRows.length > 0 ? (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p>
+                  {errorRows.length} rows encountered errors. Review them in the Processing Report.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => openProcessingReport('errors')}
+                  className="rounded-lg border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-700 transition hover:bg-amber-100 dark:border-amber-400/40 dark:text-amber-200 dark:hover:bg-amber-500/20"
+                >
+                  View Errors
+                </button>
+              </div>
+            </div>
+          ) : null}
+          <div className="mt-6">
             {parseSummary ? (
               <>
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex flex-wrap gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('valid')}
-                      className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                        activeTab === 'valid'
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                      }`}
-                    >
-                      Valid (Unique) ({parseSummary.valid_unique})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('needs_review')}
-                      className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                        activeTab === 'needs_review'
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                      }`}
-                    >
-                      Needs Review ({parseSummary.unmatched})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('skipped')}
-                      className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                        activeTab === 'skipped'
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                      }`}
-                    >
-                      Skipped ({parseSummary.skipped})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab('duplicates')}
-                      className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                        activeTab === 'duplicates'
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                      }`}
-                    >
-                      Duplicates ({parseSummary.duplicates})
-                    </button>
-                    {typeof parseSummary.out_of_scope === 'number' ? (
-                      <button
-                        type="button"
-                        onClick={() => setActiveTab('out_of_scope')}
-                        className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                          activeTab === 'out_of_scope'
-                            ? 'bg-indigo-600 text-white'
-                            : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                        }`}
-                      >
-                        Out of Scope ({parseSummary.out_of_scope})
-                      </button>
-                    ) : null}
+                {activeTab === 'valid' ? (
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                    <div className="overflow-auto">
+                      <table className="min-w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                          <tr>
+                            <th className="px-4 py-3">#</th>
+                            <th className="px-4 py-3">Full Address</th>
+                            <th className="px-4 py-3">Street Address</th>
+                            <th className="px-4 py-3">Address 2</th>
+                            <th className="px-4 py-3">City</th>
+                            <th className="px-4 py-3">State</th>
+                            <th className="px-4 py-3">Zip</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {canonicalAddresses.length === 0 ? (
+                            <tr>
+                              <td
+                                className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
+                                colSpan={7}
+                              >
+                                No unique valid addresses yet.
+                              </td>
+                            </tr>
+                          ) : (
+                            paginatedCanonicalAddresses.map((row, index) => (
+                              <tr
+                                key={row.canonical_id}
+                                className="hover:bg-slate-50 dark:hover:bg-slate-900"
+                              >
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {(resultsPage - 1) * resultsPageSize + index + 1}
+                                </td>
+                                <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
+                                  {row.fullAddress || row.formatted_address || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {row.street1 || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {row.street2 || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {row.city || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {row.state || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {row.zip || '--'}
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <TablePagination
+                      totalCount={canonicalAddresses.length}
+                      page={resultsPage}
+                      pageSize={resultsPageSize}
+                      onPageChange={setResultsPage}
+                      onPageSizeChange={setResultsPageSize}
+                    />
                   </div>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={handleDownloadUnique}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
-                      Download Unique Valid CSV
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleDownloadProcessingReport(rowResults, 'processing-report.csv')}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
-                      Download Full Processing Report CSV
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleDownloadProcessingReport(needsReviewRows, 'needs-review.csv')
-                      }
-                      disabled={needsReviewRows.length === 0}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:border-slate-200 disabled:text-slate-400 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
-                    >
-                      Download Needs Review CSV
-                    </button>
-                  </div>
-                </div>
-                <div className="mt-6">
-                  {activeTab === 'valid' ? (
-                    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                      <div className="overflow-auto">
-                        <table className="min-w-full text-left text-sm">
-                          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                ) : null}
+                {activeTab === 'needs_review' ? (
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                    <div className="overflow-auto">
+                      <table className="min-w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                          <tr>
+                            <th className="px-4 py-3">Record ID / Row</th>
+                            <th className="px-4 py-3">Original Address</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3">Reason</th>
+                            {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
+                            <th className="px-4 py-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {needsReviewRows.length === 0 ? (
                             <tr>
-                              <th className="px-4 py-3">#</th>
-                              <th className="px-4 py-3">Full Address</th>
-                              <th className="px-4 py-3">Street Address</th>
-                              <th className="px-4 py-3">Address 2</th>
-                              <th className="px-4 py-3">City</th>
-                              <th className="px-4 py-3">State</th>
-                              <th className="px-4 py-3">Zip</th>
+                              <td
+                                className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
+                                colSpan={showDebugMode ? 6 : 5}
+                              >
+                                No rows need review.
+                              </td>
                             </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {canonicalAddresses.length === 0 ? (
-                              <tr>
-                                <td
-                                  className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={7}
-                                >
-                                  No unique valid addresses yet.
+                          ) : (
+                            paginatedNeedsReviewRows.map((row) => (
+                              <tr
+                                key={row.source_row_id}
+                                className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
+                                onClick={() => openReviewDrawer(row)}
+                              >
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getRowDisplayId(row)}
                                 </td>
-                              </tr>
-                            ) : (
-                              canonicalAddresses.map((row, index) => (
-                                <tr
-                                  key={row.canonical_id}
-                                  className="hover:bg-slate-50 dark:hover:bg-slate-900"
-                                >
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {index + 1}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
-                                    {row.fullAddress || row.formatted_address || '--'}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.street1 || '--'}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.street2 || '--'}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.city || '--'}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.state || '--'}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {row.zip || '--'}
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : null}
-                  {activeTab === 'needs_review' ? (
-                    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                      <div className="overflow-auto">
-                        <table className="min-w-full text-left text-sm">
-                          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                            <tr>
-                              <th className="px-4 py-3">ID</th>
-                              <th className="px-4 py-3">Original Address</th>
-                              <th className="px-4 py-3">Status</th>
-                              <th className="px-4 py-3">Reason</th>
-                              {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
-                              <th className="px-4 py-3 text-right">Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {needsReviewRows.length === 0 ? (
-                              <tr>
-                                <td
-                                  className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={showDebugMode ? 6 : 5}
-                                >
-                                  No rows need review.
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getInputAddress(row) || '--'}
                                 </td>
-                              </tr>
-                            ) : (
-                              needsReviewRows.map((row) => (
-                                <tr
-                                  key={row.source_row_id}
-                                  className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
-                                  onClick={() => openReviewDrawer(row)}
-                                >
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {getRowDisplayId(row)}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {getInputAddress(row) || '--'}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                    {getStatusLabel(row)}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                    {renderReasonCell(row)}
-                                  </td>
-                                  {showDebugMode ? (
-                                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                                      {stringifyPreview(row.raw_row)}
-                                    </td>
-                                  ) : null}
-                                  <td className="px-4 py-3 text-right">
-                                    <div
-                                      className="flex flex-wrap justify-end gap-2"
-                                      onClick={(event) => event.stopPropagation()}
-                                      role="presentation"
-                                    >
-                                      <button
-                                        type="button"
-                                        onClick={() => openReviewDrawer(row)}
-                                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                                      >
-                                        Review
-                                      </button>
-                                      {showDebugMode ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => copyJsonPayload(row)}
-                                          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                                        >
-                                          Copy JSON
-                                        </button>
-                                      ) : null}
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : null}
-                  {activeTab === 'skipped' ? (
-                    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                      <div className="overflow-auto">
-                        <table className="min-w-full text-left text-sm">
-                          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                            <tr>
-                              <th className="px-4 py-3">ID</th>
-                              <th className="px-4 py-3">Original Address</th>
-                              <th className="px-4 py-3">Status</th>
-                              <th className="px-4 py-3">Reason</th>
-                              {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
-                              <th className="px-4 py-3 text-right">Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {skippedRows.length === 0 ? (
-                              <tr>
-                                <td
-                                  className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={showDebugMode ? 6 : 5}
-                                >
-                                  No rows were skipped.
+                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                  {getStatusLabel(row)}
                                 </td>
-                              </tr>
-                            ) : (
-                              skippedRows.map((row) => (
-                                <tr
-                                  key={row.source_row_id}
-                                  className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
-                                  onClick={() => openReviewDrawer(row)}
-                                >
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {getRowDisplayId(row)}
+                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                  {renderReasonCell(row)}
+                                </td>
+                                {showDebugMode ? (
+                                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                                    {stringifyPreview(row.raw_row)}
                                   </td>
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {getInputAddress(row) || '--'}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                    {getStatusLabel(row)}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                    {renderReasonCell(row)}
-                                  </td>
-                                  {showDebugMode ? (
-                                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                                      {stringifyPreview(row.raw_row)}
-                                    </td>
-                                  ) : null}
-                                  <td className="px-4 py-3 text-right">
-                                    <div
-                                      className="flex flex-wrap justify-end gap-2"
-                                      onClick={(event) => event.stopPropagation()}
-                                      role="presentation"
-                                    >
-                                      <button
-                                        type="button"
-                                        onClick={() => openReviewDrawer(row)}
-                                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                                      >
-                                        Review
-                                      </button>
-                                      {showDebugMode ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => copyJsonPayload(row)}
-                                          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                                        >
-                                          Copy JSON
-                                        </button>
-                                      ) : null}
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  ) : null}
-                  {activeTab === 'duplicates' ? (
-                    <div className="space-y-4">
-                      {filteredDuplicateGroups.length === 0 ? (
-                        <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
-                          No duplicate groups detected.
-                        </div>
-                      ) : (
-                        filteredDuplicateGroups.map((group, index) => {
-                          const isExpanded = expandedDuplicateGroups.has(group.canonical_id);
-                          const rowCount = group.source_row_ids.length;
-                          const duplicateCount =
-                            group.duplicate_rows_count ?? Math.max(0, rowCount - 1);
-                          return (
-                            <div
-                              key={group.canonical_id}
-                              className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
-                            >
-                              <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                                <div>
-                                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
-                                    Group {index + 1}
-                                  </p>
-                                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                                    {group.canonical_formatted_address}
-                                  </p>
-                                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                                    Canonical ID: {group.canonical_id}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-3">
-                                  <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-                                    Rows: {rowCount} • Duplicates: {duplicateCount}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => toggleDuplicateGroup(group.canonical_id)}
-                                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                ) : null}
+                                <td className="px-4 py-3 text-right">
+                                  <div
+                                    className="flex flex-wrap justify-end gap-2"
+                                    onClick={(event) => event.stopPropagation()}
+                                    role="presentation"
                                   >
-                                    {isExpanded ? 'Hide Rows' : 'Show Rows'}
-                                  </button>
-                                </div>
-                              </div>
-                              {isExpanded ? renderDuplicateRows(group) : null}
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  ) : null}
-                  {activeTab === 'out_of_scope' ? (
-                    <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                      <div className="overflow-auto">
-                        <table className="min-w-full text-left text-sm">
-                          <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                            <tr>
-                              <th className="px-4 py-3">ID</th>
-                              <th className="px-4 py-3">Original Address</th>
-                              <th className="px-4 py-3">Status</th>
-                              <th className="px-4 py-3">Reason</th>
-                              {showDebugMode ? <th className="px-4 py-3">Raw Row</th> : null}
-                              <th className="px-4 py-3 text-right">Actions</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                            {outOfScopeRows.length === 0 ? (
-                              <tr>
-                                <td
-                                  className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                  colSpan={showDebugMode ? 6 : 5}
-                                >
-                                  No out-of-scope rows.
-                                </td>
-                              </tr>
-                            ) : (
-                              outOfScopeRows.map((row) => (
-                                <tr
-                                  key={row.source_row_id}
-                                  className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
-                                  onClick={() => openReviewDrawer(row)}
-                                >
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {getRowDisplayId(row)}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                    {getInputAddress(row) || '--'}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                    {getStatusLabel(row)}
-                                  </td>
-                                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                    {renderReasonCell(row)}
-                                  </td>
-                                  {showDebugMode ? (
-                                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                                      {stringifyPreview(row.raw_row)}
-                                    </td>
-                                  ) : null}
-                                  <td className="px-4 py-3 text-right">
-                                    <div
-                                      className="flex flex-wrap justify-end gap-2"
-                                      onClick={(event) => event.stopPropagation()}
-                                      role="presentation"
+                                    <button
+                                      type="button"
+                                      onClick={() => openReviewDrawer(row)}
+                                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                                     >
+                                      Review
+                                    </button>
+                                    {showDebugMode ? (
                                       <button
                                         type="button"
-                                        onClick={() => openReviewDrawer(row)}
+                                        onClick={() => copyJsonPayload(row)}
                                         className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                                       >
-                                        Review
+                                        Copy Row JSON
                                       </button>
-                                      {showDebugMode ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => copyJsonPayload(row)}
-                                          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                                        >
-                                          Copy JSON
-                                        </button>
-                                      ) : null}
-                                    </div>
-                                  </td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
                     </div>
-                  ) : null}
-                </div>
+                    <TablePagination
+                      totalCount={needsReviewRows.length}
+                      page={resultsPage}
+                      pageSize={resultsPageSize}
+                      onPageChange={setResultsPage}
+                      onPageSizeChange={setResultsPageSize}
+                    />
+                  </div>
+                ) : null}
+                {activeTab === 'skipped' ? (
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                    <div className="overflow-auto">
+                      <table className="min-w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                          <tr>
+                            <th className="px-4 py-3">Record ID / Row</th>
+                            <th className="px-4 py-3">Original Address</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3">Reason</th>
+                            {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
+                            <th className="px-4 py-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {skippedRows.length === 0 ? (
+                            <tr>
+                              <td
+                                className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
+                                colSpan={showDebugMode ? 6 : 5}
+                              >
+                                No rows were skipped.
+                              </td>
+                            </tr>
+                          ) : (
+                            paginatedSkippedRows.map((row) => (
+                              <tr
+                                key={row.source_row_id}
+                                className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
+                                onClick={() => openReviewDrawer(row)}
+                              >
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getRowDisplayId(row)}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getInputAddress(row) || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                  {getStatusLabel(row)}
+                                </td>
+                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                  {renderReasonCell(row)}
+                                </td>
+                                {showDebugMode ? (
+                                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                                    {stringifyPreview(row.raw_row)}
+                                  </td>
+                                ) : null}
+                                <td className="px-4 py-3 text-right">
+                                  <div
+                                    className="flex flex-wrap justify-end gap-2"
+                                    onClick={(event) => event.stopPropagation()}
+                                    role="presentation"
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => openReviewDrawer(row)}
+                                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                    >
+                                      Review
+                                    </button>
+                                    {showDebugMode ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => copyJsonPayload(row)}
+                                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                      >
+                                        Copy Row JSON
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <TablePagination
+                      totalCount={skippedRows.length}
+                      page={resultsPage}
+                      pageSize={resultsPageSize}
+                      onPageChange={setResultsPage}
+                      onPageSizeChange={setResultsPageSize}
+                    />
+                  </div>
+                ) : null}
+                {activeTab === 'duplicates' ? (
+                  <div className="space-y-4">
+                    {filteredDuplicateGroups.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                        No duplicate groups detected.
+                      </div>
+                    ) : (
+                      filteredDuplicateGroups.map((group, index) => {
+                        const isExpanded = expandedDuplicateGroups.has(group.canonical_id);
+                        const rowCount = group.source_row_ids.length;
+                        const duplicateCount =
+                          group.duplicate_rows_count ?? Math.max(0, rowCount - 1);
+                        return (
+                          <div
+                            key={group.canonical_id}
+                            className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                                  Group {index + 1}
+                                </p>
+                                <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                                  {group.canonical_formatted_address}
+                                </p>
+                                <p className="text-xs text-slate-500 dark:text-slate-400">
+                                  Canonical ID: {group.canonical_id}
+                                </p>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                                  Rows: {rowCount} • Duplicates: {duplicateCount}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleDuplicateGroup(group.canonical_id)}
+                                  className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                >
+                                  {isExpanded ? 'Hide Rows' : 'Show Rows'}
+                                </button>
+                              </div>
+                            </div>
+                            {isExpanded ? renderDuplicateRows(group) : null}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                ) : null}
+                {activeTab === 'out_of_scope' ? (
+                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                    <div className="overflow-auto">
+                      <table className="min-w-full text-left text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                          <tr>
+                            <th className="px-4 py-3">Record ID / Row</th>
+                            <th className="px-4 py-3">Original Address</th>
+                            <th className="px-4 py-3">Status</th>
+                            <th className="px-4 py-3">Reason</th>
+                            {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
+                            <th className="px-4 py-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {outOfScopeRows.length === 0 ? (
+                            <tr>
+                              <td
+                                className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
+                                colSpan={showDebugMode ? 6 : 5}
+                              >
+                                No out-of-scope rows.
+                              </td>
+                            </tr>
+                          ) : (
+                            paginatedOutOfScopeRows.map((row) => (
+                              <tr
+                                key={row.source_row_id}
+                                className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
+                                onClick={() => openReviewDrawer(row)}
+                              >
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getRowDisplayId(row)}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getInputAddress(row) || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                  {getStatusLabel(row)}
+                                </td>
+                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                  {renderReasonCell(row)}
+                                </td>
+                                {showDebugMode ? (
+                                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                                    {stringifyPreview(row.raw_row)}
+                                  </td>
+                                ) : null}
+                                <td className="px-4 py-3 text-right">
+                                  <div
+                                    className="flex flex-wrap justify-end gap-2"
+                                    onClick={(event) => event.stopPropagation()}
+                                    role="presentation"
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => openReviewDrawer(row)}
+                                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                    >
+                                      Review
+                                    </button>
+                                    {showDebugMode ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => copyJsonPayload(row)}
+                                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                      >
+                                        Copy Row JSON
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <TablePagination
+                      totalCount={outOfScopeRows.length}
+                      page={resultsPage}
+                      pageSize={resultsPageSize}
+                      onPageChange={setResultsPage}
+                      onPageSizeChange={setResultsPageSize}
+                    />
+                  </div>
+                ) : null}
               </>
             ) : (
               <>
-                <div className="flex flex-wrap items-center justify-between gap-4">
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setLegacyTab('matched')}
-                      className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                        legacyTab === 'matched'
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                      }`}
-                    >
-                      Matched ({dedupedMatched.length})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setLegacyTab('unmatched')}
-                      className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                        legacyTab === 'unmatched'
-                          ? 'bg-indigo-600 text-white'
-                          : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                      }`}
-                    >
-                      Unmatched ({dedupedUnmatched.length})
-                    </button>
-                  </div>
+                <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
                   <div className="flex flex-wrap items-center gap-3">
                     {legacyTab === 'unmatched' ? (
                       <button
@@ -2582,15 +2713,17 @@ export default function ParsePage() {
                           legacyTab === 'matched'
                             ? 'matched-addresses.csv'
                             : 'unmatched-addresses.csv',
-                          (legacyTab === 'matched' ? dedupedMatched : dedupedUnmatched).map((row) => ({
-                            full_address: row.fullAddress,
-                            street_address: row.streetAddress,
-                            address2: row.address2,
-                            city: row.city,
-                            state: row.state,
-                            zip_code: row.zipCode,
-                            source_raw: row.sourceRaw,
-                          })),
+                          (legacyTab === 'matched' ? dedupedMatched : dedupedUnmatched).map(
+                            (row) => ({
+                              full_address: row.fullAddress,
+                              street_address: row.streetAddress,
+                              address2: row.address2,
+                              city: row.city,
+                              state: row.state,
+                              zip_code: row.zipCode,
+                              source_raw: row.sourceRaw,
+                            }),
+                          ),
                         )
                       }
                       className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
