@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import AccountedRowsIndicator from '../components/AccountedRowsIndicator';
 import FileUploadCard from '../components/FileUploadCard';
@@ -37,6 +38,8 @@ import type {
 } from '../types/parse';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Finalizing'];
+const SESSION_STORAGE_KEY = 'pp-parse-last-job';
+const SESSION_STORAGE_VERSION = 1;
 
 type CanonicalAddressComponents = {
   street_address?: string;
@@ -48,6 +51,33 @@ type CanonicalAddressComponents = {
 
 type NormalizedCanonicalAddress = CanonicalAddress & {
   fullAddress: string;
+};
+
+type PersistedParseState = {
+  version: number;
+  jobId: string;
+  fileId: string | null;
+  stateValue: string;
+  countyValue: string;
+  cityValue: string;
+  campaignName: string;
+  parseTimestamp: string | null;
+  rowsReceived: number | null;
+  parseSummary: ParseSummary | null;
+  canonicalAddresses: NormalizedCanonicalAddress[];
+  rowResults: RowResult[];
+  duplicateGroups: DuplicateGroup[];
+  debugInfo: ParseDebugInfo | null;
+  legacyMatchedRows: ParsedRow[];
+  legacyUnmatchedRows: ParsedRow[];
+  metadata: Record<string, unknown> | null;
+  legacyMode: boolean;
+  activeTab: 'valid' | 'needs_review' | 'skipped' | 'duplicates' | 'out_of_scope';
+  legacyTab: 'matched' | 'unmatched';
+  showRaw: boolean;
+  showDebugMode: boolean;
+  forceRefresh: boolean;
+  parsePayload: Record<string, unknown> | null;
 };
 
 const createId = (row: Record<string, unknown>, index: number) =>
@@ -257,7 +287,29 @@ const formatEta = (seconds: number) => {
   return `${minutes.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`;
 };
 
+const readStoredParseState = () => {
+  try {
+    const stored = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as PersistedParseState;
+    if (!parsed || parsed.version !== SESSION_STORAGE_VERSION) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const writeStoredParseState = (state: PersistedParseState) => {
+  try {
+    window.sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(state));
+  } catch {
+    // ignore storage errors
+  }
+};
+
 export default function ParsePage() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const [stateValue, setStateValue] = useState('');
   const [countyValue, setCountyValue] = useState('');
   const [cityValue, setCityValue] = useState('');
@@ -354,6 +406,80 @@ export default function ParsePage() {
     };
   }, []);
 
+  const restoreFromStoredState = useCallback((stored: PersistedParseState) => {
+    setJobId(stored.jobId);
+    setFileId(stored.fileId);
+    setStateValue(stored.stateValue);
+    setCountyValue(stored.countyValue);
+    setCityValue(stored.cityValue);
+    setCampaignName(stored.campaignName);
+    setParseTimestamp(stored.parseTimestamp);
+    setRowsReceived(stored.rowsReceived);
+    setParseSummary(stored.parseSummary);
+    setCanonicalAddresses(stored.canonicalAddresses);
+    setRowResults(stored.rowResults);
+    setDuplicateGroups(stored.duplicateGroups);
+    setDebugInfo(stored.debugInfo);
+    setLegacyMatchedRows(stored.legacyMatchedRows);
+    setLegacyUnmatchedRows(stored.legacyUnmatchedRows);
+    setMetadata(stored.metadata);
+    setLegacyMode(stored.legacyMode);
+    setActiveTab(stored.activeTab);
+    setLegacyTab(stored.legacyTab);
+    setShowRaw(stored.showRaw);
+    setShowDebugMode(stored.showDebugMode);
+    setForceRefresh(stored.forceRefresh);
+    setParsePayload(stored.parsePayload);
+    setProgressStep(4);
+    setProgressPercent(100);
+    setProgressInfo({
+      phase: 'DONE',
+      done: stored.parseSummary?.rows_received ?? null,
+      total: stored.parseSummary?.rows_received ?? null,
+      cacheHits: null,
+      googleCallsUsed: null,
+      eta: null,
+    });
+    setBusy(false);
+    setError(null);
+    setPollError(null);
+    setPollErrorCount(0);
+  }, []);
+
+  const updateJobQueryParam = useCallback(
+    (nextJobId: string) => {
+      const params = new URLSearchParams(location.search);
+      params.set('job', nextJobId);
+      const search = params.toString();
+      navigate(
+        {
+          pathname: location.pathname,
+          search: search ? `?${search}` : '',
+        },
+        { replace: true },
+      );
+    },
+    [location.pathname, location.search, navigate],
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const jobParam = params.get('job');
+    const stored = readStoredParseState();
+
+    if (jobParam && stored?.jobId === jobParam) {
+      if (jobId !== jobParam || !parseSummary) {
+        restoreFromStoredState(stored);
+      }
+      return;
+    }
+
+    if (!jobParam && stored?.jobId) {
+      restoreFromStoredState(stored);
+      updateJobQueryParam(stored.jobId);
+    }
+  }, [jobId, location.search, parseSummary, restoreFromStoredState, updateJobQueryParam]);
+
   const apiCallsUsed = useMemo(() => {
     if (!metadata) return null;
     return (
@@ -369,6 +495,71 @@ export default function ParsePage() {
     if (!metadata) return null;
     return (metadata.candidates_extracted as number) || (metadata.candidatesExtracted as number) || null;
   }, [metadata]);
+
+  const hasPersistableResults = useMemo(() => {
+    return Boolean(
+      parseSummary ||
+        legacyMatchedRows.length > 0 ||
+        legacyUnmatchedRows.length > 0 ||
+        rowResults.length > 0,
+    );
+  }, [legacyMatchedRows.length, legacyUnmatchedRows.length, parseSummary, rowResults.length]);
+
+  useEffect(() => {
+    if (!jobId || !hasPersistableResults || busy) return;
+    writeStoredParseState({
+      version: SESSION_STORAGE_VERSION,
+      jobId,
+      fileId,
+      stateValue,
+      countyValue,
+      cityValue,
+      campaignName,
+      parseTimestamp,
+      rowsReceived,
+      parseSummary,
+      canonicalAddresses,
+      rowResults,
+      duplicateGroups,
+      debugInfo,
+      legacyMatchedRows,
+      legacyUnmatchedRows,
+      metadata,
+      legacyMode,
+      activeTab,
+      legacyTab,
+      showRaw,
+      showDebugMode,
+      forceRefresh,
+      parsePayload,
+    });
+  }, [
+    activeTab,
+    busy,
+    campaignName,
+    canonicalAddresses,
+    cityValue,
+    countyValue,
+    debugInfo,
+    duplicateGroups,
+    fileId,
+    forceRefresh,
+    hasPersistableResults,
+    jobId,
+    legacyMatchedRows,
+    legacyMode,
+    legacyTab,
+    legacyUnmatchedRows,
+    metadata,
+    parsePayload,
+    parseSummary,
+    parseTimestamp,
+    rowResults,
+    rowsReceived,
+    showDebugMode,
+    showRaw,
+    stateValue,
+  ]);
 
   const dedupedCount = useMemo(() => {
     if (!metadata) return null;
@@ -831,6 +1022,7 @@ export default function ParsePage() {
           setProgressPercent(percent);
         }
       }
+      updateJobQueryParam(newJobId);
     } catch (err) {
       setError((err as Error).message ?? 'Parsing failed.');
     } finally {
