@@ -113,7 +113,12 @@ export const getReasonMetadata = (row: RowResult) => {
 export const isNeedsReviewRow = (row: RowResult) => {
   const status = normalizeValue(row.status);
   const reason = normalizeValue(row.reason_code);
-  return status.includes('UNMATCHED') || reason.includes('NEEDS_REVIEW');
+  return (
+    status.includes('UNMATCHED') ||
+    status.includes('NEEDS_REVIEW') ||
+    status.includes('REVIEW') ||
+    reason.includes('NEEDS_REVIEW')
+  );
 };
 
 export const isSkippedRow = (row: RowResult) => normalizeValue(row.status).startsWith('SKIPPED');
@@ -131,7 +136,10 @@ export const isDuplicateRow = (row: RowResult) => {
 
 export const isErrorRow = (row: RowResult) => normalizeValue(row.status).startsWith('ERROR');
 
-export const isValidRow = (row: RowResult) => normalizeValue(row.status) === 'VALID';
+export const isValidRow = (row: RowResult) => {
+  const status = normalizeValue(row.status);
+  return status === 'VALID' || status === 'MATCHED';
+};
 
 export const buildReasonLabel = (row: RowResult) => getReasonMetadata(row).label;
 

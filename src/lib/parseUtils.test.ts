@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RowResult } from '../types/parse';
-import { isNeedsReviewRow, isOutOfScopeRow, isSkippedRow } from './parseUtils';
+import { isNeedsReviewRow, isOutOfScopeRow, isSkippedRow, isValidRow } from './parseUtils';
 
 const buildRow = (overrides: Partial<RowResult>): RowResult => ({
   source_row_index: 1,
@@ -14,6 +14,9 @@ describe('parseUtils filters', () => {
     expect(isNeedsReviewRow(buildRow({ status: 'UNMATCHED_NEEDS_REVIEW' }))).toBe(true);
     expect(isNeedsReviewRow(buildRow({ status: 'unmatched_other' }))).toBe(true);
     expect(isNeedsReviewRow(buildRow({ reason_code: 'needs_review' }))).toBe(true);
+
+    expect(isNeedsReviewRow(buildRow({ status: 'NEEDS_REVIEW' }))).toBe(true);
+    expect(isNeedsReviewRow(buildRow({ status: 'REVIEW_REQUIRED' }))).toBe(true);
     expect(isNeedsReviewRow(buildRow({ status: 'VALID' }))).toBe(false);
   });
 
@@ -21,6 +24,10 @@ describe('parseUtils filters', () => {
     expect(isSkippedRow(buildRow({ status: 'SKIPPED' }))).toBe(true);
     expect(isSkippedRow(buildRow({ status: 'SKIPPED_NO_ADDRESS_FOUND' }))).toBe(true);
     expect(isSkippedRow(buildRow({ status: 'VALID' }))).toBe(false);
+  });
+
+  it('flags matched rows as valid', () => {
+    expect(isValidRow(buildRow({ status: 'MATCHED' }))).toBe(true);
   });
 
   it('flags out of scope rows by status or reason', () => {
