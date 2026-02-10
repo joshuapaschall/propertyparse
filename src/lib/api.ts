@@ -260,7 +260,7 @@ export async function getJobDetail(jobId: string) {
 
 export async function getJobRows(
   jobId: string,
-  status?: 'Matched' | 'Unmatched',
+  status?: string,
   limit?: number,
   offset?: number,
 ) {

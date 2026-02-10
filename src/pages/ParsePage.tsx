@@ -289,7 +289,82 @@ const getRowIdValue = (row: JobRecord, index: number) => {
   return typeof candidate === 'string' || typeof candidate === 'number' ? String(candidate) : `row-${index}`;
 };
 
+const toRecord = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value) return undefined;
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return { value };
+    }
+  }
+  return undefined;
+};
+
+const pickStringValue = (row: JobRecord, keys: string[]) => {
+  for (const key of keys) {
+    const value = row[key];
+    if (typeof value === 'string' && value.trim()) return value;
+    if (typeof value === 'number') return String(value);
+  }
+  return undefined;
+};
+
+const isRowResultDtoShape = (row: JobRecord) =>
+  (typeof row.source_row_id === 'string' || typeof row.sourceRowId === 'string') &&
+  (typeof row.source_row_index === 'number' || typeof row.sourceRowIndex === 'number');
+
 const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
+  if (isRowResultDtoShape(row)) {
+    const rawRow =
+      toRecord(row.raw_row) ??
+      toRecord(row.rawRow) ??
+      toRecord(row.source) ??
+      toRecord(row.source_raw) ??
+      toRecord(row.sourceRaw);
+    return {
+      source_row_index:
+        normalizeNumber(row.source_row_index ?? row.sourceRowIndex) ?? index,
+      source_row_id: getRowIdValue(row, index),
+      raw_row: rawRow,
+      detected_address: pickStringValue(row, [
+        'detected_address',
+        'detectedAddress',
+        'address_raw',
+        'addressRaw',
+      ]),
+      status: pickStringValue(row, ['status']) ?? 'Unknown',
+      reason_code: pickStringValue(row, ['reason_code', 'reasonCode']),
+      reason_detail: pickStringValue(row, ['reason_detail', 'reasonDetail']),
+      scope_debug: row.scope_debug ?? row.scopeDebug ?? undefined,
+      formatted_address: pickStringValue(row, [
+        'formatted_address',
+        'formattedAddress',
+        'matched_address',
+        'matchedAddress',
+      ]),
+      place_id: pickStringValue(row, ['place_id', 'placeId']),
+      components: row.components ?? undefined,
+      canonical_id: pickStringValue(row, ['canonical_id', 'canonicalId']),
+      is_duplicate:
+        typeof row.is_duplicate === 'boolean'
+          ? row.is_duplicate
+          : typeof row.isDuplicate === 'boolean'
+            ? row.isDuplicate
+            : undefined,
+      duplicate_of_source_row_id: pickStringValue(row, [
+        'duplicate_of_source_row_id',
+        'duplicateOfSourceRowId',
+      ]),
+    };
+  }
+
   const rowIndexValue =
     row.source_row_index ??
     row.sourceRowIndex ??
@@ -309,31 +384,39 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
     source_row_index: rowIndex,
     source_row_id: getRowIdValue(row, index),
     raw_row:
-      (row.raw_row as Record<string, unknown>) ||
-      (row.rawRow as Record<string, unknown>) ||
-      (row.raw as Record<string, unknown>) ||
-      (row.source_raw as Record<string, unknown>) ||
+      toRecord(row.raw_row) ||
+      toRecord(row.rawRow) ||
+      toRecord(row.raw) ||
+      toRecord(row.source) ||
+      toRecord(row.source_raw) ||
+      toRecord(row.sourceRaw) ||
       undefined,
     detected_address:
-      (row.detected_address as string) ||
-      (row.detectedAddress as string) ||
-      (row.address as string) ||
-      (row.full_address as string) ||
-      (row.fullAddress as string) ||
+      pickStringValue(row, [
+        'detected_address',
+        'detectedAddress',
+        'address_raw',
+        'addressRaw',
+        'address',
+        'full_address',
+        'fullAddress',
+      ]) ||
       undefined,
     status,
-    reason_code: (row.reason_code as string) || (row.reasonCode as string) || undefined,
-    reason_detail: (row.reason_detail as string) || (row.reasonDetail as string) || undefined,
+    reason_code: pickStringValue(row, ['reason_code', 'reasonCode']) || undefined,
+    reason_detail: pickStringValue(row, ['reason_detail', 'reasonDetail']) || undefined,
     scope_debug: row.scope_debug ?? row.scopeDebug ?? undefined,
     formatted_address:
-      (row.formatted_address as string) ||
-      (row.formattedAddress as string) ||
-      (row.matched_address as string) ||
-      (row.matchedAddress as string) ||
+      pickStringValue(row, [
+        'formatted_address',
+        'formattedAddress',
+        'matched_address',
+        'matchedAddress',
+      ]) ||
       undefined,
-    place_id: (row.place_id as string) || (row.placeId as string) || undefined,
+    place_id: pickStringValue(row, ['place_id', 'placeId']) || undefined,
     components: (row.components as unknown) || undefined,
-    canonical_id: (row.canonical_id as string) || (row.canonicalId as string) || undefined,
+    canonical_id: pickStringValue(row, ['canonical_id', 'canonicalId']) || undefined,
     is_duplicate:
       typeof row.is_duplicate === 'boolean'
         ? row.is_duplicate
@@ -341,8 +424,7 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
           ? row.isDuplicate
           : undefined,
     duplicate_of_source_row_id:
-      (row.duplicate_of_source_row_id as string) ||
-      (row.duplicateOfSourceRowId as string) ||
+      pickStringValue(row, ['duplicate_of_source_row_id', 'duplicateOfSourceRowId']) ||
       undefined,
   };
 };
@@ -752,6 +834,11 @@ export default function ParsePage() {
     return (metadata.google_calls_used as number) || (metadata.googleCallsUsed as number) || null;
   }, [metadata]);
 
+  const cacheBackend = useMemo(() => {
+    if (!metadata) return null;
+    return (metadata.cache_backend as string) || (metadata.cacheBackend as string) || null;
+  }, [metadata]);
+
   const extractionMethod = useMemo(() => {
     if (!metadata) return null;
     return (
@@ -831,6 +918,8 @@ export default function ParsePage() {
         return skippedRows.length;
       case 'out_of_scope':
         return outOfScopeRows.length;
+      case 'duplicates':
+        return duplicateGroups.filter((group) => (group.source_row_ids?.length || 0) > 1).length;
       default:
         return 0;
     }
@@ -839,6 +928,7 @@ export default function ParsePage() {
     canonicalAddresses.length,
     needsReviewRows.length,
     outOfScopeRows.length,
+    duplicateGroups,
     parseSummary,
     skippedRows.length,
   ]);
@@ -976,7 +1066,12 @@ export default function ParsePage() {
       rawRow?.full_address ??
       rawRow?.fullAddress ??
       rawRow?.property_address ??
-      rawRow?.propertyAddress;
+      rawRow?.propertyAddress ??
+      rawRow?.address_raw ??
+      rawRow?.addressRaw ??
+      (rawRow?.source as string | undefined) ??
+      (rawRow?.source_raw as string | undefined) ??
+      (rawRow?.sourceRaw as string | undefined);
     if (typeof candidate === 'string') return candidate;
     if (typeof candidate === 'number') return candidate.toString();
     return row.detected_address ?? row.formatted_address ?? '';
@@ -2110,7 +2205,7 @@ export default function ParsePage() {
               <div className="mt-4 flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={() => setActiveTab('valid')}
+                  onClick={() => handleKpiTabClick('valid')}
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${
                     activeTab === 'valid'
                       ? 'bg-indigo-600 text-white'
@@ -2121,7 +2216,7 @@ export default function ParsePage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('needs_review')}
+                  onClick={() => handleKpiTabClick('needs_review')}
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${
                     activeTab === 'needs_review'
                       ? 'bg-indigo-600 text-white'
@@ -2132,7 +2227,7 @@ export default function ParsePage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('skipped')}
+                  onClick={() => handleKpiTabClick('skipped')}
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${
                     activeTab === 'skipped'
                       ? 'bg-indigo-600 text-white'
@@ -2143,7 +2238,7 @@ export default function ParsePage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setActiveTab('duplicates')}
+                  onClick={() => handleKpiTabClick('duplicates')}
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${
                     activeTab === 'duplicates'
                       ? 'bg-indigo-600 text-white'
@@ -2155,7 +2250,7 @@ export default function ParsePage() {
                 {typeof parseSummary.out_of_scope === 'number' ? (
                   <button
                     type="button"
-                    onClick={() => setActiveTab('out_of_scope')}
+                    onClick={() => handleKpiTabClick('out_of_scope')}
                     className={`rounded-full px-4 py-2 text-xs font-semibold ${
                       activeTab === 'out_of_scope'
                         ? 'bg-indigo-600 text-white'
@@ -2393,9 +2488,10 @@ export default function ParsePage() {
               Extraction method: {extractionMethod}
             </p>
           ) : null}
-          {parseSummary && (googleCallsUsed !== null || cacheHits !== null) ? (
+          {parseSummary && (googleCallsUsed !== null || cacheHits !== null || cacheBackend) ? (
             <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-              Google calls used: {googleCallsUsed ?? '--'} • Cache hits: {cacheHits ?? '--'}
+              Google calls used: {googleCallsUsed ?? 0} • Cache hits: {cacheHits ?? 0}
+              {cacheBackend ? ` • Cache backend: ${cacheBackend}` : ''}
             </p>
           ) : null}
           {parseSummary && errorRows.length > 0 ? (
@@ -2962,7 +3058,7 @@ export default function ParsePage() {
                   Why this happened
                 </p>
                 <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  {reviewReason?.label ?? 'Needs review'}
+                  {reviewRow?.reason_code || reviewReason?.label || 'Needs review'}
                 </p>
                 <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
                   {reviewOutOfScope ? (
@@ -2986,12 +3082,16 @@ export default function ParsePage() {
                   ) : reviewSkipped ? (
                     <p>P.O. Boxes are skipped because they aren’t physical property addresses.</p>
                   ) : (
-                    <p>
-                      {reviewReason?.description ??
-                        "We couldn’t verify this as a deliverable street address."}
-                    </p>
+                    <p>{reviewRow?.reason_detail || reviewReason?.description || 'Review this row for more context.'}</p>
                   )}
                 </div>
+              </div>
+
+
+              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Raw row JSON</p>
+                <pre className="mt-2 max-h-52 overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-300">
+{JSON.stringify(reviewRow?.raw_row ?? {}, null, 2)}</pre>
               </div>
 
               <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
