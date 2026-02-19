@@ -632,7 +632,9 @@ export default function ParsePage() {
   const reviewInputRef = useRef<HTMLInputElement | null>(null);
 
   const hasFileSelected = Boolean(file);
-  const canParse = Boolean(file && stateValue && countyValue);
+  const hasLocation = Boolean(stateValue && (countyValue || cityValue));
+  const showLocationValidation = Boolean(stateValue && !countyValue && !cityValue);
+  const canParse = Boolean(file && hasLocation && !busy);
   const parseCtaLabel = useMemo(() => {
     if (busy) return 'Processing…';
     if (!hasFileSelected) return 'Select a file to process';
@@ -1449,7 +1451,7 @@ export default function ParsePage() {
       const parsed = await parseFile(upload.fileId, {
         state: stateValue,
         county: countyValue,
-        city: cityValue || undefined,
+        city: cityValue,
         force_refresh: forceRefresh,
         jobId: newJobId,
         jobName: trimmedCampaignName || undefined,
@@ -1580,7 +1582,7 @@ export default function ParsePage() {
     try {
       const response = await retryParseRow({
         row: row.original ?? row,
-        location: { state: stateValue, county: countyValue, city: cityValue || undefined },
+        location: { state: stateValue, county: countyValue, city: cityValue },
       });
       setRetryAvailable('available');
       updateRetryStatus(row.id, false);
@@ -1597,7 +1599,7 @@ export default function ParsePage() {
     try {
       const response = await retryParseBatch({
         rows: marked.map((row) => row.original ?? row),
-        location: { state: stateValue, county: countyValue, city: cityValue || undefined },
+        location: { state: stateValue, county: countyValue, city: cityValue },
       });
       setRetryAvailable('available');
       setLegacyUnmatchedRows((prev) => prev.map((row) => ({ ...row, needsRetry: false })));
@@ -1917,7 +1919,7 @@ export default function ParsePage() {
   const reviewNeedsReview = reviewRow ? isNeedsReviewRow(reviewRow) : false;
   const reviewOutOfScope = reviewRow ? isOutOfScopeRow(reviewRow) : false;
   const reviewSkipped = reviewRow ? isSkippedRow(reviewRow) : false;
-  const selectedLocationSummary = [countyValue ?? cityValue ?? null, stateValue ?? null]
+  const selectedLocationSummary = [countyValue || cityValue || null, stateValue || null]
     .filter(Boolean)
     .join(', ');
   const canEditReview = reviewNeedsReview;
@@ -1965,10 +1967,9 @@ export default function ParsePage() {
                   options={states}
                 />
                 <LocationSelect
-                  label="County"
+                  label="County (optional)"
                   value={countyValue}
                   placeholder={stateValue ? 'Select county' : 'Select state first'}
-                  required
                   disabled={!stateValue}
                   onChange={(value) => {
                     setCountyValue(value);
@@ -1985,8 +1986,13 @@ export default function ParsePage() {
                   onChange={(value) => setCityValue(value)}
                   onClear={() => setCityValue('')}
                   options={cities}
-                  helperText="Leave blank if the file spans multiple cities."
+                  helperText="Select a State, and then either a County or a City (or both)."
                 />
+                {showLocationValidation ? (
+                  <p className="text-xs text-rose-600 dark:text-rose-300">
+                    Select a State, and then either a County or a City (or both).
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <label

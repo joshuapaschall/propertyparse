@@ -9,6 +9,8 @@ const ACCEPTED_TYPES = [
   '.jpg',
   '.jpeg',
   '.docx',
+  '.tsv',
+  '.doc',
 ];
 
 const formatBytes = (bytes: number) => {
@@ -57,7 +59,7 @@ export default function FileUploadCard({ file, onChange }: FileUploadCardProps) 
         </div>
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        Supported formats: CSV, XLSX, XLS, PDF, PNG, JPG, JPEG, DOCX
+        Supported formats: CSV, TSV, XLSX, XLS, PDF, PNG, JPG, JPEG, DOC, DOCX
       </p>
       {file ? (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm dark:border-slate-800 dark:bg-slate-950">
