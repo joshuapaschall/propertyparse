@@ -21,6 +21,7 @@ import {
   isValidRow,
   stringifyPreview,
 } from '../lib/parseUtils';
+import { canStartParse, hasValidLocation } from '../lib/parseValidation';
 import {
   getJobDetail,
   getJobRows,
@@ -632,9 +633,9 @@ export default function ParsePage() {
   const reviewInputRef = useRef<HTMLInputElement | null>(null);
 
   const hasFileSelected = Boolean(file);
-  const hasLocation = Boolean(stateValue && (countyValue || cityValue));
+  const hasLocation = hasValidLocation(stateValue, countyValue, cityValue);
   const showLocationValidation = Boolean(stateValue && !countyValue && !cityValue);
-  const canParse = Boolean(file && hasLocation && !busy);
+  const canParse = canStartParse(file, stateValue, countyValue, cityValue) && !busy;
   const parseCtaLabel = useMemo(() => {
     if (busy) return 'Processing…';
     if (!hasFileSelected) return 'Select a file to process';
