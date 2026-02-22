@@ -608,6 +608,7 @@ export default function ParsePage() {
   const [parsePayload, setParsePayload] = useState<Record<string, unknown> | null>(null);
   const [reviewRow, setReviewRow] = useState<RowResult | null>(null);
   const [reviewAddress, setReviewAddress] = useState('');
+  const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
   const [reviewAutoFocus, setReviewAutoFocus] = useState(false);
@@ -634,6 +635,7 @@ export default function ParsePage() {
 
   const hasFileSelected = Boolean(file);
   const hasLocation = hasValidLocation(stateValue, countyValue, cityValue);
+  const canRerunSameUpload = Boolean(fileId) && hasLocation && !busy && !rehydrating;
   const showLocationValidation = Boolean(stateValue && !countyValue && !cityValue);
   const canParse = canStartParse(file, stateValue, countyValue, cityValue) && !busy;
   const parseCtaLabel = useMemo(() => {
@@ -904,6 +906,14 @@ export default function ParsePage() {
   const needsReviewRows = useMemo(() => rowResults.filter(isNeedsReviewRow), [rowResults]);
   const skippedRows = useMemo(() => rowResults.filter(isSkippedRow), [rowResults]);
   const outOfScopeRows = useMemo(() => rowResults.filter(isOutOfScopeRow), [rowResults]);
+  const outOfScopeCityRowsCount = useMemo(
+    () =>
+      outOfScopeRows.filter((row) =>
+        (row.reason_code || '').toUpperCase().includes('OUT_OF_SCOPE_CITY'),
+      ).length,
+    [outOfScopeRows],
+  );
+  const canRerunWithoutCityFilter = Boolean(cityValue) && outOfScopeCityRowsCount > 0;
   const errorRows = useMemo(() => rowResults.filter(isErrorRow), [rowResults]);
 
   useEffect(() => {
@@ -1276,8 +1286,9 @@ export default function ParsePage() {
   };
 
   const openReviewDrawer = (row: RowResult, focusEdit = false) => {
+    const draft = reviewDrafts[row.source_row_id];
     setReviewRow(row);
-    setReviewAddress(getInputAddress(row));
+    setReviewAddress(draft ?? getInputAddress(row));
     setReviewError(null);
     setReviewAutoFocus(focusEdit);
   };
@@ -1299,6 +1310,49 @@ export default function ParsePage() {
       setShowRaw(false);
     }
   }, [showDebugMode]);
+
+  const activeReviewIndex = useMemo(
+    () => (reviewRow ? needsReviewRows.findIndex((row) => row.source_row_id === reviewRow.source_row_id) : -1),
+    [needsReviewRows, reviewRow],
+  );
+  const canReviewPrev = activeReviewIndex > 0;
+  const canReviewNext = activeReviewIndex > -1 && activeReviewIndex < needsReviewRows.length - 1;
+
+  const navigateReviewRow = useCallback(
+    (direction: 'prev' | 'next') => {
+      if (!reviewRow) return;
+      if (direction === 'prev' && !canReviewPrev) return;
+      if (direction === 'next' && !canReviewNext) return;
+      const delta = direction === 'next' ? 1 : -1;
+      const target = needsReviewRows[activeReviewIndex + delta];
+      if (target) {
+        openReviewDrawer(target);
+      }
+    },
+    [activeReviewIndex, canReviewNext, canReviewPrev, needsReviewRows, reviewRow],
+  );
+
+  useEffect(() => {
+    if (!reviewRow) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeReviewDrawer();
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key === 'j') {
+        event.preventDefault();
+        navigateReviewRow('next');
+      }
+      if (key === 'k') {
+        event.preventDefault();
+        navigateReviewRow('prev');
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [navigateReviewRow, reviewRow]);
 
   const handleCopyDebugInfo = () => {
     const debugInfo = [
@@ -1409,8 +1463,7 @@ export default function ParsePage() {
     }, 900);
   };
 
-  const handleParse = async () => {
-    if (!file) return;
+  const resetForFreshParse = () => {
     setError(null);
     setBusy(true);
     setRowsReceived(null);
@@ -1428,6 +1481,13 @@ export default function ParsePage() {
     setProgressPercent(5);
     setPollError(null);
     setPollErrorCount(0);
+    setProcessingReportFilter('all');
+    setActiveTab('valid');
+    setLegacyTab('matched');
+    setReviewRow(null);
+    setReviewError(null);
+    setReviewSaving(false);
+    setReviewDrafts({});
     setProgressInfo({
       phase: null,
       done: null,
@@ -1436,9 +1496,108 @@ export default function ParsePage() {
       googleCallsUsed: null,
       eta: null,
     });
-    setProcessingReportFilter('all');
-    setActiveTab('valid');
-    setLegacyTab('matched');
+  };
+
+  const runParseWithExistingUpload = async (uploadFileId: string, cityOverride?: string) => {
+    resetForFreshParse();
+    try {
+      const trimmedCampaignName = campaignName.trim();
+      const cityToUse = cityOverride ?? cityValue;
+      const parsed = await parseFile(uploadFileId, {
+        state: stateValue,
+        county: countyValue,
+        city: cityToUse,
+        force_refresh: forceRefresh,
+        jobName: trimmedCampaignName || undefined,
+      });
+      const parsedRecord = parsed as Record<string, unknown>;
+      const createdJobId =
+        pickString(parsedRecord as JobRecord, ['job_id', 'jobId', 'id']) ??
+        pickString((parsedRecord.metadata as JobRecord) ?? {}, ['job_id', 'jobId', 'id']) ??
+        crypto.randomUUID();
+      setJobId(createdJobId);
+      setFileId(uploadFileId);
+      setParseTimestamp(new Date().toISOString());
+      setParsePayload(parsedRecord);
+      setProgressStep(4);
+      setProgressPercent(100);
+      const hasRowAccounting = Boolean(parsed.summary && parsed.row_results);
+      if (hasRowAccounting) {
+        const summary = parsed.summary as ParseSummary;
+        const rowAccountingMetadata: Record<string, unknown> = {
+          ...((parsedRecord.metadata as Record<string, unknown>) ?? {}),
+        };
+        const responseRowsReceived =
+          typeof parsedRecord.rows_received === 'number'
+            ? parsedRecord.rows_received
+            : summary.rows_received ?? null;
+
+        rowAccountingMetadata.rows_received = responseRowsReceived;
+        if (typeof parsedRecord.accounted_rows === 'number') {
+          rowAccountingMetadata.accounted_rows = parsedRecord.accounted_rows;
+        }
+        if (typeof parsedRecord.extraction_method === 'string') {
+          rowAccountingMetadata.extraction_method = parsedRecord.extraction_method;
+        }
+        if (parsedRecord.warnings) {
+          rowAccountingMetadata.warnings = parsedRecord.warnings;
+        }
+        if (typeof parsedRecord.google_calls_used === 'number') {
+          rowAccountingMetadata.google_calls_used = parsedRecord.google_calls_used;
+        }
+        if (typeof parsedRecord.cache_hits === 'number') {
+          rowAccountingMetadata.cache_hits = parsedRecord.cache_hits;
+        }
+
+        setParseSummary(summary);
+        setRowsReceived(responseRowsReceived);
+        const canonicalRows = (parsed.canonical_addresses ?? []) as CanonicalAddress[];
+        setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
+        setRowResults((parsed.row_results ?? []) as RowResult[]);
+        setDuplicateGroups((parsed.duplicate_groups ?? []) as DuplicateGroup[]);
+        setDebugInfo((parsed.debug ?? null) as ParseDebugInfo | null);
+        setMetadata(Object.keys(rowAccountingMetadata).length ? rowAccountingMetadata : null);
+        setLegacyMode(false);
+      } else {
+        setLegacyMode(true);
+        const parsedHasBuckets = 'matched' in parsed || 'unmatched' in parsed;
+        if (parsedHasBuckets) {
+          const rawMatched = (parsed.matched || []) as unknown[];
+          const rawUnmatched = (parsed.unmatched || []) as unknown[];
+          setLegacyMatchedRows(normalizeRows(rawMatched));
+          setLegacyUnmatchedRows(normalizeRows(rawUnmatched));
+        } else {
+          const rawItems = (parsed.items || []) as Record<string, unknown>[];
+          const matchedItems = rawItems.filter((item) => item.status === 'Matched');
+          const unmatchedItems = rawItems.filter((item) => item.status !== 'Matched');
+          setLegacyMatchedRows(normalizeRows(matchedItems));
+          setLegacyUnmatchedRows(normalizeRows(unmatchedItems));
+        }
+        setMetadata((parsed.metadata as Record<string, unknown>) || null);
+      }
+      if (cityOverride !== undefined) {
+        setCityValue(cityOverride);
+      }
+      updateJobQueryParam(createdJobId);
+      writeLastJobState({
+        version: LAST_JOB_STORAGE_VERSION,
+        jobId: createdJobId,
+        stateValue,
+        countyValue,
+        cityValue: cityToUse,
+        campaignName: trimmedCampaignName,
+      });
+    } catch (err) {
+      setError((err as Error).message ?? 'Parsing failed.');
+    } finally {
+      stopPolling();
+      setBusy(false);
+    }
+  };
+
+  const handleParse = async () => {
+    if (!file) return;
+    resetForFreshParse();
     try {
       const newJobId = crypto.randomUUID();
       setJobId(newJobId);
@@ -1739,6 +1898,7 @@ export default function ParsePage() {
     setReviewError(null);
     setReviewSaving(false);
     setReviewAutoFocus(false);
+    setReviewDrafts({});
     setStateValue('');
     setCountyValue('');
     setCityValue('');
@@ -1765,6 +1925,11 @@ export default function ParsePage() {
       handleRetryUpdates({
         updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
         updatedJob: response.updated_job as Record<string, unknown> | undefined,
+      });
+      setReviewDrafts((prev) => {
+        const next = { ...prev };
+        delete next[reviewRow.source_row_id];
+        return next;
       });
       closeReviewDrawer();
     } catch (err) {
@@ -2042,18 +2207,34 @@ export default function ParsePage() {
                 </button>
               </div>
               <div className="mt-2 flex items-center justify-end">
-                <button
-                  type="button"
-                  onClick={handleParse}
-                  disabled={!canParse || busy || rehydrating}
-                  className={`rounded-xl px-5 py-3 text-sm font-semibold transition ${
-                    canParse && !busy && !rehydrating
-                      ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                      : 'bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
-                  }`}
-                >
-                  {parseCtaLabel}
-                </button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={handleParse}
+                    disabled={!canParse || busy || rehydrating}
+                    className={`rounded-xl px-5 py-3 text-sm font-semibold transition ${
+                      canParse && !busy && !rehydrating
+                        ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                        : 'bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+                    }`}
+                  >
+                    {parseCtaLabel}
+                  </button>
+                  {fileId && hasLocation ? (
+                    <button
+                      type="button"
+                      onClick={() => void runParseWithExistingUpload(fileId)}
+                      disabled={!canRerunSameUpload}
+                      className={`rounded-xl border px-4 py-3 text-sm font-semibold transition ${
+                        canRerunSameUpload
+                          ? 'border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-500/10'
+                          : 'border-slate-200 text-slate-400 dark:border-slate-700 dark:text-slate-500'
+                      }`}
+                    >
+                      Re-run (use same upload)
+                    </button>
+                  ) : null}
+                </div>
               </div>
               {error ? (
                 <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
@@ -2342,6 +2523,21 @@ export default function ParsePage() {
             <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
               Some addresses failed because Google returned a different city. Leave City blank if
               your file spans multiple cities.
+            </div>
+          ) : null}
+          {canRerunWithoutCityFilter && fileId ? (
+            <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-100">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <p>Many rows are out-of-scope due to city mismatch. Rerun without city filter.</p>
+                <button
+                  type="button"
+                  disabled={!canRerunSameUpload}
+                  onClick={() => void runParseWithExistingUpload(fileId, '')}
+                  className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300"
+                >
+                  Rerun without city filter
+                </button>
+              </div>
             </div>
           ) : null}
           {parseSummary ? (
@@ -3006,6 +3202,29 @@ export default function ParsePage() {
                 Close
               </button>
             </div>
+            <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Needs Review {activeReviewIndex >= 0 ? `${activeReviewIndex + 1} of ${needsReviewRows.length}` : 'row'}
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => navigateReviewRow('prev')}
+                  disabled={!canReviewPrev}
+                  className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Prev
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigateReviewRow('next')}
+                  disabled={!canReviewNext}
+                  className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
 
             <div className="mt-6 space-y-4">
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-900">
@@ -3116,7 +3335,13 @@ export default function ParsePage() {
                       <input
                         ref={reviewInputRef}
                         value={reviewAddress}
-                        onChange={(event) => setReviewAddress(event.target.value)}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setReviewAddress(value);
+                          if (reviewRow) {
+                            setReviewDrafts((prev) => ({ ...prev, [reviewRow.source_row_id]: value }));
+                          }
+                        }}
                         disabled={!canEditReview}
                         className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-900/40"
                       />
