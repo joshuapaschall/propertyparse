@@ -60,6 +60,9 @@ type SetupGuidance = {
   title: string;
   messages: string[];
   rawError: string;
+  supabaseConfigured: boolean | null;
+  missingTables: string[];
+  requiredMigrations: string[];
 };
 
 const getSetupGuidanceFromDiagnostics = (diagnostics: SystemDiagnostics | null, rawError: string): SetupGuidance => {
@@ -85,8 +88,97 @@ const getSetupGuidanceFromDiagnostics = (diagnostics: SystemDiagnostics | null, 
     title: 'Setup required',
     messages,
     rawError,
+    supabaseConfigured: typeof diagnostics?.supabase_configured === 'boolean' ? diagnostics.supabase_configured : null,
+    missingTables,
+    requiredMigrations: migrationsNeeded,
   };
 };
+
+const getMetricTrendBars = (value: number) => {
+  const seed = Math.max(1, Math.floor(Math.abs(value)));
+  return Array.from({ length: 7 }, (_, index) => {
+    const slice = Math.floor(seed / 10 ** (index % 3)) % 10;
+    return Math.max(20, Math.min(100, 25 + slice * 8));
+  });
+};
+
+const formatMetricValue = (metricKey: string, value: number) => {
+  if (metricKey === 'spend' || metricKey === 'spend_usd' || metricKey === 'ocrSpend') {
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value);
+  }
+  return formatNumber(value);
+};
+
+function SetupRequiredCard({ guidance, errorMessage }: { guidance: SetupGuidance | null; errorMessage: string }) {
+  const checklist = [
+    {
+      label: 'Supabase configured',
+      value:
+        guidance?.supabaseConfigured === null
+          ? 'Unknown'
+          : guidance.supabaseConfigured
+            ? 'Yes'
+            : 'No',
+    },
+    {
+      label: 'Missing tables',
+      value: guidance?.missingTables.length ? guidance.missingTables.join(', ') : 'None',
+    },
+  ];
+
+  const setupInstructions = [
+    'Admin setup checklist:',
+    `- Supabase configured: ${checklist[0].value}`,
+    `- Missing tables: ${checklist[1].value}`,
+    `- Required migrations: ${guidance?.requiredMigrations.length ? guidance.requiredMigrations.join(', ') : 'None reported'}`,
+    '',
+    'Next steps:',
+    ...(guidance?.messages ?? ['Resolve setup issues and retry.']).map((message) => `- ${message}`),
+  ].join('\n');
+
+  const handleCopyInstructions = async () => {
+    try {
+      await navigator.clipboard.writeText(setupInstructions);
+    } catch {
+      window.prompt('Copy setup instructions:', setupInstructions);
+    }
+  };
+
+  return (
+    <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-6 py-5 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-base font-semibold">{guidance?.title ?? 'Setup required'}</p>
+          <p className="mt-1 text-xs text-amber-800/90 dark:text-amber-200/90">Complete these steps to restore admin data.</p>
+        </div>
+        <Button type="button" size="sm" variant="secondary" onClick={() => void handleCopyInstructions()}>
+          Copy setup instructions
+        </Button>
+      </div>
+
+      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+        {checklist.map((item) => (
+          <div key={item.label} className="rounded-lg border border-amber-200/80 bg-white/80 px-3 py-2 text-xs dark:border-amber-800/50 dark:bg-slate-900/40">
+            <p className="font-semibold uppercase tracking-wide">{item.label}</p>
+            <p className="mt-1 text-sm font-medium">{item.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="mt-4">
+        <p className="text-xs font-semibold uppercase tracking-wide">Required migrations</p>
+        <p className="mt-1 text-xs">
+          {guidance?.requiredMigrations.length ? guidance.requiredMigrations.join(', ') : 'No required migration filenames reported.'}
+        </p>
+      </div>
+
+      <details className="mt-3">
+        <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide">Details</summary>
+        <p className="mt-2 text-xs">{errorMessage}</p>
+      </details>
+    </div>
+  );
+}
 const getMemberValue = (member: OrgMember, keys: string[]) => {
   for (const key of keys) {
     const value = member[key];
@@ -179,6 +271,7 @@ export default function AdminPage() {
     const cards = [...metricCards];
     const hasOcrCalls = metrics && Object.prototype.hasOwnProperty.call(metrics, 'ocrCalls');
     const hasOcrSpend = metrics && Object.prototype.hasOwnProperty.call(metrics, 'ocrSpend');
+    const hasSpend = metrics && (Object.prototype.hasOwnProperty.call(metrics, 'spend_usd') || Object.prototype.hasOwnProperty.call(metrics, 'spendUsd'));
 
     if (hasOcrCalls) {
       cards.push({ key: 'ocrCalls', label: 'OCR Calls', description: 'OCR API calls used.' });
@@ -186,8 +279,11 @@ export default function AdminPage() {
     if (hasOcrSpend) {
       cards.push({ key: 'ocrSpend', label: 'OCR Spend', description: 'Estimated OCR spend.' });
     }
+    if (hasSpend) {
+      cards.push({ key: 'spend_usd', label: 'Spend', description: 'Total platform spend for selected range.' });
+    }
 
-    return cards;
+    return cards.slice(0, 6);
   }, [metrics]);
 
   const handleInvite = async (event: FormEvent<HTMLFormElement>) => {
@@ -275,27 +371,24 @@ export default function AdminPage() {
             {metricsLoading ? (
               <EmptyState className="mt-6" title="Loading metrics" description="Loading admin metrics..." />
             ) : metricsError ? (
-              <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-6 py-5 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
-                <p className="text-base font-semibold">{metricsSetupGuidance?.title ?? 'Setup required'}</p>
-                <ul className="mt-2 list-disc space-y-1 pl-5">
-                  {(metricsSetupGuidance?.messages ?? ['Resolve setup issues and retry.']).map((message) => (
-                    <li key={message}>{message}</li>
-                  ))}
-                </ul>
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide">Details</summary>
-                  <p className="mt-2 text-xs">{metricsError}</p>
-                </details>
-              </div>
+              <SetupRequiredCard guidance={metricsSetupGuidance} errorMessage={metricsError} />
             ) : (
-              <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {renderedCards.map((metric) => {
-                  const value = toNumber(metrics?.[metric.key]);
+                  const value = toNumber(metrics?.[metric.key] ?? (metric.key === 'spend_usd' ? metrics?.spendUsd : 0));
+                  const trendBars = getMetricTrendBars(value);
                   return (
-                    <Card key={metric.key} className="p-5">
-                      <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{metric.label}</p>
-                      <p className="mt-3 text-3xl font-semibold text-slate-900 dark:text-white">{formatNumber(value)}</p>
-                      <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{metric.description}</p>
+                    <Card key={metric.key} className="flex min-h-[170px] flex-col justify-between bg-gradient-to-b from-white to-slate-50/80 p-5 dark:from-slate-950 dark:to-slate-900/60">
+                      <div>
+                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{metric.label}</p>
+                        <p className="mt-2 text-3xl font-semibold text-slate-900 dark:text-white">{formatMetricValue(metric.key, value)}</p>
+                        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{metric.description}</p>
+                      </div>
+                      <div className="mt-4 flex items-end gap-1" aria-hidden="true">
+                        {trendBars.map((barHeight, index) => (
+                          <span key={`${metric.key}-${index}`} className="w-2 rounded-sm bg-indigo-400/70 dark:bg-indigo-500/70" style={{ height: `${barHeight * 0.28}px` }} />
+                        ))}
+                      </div>
                     </Card>
                   );
                 })}
@@ -337,20 +430,7 @@ export default function AdminPage() {
               </form>
             ) : null}
 
-            {teamError ? (
-              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
-                <p className="text-base font-semibold">{teamSetupGuidance?.title ?? 'Setup required'}</p>
-                <ul className="mt-2 list-disc space-y-1 pl-5">
-                  {(teamSetupGuidance?.messages ?? ['Resolve setup issues and retry.']).map((message) => (
-                    <li key={message}>{message}</li>
-                  ))}
-                </ul>
-                <details className="mt-3">
-                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide">Details</summary>
-                  <p className="mt-2 text-xs">{teamError}</p>
-                </details>
-              </div>
-            ) : null}
+            {teamError ? <SetupRequiredCard guidance={teamSetupGuidance} errorMessage={teamError} /> : null}
             {teamMessage ? (
               <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
                 {teamMessage}
