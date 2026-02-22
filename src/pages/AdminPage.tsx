@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
 import { getJobs, JobRecord } from '../lib/api';
 
@@ -59,9 +60,6 @@ const rangeTabs: { key: RangeKey; label: string }[] = [
   { key: 'year', label: 'Year' },
 ];
 
-const getStoredRole = () =>
-  window.localStorage.getItem('pp-role') ?? window.localStorage.getItem('pp-user-role');
-
 const pickValue = (job: JobRecord, keys: string[]) => {
   for (const key of keys) {
     const value = job[key];
@@ -114,9 +112,9 @@ const emptyTotals = (): MetricTotals => ({
 });
 
 export default function AdminPage() {
-  const storedRole = getStoredRole();
-  const hasRoleInfo = storedRole !== null && storedRole !== '';
-  const isAdmin = storedRole === 'admin';
+  const { role } = useAuthControls();
+  const hasRoleInfo = role !== null && role !== '';
+  const isAdmin = role === 'admin';
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);

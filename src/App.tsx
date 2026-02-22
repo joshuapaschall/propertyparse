@@ -8,6 +8,7 @@ import HistoryPage from './pages/HistoryPage';
 import ParsePage from './pages/ParsePage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import LoadingSpinner from './LoadingSpinner';
+import { acceptInvitation, getMe } from './lib/api';
 import { clearAuthHeaderState, setAuthHeaderState } from './lib/authState';
 import { supabase } from './lib/supabase';
 import './App.css';
@@ -18,16 +19,19 @@ type AuthContextValue = {
   orgId: string | null;
   userId: string | null;
   role: string | null;
+  pendingInvitation: BootstrapGuidanceResponse['invitation'] | null;
   isAuthenticated: boolean;
   isReady: boolean;
   isSessionLoading: boolean;
   isBootstrapping: boolean;
   bootstrapError: string | null;
+  hasPendingInvitation: boolean;
   loginWithPassword: (email: string, password: string) => Promise<void>;
   loginWithMagicLink: (email: string) => Promise<void>;
   signUpWithPassword: (email: string, password: string) => Promise<{ needsEmailConfirmation: boolean }>;
   logout: () => Promise<void>;
   refreshBootstrap: () => Promise<void>;
+  acceptPendingInvitation: () => Promise<void>;
 };
 
 type ThemeMode = 'light' | 'dark';
@@ -37,11 +41,24 @@ type ThemeContextValue = {
   toggleTheme: () => void;
 };
 
-type BootstrapResponse = {
+type BootstrapSuccessResponse = {
   orgId: string;
   userId: string;
   role: string;
 };
+
+type BootstrapGuidanceResponse = {
+  noMembership: true;
+  hasPendingInvitation: boolean;
+  invitation?: {
+    orgId?: string;
+    orgName?: string;
+    email?: string;
+    role?: string;
+  };
+};
+
+type BootstrapResponse = BootstrapSuccessResponse | BootstrapGuidanceResponse;
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -69,6 +86,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const [orgId, setOrgId] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [role, setRole] = useState<string | null>(null);
+  const [pendingInvitation, setPendingInvitation] = useState<BootstrapGuidanceResponse['invitation'] | null>(null);
   const [isSessionLoading, setIsSessionLoading] = useState(true);
   const [isBootstrapping, setIsBootstrapping] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -88,26 +106,46 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
         throw new Error(message || `Bootstrap failed with ${res.status}`);
       }
       const data = (await res.json()) as BootstrapResponse;
-      setOrgId(data.orgId);
-      setUserId(data.userId);
-      setRole(data.role);
+      if ('noMembership' in data && data.noMembership) {
+        setOrgId(null);
+        setUserId(null);
+        setRole(null);
+        setPendingInvitation(data.invitation ?? null);
+        setBootstrapError(
+          data.hasPendingInvitation
+            ? 'You have an invitation waiting. Accept to continue.'
+            : 'No organization found for your account. Contact your admin or create an org.',
+        );
+        clearAuthHeaderState();
+        return;
+      }
+
+      setPendingInvitation(null);
       setAuthHeaderState({
         accessToken: currentSession.access_token,
         orgId: data.orgId,
         userId: data.userId,
         role: data.role,
       });
-      window.localStorage.setItem('pp-role', data.role);
-      window.localStorage.setItem('pp-user-role', data.role);
+      const me = await getMe();
+      setOrgId(me.orgId);
+      setUserId(me.userId);
+      setRole(me.role);
+      setAuthHeaderState({
+        accessToken: currentSession.access_token,
+        orgId: me.orgId,
+        userId: me.userId,
+        role: me.role,
+      });
+      setBootstrapError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to bootstrap session.';
       setBootstrapError(message);
       setOrgId(null);
       setUserId(null);
       setRole(null);
+      setPendingInvitation(null);
       clearAuthHeaderState();
-      window.localStorage.removeItem('pp-role');
-      window.localStorage.removeItem('pp-user-role');
     } finally {
       setIsBootstrapping(false);
     }
@@ -138,11 +176,10 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       setOrgId(null);
       setUserId(null);
       setRole(null);
+      setPendingInvitation(null);
       setBootstrapError(null);
       setIsBootstrapping(false);
       clearAuthHeaderState();
-      window.localStorage.removeItem('pp-role');
-      window.localStorage.removeItem('pp-user-role');
       return;
     }
 
@@ -197,10 +234,9 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     setOrgId(null);
     setUserId(null);
     setRole(null);
+    setPendingInvitation(null);
     setBootstrapError(null);
     clearAuthHeaderState();
-    window.localStorage.removeItem('pp-role');
-    window.localStorage.removeItem('pp-user-role');
   }, []);
 
   const refreshBootstrap = useCallback(async () => {
@@ -208,10 +244,17 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     await bootstrapSession(session);
   }, [bootstrapSession, session]);
 
+  const acceptPendingInvitation = useCallback(async () => {
+    await acceptInvitation();
+    await refreshBootstrap();
+  }, [refreshBootstrap]);
+
   const accessToken = session?.access_token ?? null;
   const isAuthenticated = Boolean(session);
   const hasOrgContext = Boolean(orgId && userId && role);
   const isReady = Boolean(session && hasOrgContext);
+  const hasPendingInvitation =
+    bootstrapError === 'You have an invitation waiting. Accept to continue.';
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -220,16 +263,19 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       orgId,
       userId,
       role,
+      pendingInvitation,
       isAuthenticated,
       isReady,
       isSessionLoading,
       isBootstrapping,
       bootstrapError,
+      hasPendingInvitation,
       loginWithPassword,
       loginWithMagicLink,
       signUpWithPassword,
       logout,
       refreshBootstrap,
+      acceptPendingInvitation,
     }),
     [
       session,
@@ -237,16 +283,19 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       orgId,
       userId,
       role,
+      pendingInvitation,
       isAuthenticated,
       isReady,
       isSessionLoading,
       isBootstrapping,
       bootstrapError,
+      hasPendingInvitation,
       loginWithPassword,
       loginWithMagicLink,
       signUpWithPassword,
       logout,
       refreshBootstrap,
+      acceptPendingInvitation,
     ],
   );
 
@@ -290,7 +339,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     bootstrapError,
     refreshBootstrap,
     logout,
+    hasPendingInvitation,
+    pendingInvitation,
+    acceptPendingInvitation,
   } = useAuth();
+  const [isAcceptingInvitation, setIsAcceptingInvitation] = useState(false);
 
   if (isSessionLoading) {
     return (
@@ -319,13 +372,37 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
           <p className="mt-3 text-sm text-white/70">
             {bootstrapError ?? 'Unable to load your org context. Please retry.'}
           </p>
+          {hasPendingInvitation ? (
+            <div className="mt-4 rounded-xl border border-emerald-400/40 bg-emerald-500/10 px-4 py-3 text-left text-sm text-emerald-100">
+              <p className="font-semibold">Invitation details</p>
+              <p className="mt-1 text-emerald-100/80">Org: {pendingInvitation?.orgName ?? pendingInvitation?.orgId ?? 'Unknown org'}</p>
+              {pendingInvitation?.role ? <p className="text-emerald-100/80">Role: {pendingInvitation.role}</p> : null}
+            </div>
+          ) : null}
           <div className="mt-6 flex flex-wrap justify-center gap-3">
+            {hasPendingInvitation ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsAcceptingInvitation(true);
+                  try {
+                    await acceptPendingInvitation();
+                  } finally {
+                    setIsAcceptingInvitation(false);
+                  }
+                }}
+                className="rounded-lg bg-emerald-300 px-4 py-2 text-sm font-semibold text-emerald-950"
+                disabled={isAcceptingInvitation}
+              >
+                {isAcceptingInvitation ? 'Accepting invitation...' : 'Accept invitation'}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void refreshBootstrap()}
               className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-900"
             >
-              Retry bootstrap
+              Try again
             </button>
             <button
               type="button"
