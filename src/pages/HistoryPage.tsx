@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppShell from '../components/AppShell';
+import Badge, { getBadgeVariant } from '../components/ui/Badge';
+import Button from '../components/ui/Button';
+import Card, { SectionHeader } from '../components/ui/Card';
+import EmptyState from '../components/ui/EmptyState';
 import { downloadJobExport, JobExportType, JobRecord, getJobs } from '../lib/api';
 
 const EXPORT_OPTIONS: Array<{ label: string; type: JobExportType }> = [
@@ -64,13 +68,6 @@ const normalizeStatus = (raw: string | null) => {
   if (status.includes('DONE') || status.includes('COMPLETE') || status.includes('SUCCESS')) return 'DONE';
   if (status.includes('RUN') || status.includes('PENDING') || status.includes('PROCESS')) return 'RUNNING';
   return status;
-};
-
-const statusClasses: Record<string, string> = {
-  RUNNING:
-    'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-700/50 dark:bg-amber-900/30 dark:text-amber-300',
-  DONE: 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-700/50 dark:bg-emerald-900/30 dark:text-emerald-300',
-  FAILED: 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-700/50 dark:bg-rose-900/30 dark:text-rose-300',
 };
 
 export default function HistoryPage() {
@@ -186,14 +183,11 @@ export default function HistoryPage() {
   return (
     <AppShell title="History" subtitle="Review past parsing jobs and export results.">
       <div className="space-y-6">
-        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <div>
-              <h2 className="text-lg font-semibold">Parse Jobs</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400">
-                Track status, costs, and quality metrics for every run.
-              </p>
-            </div>
+        <Card>
+          <SectionHeader
+            title="Parse Jobs"
+            subtitle="Track status, costs, and quality metrics for every run."
+            action={
             <div className="w-full max-w-xs">
               <input
                 type="search"
@@ -203,33 +197,28 @@ export default function HistoryPage() {
                 className="w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none ring-slate-200 transition placeholder:text-slate-400 focus:ring-2 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:placeholder:text-slate-500"
               />
             </div>
-          </div>
+            }
+          />
 
           <div className="mt-4 flex flex-wrap gap-2">
             {(['ALL', 'RUNNING', 'DONE', 'FAILED'] as const).map((status) => (
-              <button
+              <Button
                 key={status}
                 type="button"
                 onClick={() => setStatusFilter(status)}
-                className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
-                  statusFilter === status
-                    ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-100 dark:bg-slate-100 dark:text-slate-900'
-                    : 'border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800'
-                }`}
+                size="sm"
+                variant={statusFilter === status ? 'secondary' : 'ghost'}
+                className="rounded-full px-3 py-1"
               >
                 {status}
-              </button>
+              </Button>
             ))}
           </div>
 
           {loading ? (
-            <div className="mt-6 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-              Loading job history...
-            </div>
+            <EmptyState className="mt-6" title="Loading history" description="Loading job history..." />
           ) : filteredRows.length === 0 ? (
-            <div className="mt-6 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-              No jobs match your current search/filter.
-            </div>
+            <EmptyState className="mt-6" title="No results" description="No jobs match your current search/filter." />
           ) : (
             <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
               <div className="overflow-auto">
@@ -277,11 +266,9 @@ export default function HistoryPage() {
                           </div>
                         </td>
                         <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                          <span
-                            className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${statusClasses[row.status] ?? 'border-slate-200 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'}`}
-                          >
+                          <Badge variant={getBadgeVariant(row.status)}>
                             {row.status}
-                          </span>
+                          </Badge>
                         </td>
                         <td className="px-4 py-3 text-right" onClick={(event) => event.stopPropagation()}>
                           <details className="relative inline-block text-left">
@@ -292,17 +279,19 @@ export default function HistoryPage() {
                               {EXPORT_OPTIONS.map((option) => {
                                 const key = `${row.jobId}-${option.type}`;
                                 return (
-                                  <button
+                                  <Button
                                     key={option.type}
                                     type="button"
                                     onClick={() => {
                                       handleDownload(row.jobId, option.type, `${row.jobId}-${option.type}.csv`);
                                     }}
-                                    className="block w-full border-b border-slate-100 px-3 py-2 text-left text-xs text-slate-700 transition last:border-b-0 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                                    className="block w-full rounded-none border-0 border-b border-slate-100 px-3 py-2 text-left text-xs text-slate-700 last:border-b-0 dark:border-slate-800 dark:text-slate-200"
                                     disabled={!row.hasId || downloading[key]}
+                                    variant="ghost"
+                                    size="sm"
                                   >
                                     {downloading[key] ? 'Downloading...' : option.label}
-                                  </button>
+                                  </Button>
                                 );
                               })}
                             </div>
@@ -320,7 +309,7 @@ export default function HistoryPage() {
               {error}
             </div>
           ) : null}
-        </div>
+        </Card>
       </div>
     </AppShell>
   );
