@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import AccountedRowsIndicator from '../components/AccountedRowsIndicator';
 import FileUploadCard from '../components/FileUploadCard';
-import LocationSelect from '../components/LocationSelect';
+import AsyncLocationSelect from '../components/AsyncLocationSelect';
 import ProcessingReportModal, {
   ProcessingReportFilter,
 } from '../components/ProcessingReportModal';
@@ -33,7 +33,7 @@ import {
   retryParseRow,
   uploadFile,
 } from '../lib/api';
-import { listCitiesByState, listCounties, listStates50 } from '../lib/locations';
+import { searchCities, searchCounties, searchStates } from '../lib/locationApi';
 import type {
   CanonicalAddress,
   DuplicateGroup,
@@ -627,7 +627,6 @@ export default function ParsePage() {
     googleCallsUsed: null,
     eta: null,
   });
-  const didLogLocations = useRef(false);
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const pollingRef = useRef<number | null>(null);
   const progressSamplesRef = useRef<{ timestamp: number; done: number }[]>([]);
@@ -646,19 +645,23 @@ export default function ParsePage() {
 
   const dedupedMatched = useMemo(() => dedupeRows(legacyMatchedRows), [legacyMatchedRows]);
   const dedupedUnmatched = useMemo(() => dedupeRows(legacyUnmatchedRows), [legacyUnmatchedRows]);
-  const states = useMemo(() => listStates50(), []);
-  const counties = useMemo(() => (stateValue ? listCounties(stateValue) : []), [stateValue]);
-  const cities = useMemo(() => (stateValue ? listCitiesByState(stateValue) : []), [stateValue]);
+  const loadStateOptions = useCallback(async (inputValue: string) => searchStates(inputValue), []);
 
-  useEffect(() => {
-    if (!import.meta.env.DEV || didLogLocations.current) return;
-    didLogLocations.current = true;
-    const georgiaCounties = listCounties('Georgia');
-    const georgiaCities = listCitiesByState('Georgia');
-    console.info(
-      `[locations] states=${states.length} (expected 50), GA counties=${georgiaCounties.length}, GA cities=${georgiaCities.length}`,
-    );
-  }, [states]);
+  const loadCountyOptions = useCallback(
+    async (inputValue: string) => {
+      if (!stateValue) return [];
+      return searchCounties(stateValue, inputValue);
+    },
+    [stateValue],
+  );
+
+  const loadCityOptions = useCallback(
+    async (inputValue: string) => {
+      if (!stateValue) return [];
+      return searchCities(stateValue, inputValue, countyValue || undefined);
+    },
+    [countyValue, stateValue],
+  );
 
   useEffect(() => {
     return () => {
@@ -2115,11 +2118,12 @@ export default function ParsePage() {
                     Select the required location fields to improve parsing accuracy.
                   </p>
                 </div>
-                <LocationSelect
+                <AsyncLocationSelect
                   label="State"
                   value={stateValue}
-                  placeholder="Select state"
+                  placeholder="Search state"
                   required
+                  loadOptions={loadStateOptions}
                   onChange={(value) => {
                     setStateValue(value);
                     setCountyValue('');
@@ -2130,28 +2134,29 @@ export default function ParsePage() {
                     setCountyValue('');
                     setCityValue('');
                   }}
-                  options={states}
                 />
-                <LocationSelect
+                <AsyncLocationSelect
                   label="County (optional)"
                   value={countyValue}
-                  placeholder={stateValue ? 'Select county' : 'Select state first'}
+                  placeholder={stateValue ? 'Search county' : 'Select state first'}
                   disabled={!stateValue}
+                  cacheScope={`counties:${stateValue}`}
+                  loadOptions={loadCountyOptions}
                   onChange={(value) => {
                     setCountyValue(value);
                     setCityValue('');
                   }}
                   onClear={() => setCountyValue('')}
-                  options={counties}
                 />
-                <LocationSelect
+                <AsyncLocationSelect
                   label="City (optional)"
                   value={cityValue}
-                  placeholder={stateValue ? 'Select city' : 'Select state first'}
+                  placeholder={stateValue ? 'Search city' : 'Select state first'}
                   disabled={!stateValue}
+                  cacheScope={`cities:${stateValue}:${countyValue}`}
+                  loadOptions={loadCityOptions}
                   onChange={(value) => setCityValue(value)}
                   onClear={() => setCityValue('')}
-                  options={cities}
                   helperText="Select a State, and then either a County or a City (or both)."
                 />
                 {showLocationValidation ? (
