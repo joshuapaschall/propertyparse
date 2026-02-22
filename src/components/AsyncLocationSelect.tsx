@@ -109,17 +109,12 @@ export default function AsyncLocationSelect({
             unstyled
             isSearchable
             cacheOptions
-            defaultOptions={defaultOptions}
+            defaultOptions={defaultOptions.length ? defaultOptions : true}
             value={selectedOption}
             isDisabled={disabled}
             placeholder={placeholder}
             maxMenuHeight={300}
             loadOptions={fetchOptions}
-            onFocus={() => {
-              if (!defaultOptions.length && !disabled) {
-                void fetchOptions('');
-              }
-            }}
             onChange={(option: SingleValue<Option>) => onChange(option?.value ?? '')}
             classNames={{
               control: (state) =>
