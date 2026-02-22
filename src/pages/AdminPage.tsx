@@ -1,6 +1,9 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
+import Button from '../components/ui/Button';
+import Card, { SectionHeader } from '../components/ui/Card';
+import EmptyState from '../components/ui/EmptyState';
 import {
   getMetricsSummary,
   getOrgMembers,
@@ -244,44 +247,33 @@ export default function AdminPage() {
   return (
     <AppShell title="Admin" subtitle="Monitor parsing usage and manage your organization team.">
       {!hasRoleInfo || !canAccessAdmin ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-10 text-center shadow-sm dark:border-slate-800 dark:bg-slate-950">
+        <Card className="p-10 text-center">
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Not authorized</h2>
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
             Admin access is restricted. If you believe you should have access, contact your account owner.
           </p>
-        </div>
+        </Card>
       ) : (
         <div className="space-y-6">
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <div className="flex flex-wrap items-center justify-between gap-4">
-              <div>
-                <h2 className="text-lg font-semibold">Admin Metrics</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Snapshot totals from server-side metrics.</p>
-              </div>
-              <div className="flex flex-wrap gap-2">
+          <Card>
+            <SectionHeader title="Admin Metrics" subtitle="Snapshot totals from server-side metrics." action={<div className="flex flex-wrap gap-2">
                 {rangeTabs.map((tab) => {
                   const isActive = tab.key === activeRange;
                   return (
-                    <button
+                    <Button
                       key={tab.key}
                       type="button"
                       onClick={() => setActiveRange(tab.key)}
-                      className={`rounded-lg border px-3 py-2 text-xs font-semibold transition ${
-                        isActive
-                          ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-200 dark:bg-slate-200 dark:text-slate-900'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800'
-                      }`}
+                      size="sm"
+                      variant={isActive ? 'secondary' : 'ghost'}
                     >
                       {tab.label}
-                    </button>
+                    </Button>
                   );
                 })}
-              </div>
-            </div>
+              </div>} />
             {metricsLoading ? (
-              <div className="mt-6 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-                Loading admin metrics...
-              </div>
+              <EmptyState className="mt-6" title="Loading metrics" description="Loading admin metrics..." />
             ) : metricsError ? (
               <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-6 py-5 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
                 <p className="text-base font-semibold">{metricsSetupGuidance?.title ?? 'Setup required'}</p>
@@ -300,27 +292,19 @@ export default function AdminPage() {
                 {renderedCards.map((metric) => {
                   const value = toNumber(metrics?.[metric.key]);
                   return (
-                    <div
-                      key={metric.key}
-                      className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-950"
-                    >
+                    <Card key={metric.key} className="p-5">
                       <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{metric.label}</p>
                       <p className="mt-3 text-3xl font-semibold text-slate-900 dark:text-white">{formatNumber(value)}</p>
                       <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{metric.description}</p>
-                    </div>
+                    </Card>
                   );
                 })}
               </div>
             )}
-          </div>
+          </Card>
 
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h2 className="text-lg font-semibold">Team</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Manage members and organization access.</p>
-              </div>
-            </div>
+          <Card>
+            <SectionHeader title="Team" subtitle="Manage members and organization access." />
 
             {canManageTeam ? (
               <form onSubmit={handleInvite} className="mt-5 grid gap-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800 md:grid-cols-[1fr_180px_auto]">
@@ -343,13 +327,13 @@ export default function AdminPage() {
                     </option>
                   ))}
                 </select>
-                <button
+                <Button
                   type="submit"
                   disabled={inviteLoading}
-                  className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60"
+                  variant="primary"
                 >
                   {inviteLoading ? 'Inviting...' : 'Invite Member'}
-                </button>
+                </Button>
               </form>
             ) : null}
 
@@ -374,9 +358,7 @@ export default function AdminPage() {
             ) : null}
 
             {teamLoading ? (
-              <div className="mt-6 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-                Loading team...
-              </div>
+              <EmptyState className="mt-6 py-8" title="Loading team" description="Loading team..." />
             ) : (
               <div className="mt-6 overflow-x-auto">
                 <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
@@ -423,14 +405,14 @@ export default function AdminPage() {
                           <td className="px-3 py-3 text-sm text-slate-500 dark:text-slate-400">{joinedLabel}</td>
                           <td className="px-3 py-3 text-right text-sm">
                             {canManageTeam ? (
-                              <button
+                              <Button
                                 type="button"
                                 disabled={Boolean(removingByUserId[userId]) || !userId}
                                 onClick={() => void handleRemove(userId, email)}
-                                className="rounded-lg border border-red-200 px-3 py-1.5 font-semibold text-red-600 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-red-900/60 dark:text-red-300 dark:hover:bg-red-950/30"
+                                variant="destructive"
                               >
                                 {removingByUserId[userId] ? 'Removing...' : 'Remove'}
-                              </button>
+                              </Button>
                             ) : (
                               <span className="text-slate-400">--</span>
                             )}
@@ -449,7 +431,7 @@ export default function AdminPage() {
                 </table>
               </div>
             )}
-          </div>
+          </Card>
         </div>
       )}
     </AppShell>

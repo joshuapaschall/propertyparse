@@ -11,6 +11,9 @@ import ProgressIndicator from '../components/ProgressIndicator';
 import ResultsTable from '../components/ResultsTable';
 import TablePagination from '../components/TablePagination';
 import EditRowModal, { ParsedRow } from '../components/EditRowModal';
+import Card from '../components/ui/Card';
+import EmptyState from '../components/ui/EmptyState';
+import Skeleton from '../components/ui/Skeleton';
 import { downloadCsv } from '../lib/csv';
 import {
   getReasonMetadata,
@@ -53,15 +56,15 @@ const ASYNC_PARSE_MIME_PREFIXES = ['application/pdf', 'image/'];
 const ASYNC_PARSE_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'tiff', 'tif', 'bmp', 'heic', 'heif'];
 
 const ResultsTableSkeleton = () => (
-  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-    <div className="animate-pulse space-y-3 p-4">
-      <div className="h-4 w-40 rounded bg-slate-200 dark:bg-slate-800" />
-      <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
-      <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
-      <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
-      <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
+  <Card className="overflow-hidden p-4">
+    <div className="space-y-3">
+      <Skeleton className="h-4 w-40" />
+      <Skeleton className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
+      <Skeleton className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
+      <Skeleton className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
+      <Skeleton className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
     </div>
-  </div>
+  </Card>
 );
 const LAST_JOB_STORAGE_KEY = 'pp-parse-last-job';
 const LAST_JOB_STORAGE_VERSION = 1;
@@ -2211,7 +2214,7 @@ export default function ParsePage() {
                       <button
                         type="button"
                         onClick={() => openReviewDrawer(row)}
-                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                       
                       >
                         Review
                       </button>
@@ -2219,7 +2222,7 @@ export default function ParsePage() {
                         <button
                           type="button"
                           onClick={() => copyJsonPayload(row)}
-                          className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                         
                         >
                           Copy Row JSON
                         </button>
@@ -2580,7 +2583,7 @@ export default function ParsePage() {
                       type="button"
                       onClick={() => handleDownloadJobExport(type, downloadLabels[type])}
                       disabled={!jobId || activeDownloadType !== null}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                     
                     >
                       {activeDownloadType === type ? 'Downloading…' : `Download ${downloadLabels[type]}`}
                     </button>
@@ -2650,9 +2653,7 @@ export default function ParsePage() {
                 ) : null}
               </div>
             ) : (
-              <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-                Run a parse to see results.
-              </div>
+              <EmptyState className="mt-4 py-6" title="No parse results" description="Run a parse to see results." />
             )}
           </div>
 
@@ -2674,7 +2675,7 @@ export default function ParsePage() {
                   <button
                     type="button"
                     onClick={handleCopyDebugInfo}
-                    className="rounded-lg border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-700 transition hover:bg-rose-100 dark:border-rose-400/40 dark:text-rose-200 dark:hover:bg-rose-500/20"
+                   
                   >
                     Copy Debug Info
                   </button>
@@ -3032,7 +3033,7 @@ export default function ParsePage() {
                                     <button
                                       type="button"
                                       onClick={() => openReviewDrawer(row)}
-                                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                     
                                     >
                                       Review
                                     </button>
@@ -3040,7 +3041,7 @@ export default function ParsePage() {
                                       <button
                                         type="button"
                                         onClick={() => copyJsonPayload(row)}
-                                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                       
                                       >
                                         Copy Row JSON
                                       </button>
@@ -3119,7 +3120,7 @@ export default function ParsePage() {
                                     <button
                                       type="button"
                                       onClick={() => openReviewDrawer(row)}
-                                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                     
                                     >
                                       Review
                                     </button>
@@ -3127,7 +3128,7 @@ export default function ParsePage() {
                                       <button
                                         type="button"
                                         onClick={() => copyJsonPayload(row)}
-                                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                       
                                       >
                                         Copy Row JSON
                                       </button>
@@ -3255,7 +3256,7 @@ export default function ParsePage() {
                                     <button
                                       type="button"
                                       onClick={() => openReviewDrawer(row)}
-                                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                     
                                     >
                                       Review
                                     </button>
@@ -3263,7 +3264,7 @@ export default function ParsePage() {
                                       <button
                                         type="button"
                                         onClick={() => copyJsonPayload(row)}
-                                        className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                       
                                       >
                                         Copy Row JSON
                                       </button>
