@@ -235,7 +235,9 @@ export default function AdminPage() {
   const [inviteLastName, setInviteLastName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('member');
+  const [inviteGenerateTempPassword, setInviteGenerateTempPassword] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [generatedTempPassword, setGeneratedTempPassword] = useState<string | null>(null);
 
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [editFirstName, setEditFirstName] = useState('');
@@ -323,18 +325,27 @@ export default function AdminPage() {
     setInviteLoading(true);
     setTeamError(null);
     setTeamMessage(null);
+    setGeneratedTempPassword(null);
     try {
-      await inviteOrgMember({
+      const inviteResponse = await inviteOrgMember({
         firstName: inviteFirstName.trim(),
         lastName: inviteLastName.trim(),
         email: inviteEmail.trim(),
         role: inviteRole,
+        generateTemporaryPassword: inviteGenerateTempPassword,
       });
       setInviteFirstName('');
       setInviteLastName('');
       setInviteEmail('');
       setInviteRole('member');
-      setTeamMessage('Invitation sent. Ask the invited user to accept their invite, then visit Account > Security to set a password.');
+      setInviteGenerateTempPassword(false);
+      const tempPassword = inviteResponse.temporaryPassword ?? inviteResponse.tempPassword ?? null;
+      setGeneratedTempPassword(tempPassword);
+      setTeamMessage(
+        tempPassword
+          ? 'Invitation sent. Share the temporary password securely. The user will be forced to change it.'
+          : 'Invitation sent. The user can finish onboarding from their invite email.'
+      );
       showToast({ title: 'Invitation created', variant: 'success' });
       await loadMembers();
     } catch (err) {
@@ -515,6 +526,20 @@ export default function AdminPage() {
                     </option>
                   ))}
                 </select>
+                <label className="md:col-span-2 xl:col-span-5 flex items-start gap-3 rounded-lg border border-slate-300/70 px-3 py-2 text-sm dark:border-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={inviteGenerateTempPassword}
+                    onChange={(event) => setInviteGenerateTempPassword(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <span>
+                    <span className="font-medium text-slate-700 dark:text-slate-200">Generate temporary password</span>
+                    <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+                      Share temp password securely; user will be forced to change it.
+                    </span>
+                  </span>
+                </label>
                 <Button type="submit" disabled={inviteLoading} variant="primary">
                   {inviteLoading ? 'Inviting...' : 'Invite Member'}
                 </Button>
@@ -525,6 +550,13 @@ export default function AdminPage() {
             {teamMessage ? (
               <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
                 {teamMessage}
+              </div>
+            ) : null}
+            {generatedTempPassword ? (
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-200">
+                <p className="font-semibold">Temporary password (shown once)</p>
+                <p className="mt-2 rounded bg-white/70 px-3 py-2 font-mono text-base text-amber-950 dark:bg-slate-900/60 dark:text-amber-100">{generatedTempPassword}</p>
+                <p className="mt-2 text-xs">Share temp password securely; user will be forced to change it.</p>
               </div>
             ) : null}
 

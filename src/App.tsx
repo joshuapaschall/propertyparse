@@ -7,6 +7,8 @@ import HistoryDetailPage from './pages/HistoryDetailPage';
 import HistoryPage from './pages/HistoryPage';
 import ParsePage from './pages/ParsePage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import AuthCallbackPage from './pages/AuthCallbackPage';
+import SetPasswordOnboardingPage from './pages/SetPasswordOnboardingPage';
 import AccountSecurityPage from './pages/AccountSecurityPage';
 import LoadingSpinner from './LoadingSpinner';
 import { ToastProvider } from './components/ui/ToastProvider';
@@ -28,6 +30,7 @@ type AuthContextValue = {
   isBootstrapping: boolean;
   bootstrapError: string | null;
   hasPendingInvitation: boolean;
+  requiresPasswordSetup: boolean;
   loginWithPassword: (email: string, password: string) => Promise<void>;
   loginWithMagicLink: (email: string) => Promise<void>;
   signUpWithPassword: (email: string, password: string) => Promise<{ needsEmailConfirmation: boolean }>;
@@ -257,6 +260,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const isReady = Boolean(session && hasOrgContext);
   const hasPendingInvitation =
     bootstrapError === 'You have an invitation waiting. Accept to continue.';
+  const requiresPasswordSetup = session?.user.user_metadata?.requires_password_setup === true;
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -272,6 +276,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       isBootstrapping,
       bootstrapError,
       hasPendingInvitation,
+      requiresPasswordSetup,
       loginWithPassword,
       loginWithMagicLink,
       signUpWithPassword,
@@ -292,6 +297,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       isBootstrapping,
       bootstrapError,
       hasPendingInvitation,
+      requiresPasswordSetup,
       loginWithPassword,
       loginWithMagicLink,
       signUpWithPassword,
@@ -344,6 +350,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     hasPendingInvitation,
     pendingInvitation,
     acceptPendingInvitation,
+    requiresPasswordSetup,
   } = useAuth();
   const [isAcceptingInvitation, setIsAcceptingInvitation] = useState(false);
 
@@ -357,6 +364,10 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
   if (!isAuthenticated) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (requiresPasswordSetup) {
+    return <Navigate to="/welcome/set-password" replace />;
   }
 
   if (!isReady) {
@@ -423,14 +434,18 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function LoginGate() {
-  const { isAuthenticated, isReady, isSessionLoading, isBootstrapping } = useAuth();
+  const { isAuthenticated, isReady, isSessionLoading, isBootstrapping, requiresPasswordSetup } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
+    if (isAuthenticated && requiresPasswordSetup) {
+      navigate('/welcome/set-password', { replace: true });
+      return;
+    }
     if (isAuthenticated && isReady) {
       navigate('/parse', { replace: true });
     }
-  }, [isAuthenticated, isReady, navigate]);
+  }, [isAuthenticated, isReady, navigate, requiresPasswordSetup]);
 
   if (isSessionLoading || (isAuthenticated && isBootstrapping)) {
     return (
@@ -449,6 +464,8 @@ function AppRoutes() {
       <Route path="/" element={<LoginGate />} />
       <Route path="/login" element={<LoginGate />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
+      <Route path="/auth/callback" element={<AuthCallbackPage />} />
+      <Route path="/welcome/set-password" element={<SetPasswordOnboardingPage />} />
       <Route
         path="/parse"
         element={
