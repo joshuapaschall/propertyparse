@@ -645,12 +645,12 @@ export default function ParsePage() {
 
   const dedupedMatched = useMemo(() => dedupeRows(legacyMatchedRows), [legacyMatchedRows]);
   const dedupedUnmatched = useMemo(() => dedupeRows(legacyUnmatchedRows), [legacyUnmatchedRows]);
-  const loadStateOptions = useCallback(async (inputValue: string) => searchStates(inputValue, 30), []);
+  const loadStateOptions = useCallback(async (inputValue: string) => searchStates(inputValue), []);
 
   const loadCountyOptions = useCallback(
     async (inputValue: string) => {
       if (!stateValue) return [];
-      return searchCounties(stateValue, inputValue, 30);
+      return searchCounties(stateValue, inputValue);
     },
     [stateValue],
   );
@@ -658,7 +658,7 @@ export default function ParsePage() {
   const loadCityOptions = useCallback(
     async (inputValue: string) => {
       if (!stateValue) return [];
-      return searchCities(stateValue, inputValue, countyValue || undefined, 30);
+      return searchCities(stateValue, inputValue, countyValue || undefined);
     },
     [countyValue, stateValue],
   );
