@@ -7,6 +7,7 @@ import HistoryDetailPage from './pages/HistoryDetailPage';
 import HistoryPage from './pages/HistoryPage';
 import ParsePage from './pages/ParsePage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import AccountSecurityPage from './pages/AccountSecurityPage';
 import LoadingSpinner from './LoadingSpinner';
 import { ToastProvider } from './components/ui/ToastProvider';
 import { acceptInvitation, getMe } from './lib/api';
@@ -477,6 +478,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <AdminPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/account/security"
+        element={
+          <ProtectedRoute>
+            <AccountSecurityPage />
           </ProtectedRoute>
         }
       />

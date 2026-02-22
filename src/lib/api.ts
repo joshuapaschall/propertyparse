@@ -62,6 +62,8 @@ export type OrgMember = {
   userId: string;
   email: string;
   role: string;
+  firstName?: string;
+  lastName?: string;
   createdAt?: string;
   [key: string]: JsonValue | undefined;
 };
@@ -373,15 +375,23 @@ export async function getSystemDiagnostics() {
   return (res.data ?? res.items ?? res) as SystemDiagnostics;
 }
 
-export async function inviteOrgMember(email: string, role: string) {
-  return postJson<JsonValue>('/org/invite', { email, role }, { headers: getAuthHeaders() });
+export async function inviteOrgMember(payload: { firstName: string; lastName: string; email: string; role: string }) {
+  return postJson<JsonValue>('/org/invite', payload, { headers: getAuthHeaders() });
 }
 
-export async function updateOrgMemberRole(userId: string, role: string) {
+export async function updateOrgMember(userId: string, payload: { firstName: string; lastName: string; role: string }) {
   return requestJson<JsonValue>(`/org/members/${userId}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', ...getAuthHeaders() },
-    body: JSON.stringify({ role }),
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function resetOrgMemberPassword(userId: string) {
+  return requestJson<JsonValue>(`/org/members/${userId}/reset-password`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({}),
   });
 }
 
