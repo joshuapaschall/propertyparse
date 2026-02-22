@@ -8,6 +8,7 @@ type AppShellProps = {
   subtitle?: string;
   children: ReactNode;
   actions?: ReactNode;
+  contentFullWidth?: boolean;
 };
 
 type NavItem = {
@@ -55,7 +56,7 @@ const navItems: NavItem[] = [
 const navLinkBase =
   'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition';
 
-export default function AppShell({ title, subtitle, actions, children }: AppShellProps) {
+export default function AppShell({ title, subtitle, actions, children, contentFullWidth = false }: AppShellProps) {
   const { logout } = useAuthControls();
   const { theme, toggleTheme } = useThemeControls();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -172,7 +173,7 @@ export default function AppShell({ title, subtitle, actions, children }: AppShel
               </div>
             </div>
           </header>
-          <main className="mx-auto w-full max-w-[1200px] px-6 py-8">
+          <main className={`w-full px-6 py-8 ${contentFullWidth ? '' : 'mx-auto max-w-[1200px]'}`}>
             <div className="mb-8">
               <h1 className="text-2xl font-semibold">{title}</h1>
               {subtitle ? (
