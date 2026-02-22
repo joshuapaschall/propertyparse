@@ -15,6 +15,7 @@ import Card from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import Skeleton from '../components/ui/Skeleton';
 import ExportMenu from '../components/ui/ExportMenu';
+import { useToast } from '../components/ui/ToastProvider';
 import { downloadCsv } from '../lib/csv';
 import {
   getReasonMetadata,
@@ -179,10 +180,9 @@ const dedupeRows = (rows: ParsedRow[]) => {
   });
 };
 
-const copyJsonPayload = (payload: unknown) => {
-  const text = JSON.stringify(payload, null, 2);
+const copyTextToClipboard = async (text: string) => {
   if (navigator.clipboard?.writeText) {
-    void navigator.clipboard.writeText(text);
+    await navigator.clipboard.writeText(text);
     return;
   }
   const textarea = document.createElement('textarea');
@@ -598,6 +598,7 @@ export default function ParsePage() {
   const [countyValue, setCountyValue] = useState('');
   const [cityValue, setCityValue] = useState('');
   const [campaignName, setCampaignName] = useState('');
+  const { showToast } = useToast();
   const [file, setFile] = useState<File | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -1406,7 +1407,7 @@ export default function ParsePage() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [navigateReviewRow, reviewRow]);
 
-  const handleCopyDebugInfo = () => {
+  const handleCopyDebugInfo = async () => {
     const debugInfo = [
       `Timestamp: ${parseTimestamp ?? new Date().toISOString()}`,
       `State: ${stateValue || '--'}`,
@@ -1425,19 +1426,12 @@ export default function ParsePage() {
       `Metadata: ${metadata ? JSON.stringify(metadata, null, 2) : '--'}`,
     ].join('\n');
 
-    if (navigator.clipboard?.writeText) {
-      void navigator.clipboard.writeText(debugInfo);
-      return;
+    try {
+      await copyTextToClipboard(debugInfo);
+      showToast({ title: 'Copied', variant: 'success' });
+    } catch {
+      showToast({ title: 'Unable to copy debug info', variant: 'error' });
     }
-
-    const textarea = document.createElement('textarea');
-    textarea.value = debugInfo;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textarea);
   };
 
   const stopPolling = () => {
@@ -1864,9 +1858,11 @@ export default function ParsePage() {
       setRetryAvailable('available');
       updateRetryStatus(row.id, false);
       applyRetryResponse(response);
+      showToast({ title: 'Row retried', variant: 'success' });
     } catch {
       setRetryAvailable('unavailable');
       updateRetryStatus(row.id, true);
+      showToast({ title: 'Retry failed', variant: 'error' });
     }
   };
 
@@ -1883,6 +1879,7 @@ export default function ParsePage() {
       applyRetryResponse(response);
     } catch {
       setRetryAvailable('unavailable');
+      showToast({ title: 'Retry failed', variant: 'error' });
     }
   };
 
@@ -2055,8 +2052,11 @@ export default function ParsePage() {
         return next;
       });
       closeReviewDrawer();
+      showToast({ title: 'Row retried', variant: 'success' });
     } catch (err) {
-      setReviewError((err as Error).message ?? 'Retry failed.');
+      const message = (err as Error).message ?? 'Retry failed.';
+      setReviewError(message);
+      showToast({ title: message, variant: 'error' });
     } finally {
       setReviewSaving(false);
     }
@@ -2127,6 +2127,7 @@ export default function ParsePage() {
       link.remove();
       URL.revokeObjectURL(href);
       setDownloadSuccessLabel(`${label} downloaded`);
+      showToast({ title: 'Export downloaded', variant: 'success' });
       if (downloadSuccessTimerRef.current !== null) {
         window.clearTimeout(downloadSuccessTimerRef.current);
       }
@@ -2135,7 +2136,9 @@ export default function ParsePage() {
         downloadSuccessTimerRef.current = null;
       }, 2000);
     } catch (err) {
-      setPollError((err as Error).message ?? 'Failed to download export.');
+      const message = (err as Error).message ?? 'Failed to download export.';
+      setPollError(message);
+      showToast({ title: message, variant: 'error' });
     } finally {
       setActiveDownloadType(null);
     }
@@ -2237,7 +2240,7 @@ export default function ParsePage() {
                       {showDebugMode ? (
                         <button
                           type="button"
-                          onClick={() => copyJsonPayload(row)}
+                          onClick={() => void handleCopyRowJson(row)}
                          
                         >
                           Copy Row JSON
@@ -2268,6 +2271,25 @@ export default function ParsePage() {
     .filter(Boolean)
     .join(', ');
   const canEditReview = reviewNeedsReview;
+
+  const handleCopyRowJson = async (payload: unknown) => {
+    try {
+      await copyTextToClipboard(JSON.stringify(payload, null, 2));
+      showToast({ title: 'Copied', variant: 'success' });
+    } catch {
+      showToast({ title: 'Unable to copy row JSON', variant: 'error' });
+    }
+  };
+
+  const handleCopyReviewAddress = async (address: string) => {
+    if (!address) return;
+    try {
+      await copyTextToClipboard(address);
+      showToast({ title: 'Copied', variant: 'success' });
+    } catch {
+      showToast({ title: 'Unable to copy address', variant: 'error' });
+    }
+  };
 
   return (
     <AppShell
@@ -3008,7 +3030,7 @@ export default function ParsePage() {
                                     {showDebugMode ? (
                                       <button
                                         type="button"
-                                        onClick={() => copyJsonPayload(row)}
+                                        onClick={() => void handleCopyRowJson(row)}
                                        
                                       >
                                         Copy Row JSON
@@ -3095,7 +3117,7 @@ export default function ParsePage() {
                                     {showDebugMode ? (
                                       <button
                                         type="button"
-                                        onClick={() => copyJsonPayload(row)}
+                                        onClick={() => void handleCopyRowJson(row)}
                                        
                                       >
                                         Copy Row JSON
@@ -3231,7 +3253,7 @@ export default function ParsePage() {
                                     {showDebugMode ? (
                                       <button
                                         type="button"
-                                        onClick={() => copyJsonPayload(row)}
+                                        onClick={() => void handleCopyRowJson(row)}
                                        
                                       >
                                         Copy Row JSON
@@ -3429,15 +3451,35 @@ export default function ParsePage() {
                 <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
                   Detected address
                 </p>
-                <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  {reviewDetectedAddress || '—'}
-                </p>
+                <div className="mt-1 flex items-start justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    {reviewDetectedAddress || '—'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyReviewAddress(reviewDetectedAddress)}
+                    className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                    disabled={!reviewDetectedAddress}
+                  >
+                    Copy
+                  </button>
+                </div>
                 <p className="mt-3 text-xs uppercase text-slate-500 dark:text-slate-400">
                   Verified address
                 </p>
-                <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  {reviewVerifiedAddress || '—'}
-                </p>
+                <div className="mt-1 flex items-start justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                    {reviewVerifiedAddress || '—'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyReviewAddress(reviewVerifiedAddress)}
+                    className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                    disabled={!reviewVerifiedAddress}
+                  >
+                    Copy
+                  </button>
+                </div>
               </div>
 
               <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
@@ -3476,7 +3518,16 @@ export default function ParsePage() {
 
 
               <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
-                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Raw row JSON</p>
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Raw row JSON</p>
+                  <button
+                    type="button"
+                    onClick={() => void handleCopyRowJson(reviewRow?.raw_row ?? {})}
+                    className="rounded-md border border-slate-200 px-2 py-1 text-[11px] font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Copy JSON
+                  </button>
+                </div>
                 <pre className="mt-2 max-h-52 overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-300">
 {JSON.stringify(reviewRow?.raw_row ?? {}, null, 2)}</pre>
               </div>

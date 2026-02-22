@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
 import Button from '../components/ui/Button';
+import { useToast } from '../components/ui/ToastProvider';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import {
@@ -116,6 +117,7 @@ const formatMetricValue = (metricKey: string, value: number) => {
 };
 
 function SetupRequiredCard({ guidance, errorInfo }: { guidance: SetupGuidance | null; errorInfo: ApiErrorInfo }) {
+  const { showToast } = useToast();
   const checklist = [
     {
       label: 'Supabase configured',
@@ -150,8 +152,10 @@ function SetupRequiredCard({ guidance, errorInfo }: { guidance: SetupGuidance | 
   const handleCopyInstructions = async () => {
     try {
       await navigator.clipboard.writeText(setupInstructions);
+      showToast({ title: 'Copied', variant: 'success' });
     } catch {
       window.prompt('Copy details:', setupInstructions);
+      showToast({ title: 'Copied', variant: 'info' });
     }
   };
 
@@ -210,6 +214,7 @@ export default function AdminPage() {
   const canAccessAdmin = role === 'admin' || role === 'owner';
   const canManageTeam = role === 'admin' || role === 'owner';
 
+  const { showToast } = useToast();
   const [activeRange, setActiveRange] = useState<RangeKey>('today');
 
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
@@ -312,9 +317,12 @@ export default function AdminPage() {
       setInviteEmail('');
       setInviteRole('member');
       setTeamMessage('Invitation sent.');
+      showToast({ title: 'Invitation created', variant: 'success' });
       await loadMembers();
     } catch (err) {
-      setTeamError(getApiErrorInfo(err) ?? { message: 'Unable to send invitation.', endpoint: '/org/invite' });
+      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to send invitation.', endpoint: '/org/invite' };
+      setTeamError(errorInfo);
+      showToast({ title: errorInfo.message, variant: 'error' });
     } finally {
       setInviteLoading(false);
     }
@@ -330,7 +338,9 @@ export default function AdminPage() {
       setTeamMessage('Member role updated.');
       await loadMembers();
     } catch (err) {
-      setTeamError(getApiErrorInfo(err) ?? { message: 'Unable to update member role.', endpoint: `/org/members/${userId}` });
+      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to update member role.', endpoint: `/org/members/${userId}` };
+      setTeamError(errorInfo);
+      showToast({ title: errorInfo.message, variant: 'error' });
     } finally {
       setUpdatingRoleByUserId((prev) => ({ ...prev, [userId]: false }));
     }
@@ -349,7 +359,9 @@ export default function AdminPage() {
       setTeamMessage('Member removed.');
       await loadMembers();
     } catch (err) {
-      setTeamError(getApiErrorInfo(err) ?? { message: 'Unable to remove member.', endpoint: `/org/members/${userId}` });
+      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to remove member.', endpoint: `/org/members/${userId}` };
+      setTeamError(errorInfo);
+      showToast({ title: errorInfo.message, variant: 'error' });
     } finally {
       setRemovingByUserId((prev) => ({ ...prev, [userId]: false }));
     }

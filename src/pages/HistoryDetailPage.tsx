@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import { downloadJobExport, getJobDetail, getJobRows, JobExportType, JobRecord } from '../lib/api';
+import { useToast } from '../components/ui/ToastProvider';
 
 type ParsedPreviewRow = {
   id: string;
@@ -105,6 +106,7 @@ const triggerDownload = (blob: Blob, filename: string) => {
 };
 
 export default function HistoryDetailPage() {
+  const { showToast } = useToast();
   const { jobId } = useParams();
   const [job, setJob] = useState<JobRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -137,7 +139,11 @@ export default function HistoryDetailPage() {
           setNeedsReviewRows(normalizeRows(needsReviewResponse ?? []));
         }
       } catch (err) {
-        if (active) setError((err as Error).message ?? 'Unable to load job details.');
+        if (active) {
+          const message = (err as Error).message ?? 'Unable to load job details.';
+          setError(message);
+          showToast({ title: message, variant: 'error' });
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -187,8 +193,11 @@ export default function HistoryDetailPage() {
     try {
       const result = await downloadJobExport(jobId, type);
       triggerDownload(result.blob, result.filename);
+      showToast({ title: 'Export downloaded', variant: 'success' });
     } catch (err) {
-      setError((err as Error).message ?? 'Export failed.');
+      const message = (err as Error).message ?? 'Export failed.';
+      setError(message);
+      showToast({ title: message, variant: 'error' });
     } finally {
       setDownloading((prev) => ({ ...prev, [key]: false }));
     }
