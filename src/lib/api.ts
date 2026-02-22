@@ -73,6 +73,15 @@ export type SystemDiagnostics = {
   [key: string]: JsonValue | undefined;
 };
 
+export type ApiErrorInfo = {
+  message: string;
+  endpoint: string;
+  status?: number;
+  isNetworkError?: boolean;
+};
+
+type ApiError = Error & { apiErrorInfo?: ApiErrorInfo };
+
 const normalizedApiBaseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
 const joinUrl = (path: string) =>
   new URL(path.startsWith('/') ? path.slice(1) : path, normalizedApiBaseUrl).toString();
@@ -105,17 +114,57 @@ const getErrorMessage = async (res: Response) => {
   return text;
 };
 
+const createApiError = (info: ApiErrorInfo): ApiError => {
+  const error = new Error(info.message) as ApiError;
+  error.apiErrorInfo = info;
+  return error;
+};
+
+export const getApiErrorInfo = (error: unknown): ApiErrorInfo | null => {
+  if (error && typeof error === 'object' && 'apiErrorInfo' in error) {
+    const info = (error as ApiError).apiErrorInfo;
+    if (info && typeof info.message === 'string' && typeof info.endpoint === 'string') {
+      return info;
+    }
+  }
+  if (error instanceof Error) {
+    return { message: error.message, endpoint: 'unknown' };
+  }
+  return null;
+};
+
 async function requestJson<T>(path: string, options: RequestInit) {
-  const res = await fetch(joinUrl(path), {
-    ...options,
-    headers: { ...getAuthHeaders(), ...(options.headers ?? {}) },
-  });
+  let res: Response;
+  try {
+    res = await fetch(joinUrl(path), {
+      ...options,
+      headers: { ...getAuthHeaders(), ...(options.headers ?? {}) },
+    });
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw createApiError({
+        message: `Network error (CORS or connectivity). Endpoint: ${path}. Check ALLOWED_ORIGINS on API.`,
+        endpoint: path,
+        isNetworkError: true,
+      });
+    }
+    throw error;
+  }
   if (!res.ok) {
-    throw new Error(await getErrorMessage(res));
+    const detail = await getErrorMessage(res);
+    throw createApiError({
+      message: `HTTP ${res.status}: ${detail}`,
+      endpoint: path,
+      status: res.status,
+    });
   }
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
-    throw new Error('Expected JSON response.');
+    throw createApiError({
+      message: `HTTP ${res.status}: Expected JSON response.`,
+      endpoint: path,
+      status: res.status,
+    });
   }
   return (await res.json()) as T;
 }
