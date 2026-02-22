@@ -2141,7 +2141,6 @@ export default function ParsePage() {
                   placeholder={stateValue ? 'Search county' : 'Select state first'}
                   disabled={!stateValue}
                   cacheScope={`counties:${stateValue}`}
-                  noOptionsMessage={stateValue ? 'No matches' : 'Select a state first'}
                   loadOptions={loadCountyOptions}
                   onChange={(value) => {
                     setCountyValue(value);
@@ -2155,11 +2154,10 @@ export default function ParsePage() {
                   placeholder={stateValue ? 'Search city' : 'Select state first'}
                   disabled={!stateValue}
                   cacheScope={`cities:${stateValue}:${countyValue}`}
-                  noOptionsMessage={stateValue ? 'No matches' : 'Select a state first'}
                   loadOptions={loadCityOptions}
                   onChange={(value) => setCityValue(value)}
                   onClear={() => setCityValue('')}
-                  helperText="Scroll or type to filter"
+                  helperText="Select a State, and then either a County or a City (or both)."
                 />
                 {showLocationValidation ? (
                   <p className="text-xs text-rose-600 dark:text-rose-300">
