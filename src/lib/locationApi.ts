@@ -1,4 +1,5 @@
 import { getAuthHeaderState } from './authState';
+import { toFullState } from './stateNames';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -85,14 +86,14 @@ async function postSearch(endpoint: string, payload: SearchPayload): Promise<str
   return normalized;
 }
 
-export async function searchStates(query = '', limit = 200) {
-  return postSearch('/states/search', { query: query ?? '', limit });
+export async function searchStates(query: string, limit = 100) {
+  return postSearch('/states/search', { query, limit });
 }
 
-export async function searchCounties(state: string, query = '', limit = 10000) {
-  return postSearch('/counties/search', { state, query: query ?? '', limit });
+export async function searchCounties(state: string, query: string, limit = 5000) {
+  return postSearch('/counties/search', { state: toFullState(state), query, limit });
 }
 
-export async function searchCities(state: string, query = '', county?: string, limit = 50000) {
-  return postSearch('/cities/search', { state, query: query ?? '', county, limit });
+export async function searchCities(state: string, query: string, county?: string, limit = 50000) {
+  return postSearch('/cities/search', { state: toFullState(state), query, county, limit });
 }
