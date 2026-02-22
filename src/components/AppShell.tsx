@@ -129,7 +129,7 @@ export default function AppShell({ title, subtitle, actions, children }: AppShel
 
         <div className="flex min-h-screen flex-1 flex-col">
           <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
-            <div className="mx-auto flex w-full max-w-7xl flex-wrap items-center justify-between gap-4 px-6 py-4">
+            <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-between gap-4 px-6 py-4">
               <div className="flex items-center gap-3">
                 <button
                   type="button"
@@ -172,7 +172,7 @@ export default function AppShell({ title, subtitle, actions, children }: AppShel
               </div>
             </div>
           </header>
-          <main className="mx-auto w-full max-w-7xl px-6 py-8">
+          <main className="mx-auto w-full max-w-[1200px] px-6 py-8">
             <div className="mb-8">
               <h1 className="text-2xl font-semibold">{title}</h1>
               {subtitle ? (
