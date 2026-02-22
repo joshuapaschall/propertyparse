@@ -70,6 +70,10 @@ type SetupGuidance = {
 const getSetupGuidanceFromDiagnostics = (diagnostics: SystemDiagnostics | null, rawError: string): SetupGuidance => {
   const messages: string[] = [];
 
+  if (diagnostics === null) {
+    messages.push('We couldn\'t load system diagnostics. Check API connectivity/CORS and try again.');
+  }
+
   if (diagnostics?.supabase_configured === false) {
     messages.push('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the API droplet and redeploy.');
   }
@@ -211,12 +215,12 @@ export default function AdminPage() {
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState<ApiErrorInfo | null>(null);
-  const [metricsSetupGuidance, setMetricsSetupGuidance] = useState<SetupGuidance | null>(null);
+  const [metricsDiagnostics, setMetricsDiagnostics] = useState<SystemDiagnostics | null>(null);
 
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<ApiErrorInfo | null>(null);
-  const [teamSetupGuidance, setTeamSetupGuidance] = useState<SetupGuidance | null>(null);
+  const [teamDiagnostics, setTeamDiagnostics] = useState<SystemDiagnostics | null>(null);
   const [teamMessage, setTeamMessage] = useState<string | null>(null);
 
   const [inviteEmail, setInviteEmail] = useState('');
@@ -229,7 +233,7 @@ export default function AdminPage() {
   const loadMetrics = async (range: RangeKey) => {
     setMetricsLoading(true);
     setMetricsError(null);
-    setMetricsSetupGuidance(null);
+    setMetricsDiagnostics(null);
     try {
       const data = await getMetricsSummary(range);
       setMetrics(data ?? null);
@@ -238,9 +242,9 @@ export default function AdminPage() {
       setMetricsError(errorInfo);
       try {
         const diagnostics = await getSystemDiagnostics();
-        setMetricsSetupGuidance(getSetupGuidanceFromDiagnostics(diagnostics, errorInfo.message));
+        setMetricsDiagnostics(diagnostics ?? null);
       } catch {
-        setMetricsSetupGuidance(getSetupGuidanceFromDiagnostics(null, errorInfo.message));
+        setMetricsDiagnostics(null);
       }
     } finally {
       setMetricsLoading(false);
@@ -250,7 +254,7 @@ export default function AdminPage() {
   const loadMembers = async () => {
     setTeamLoading(true);
     setTeamError(null);
-    setTeamSetupGuidance(null);
+    setTeamDiagnostics(null);
     try {
       const list = await getOrgMembers();
       setMembers(Array.isArray(list) ? list : []);
@@ -259,9 +263,9 @@ export default function AdminPage() {
       setTeamError(errorInfo);
       try {
         const diagnostics = await getSystemDiagnostics();
-        setTeamSetupGuidance(getSetupGuidanceFromDiagnostics(diagnostics, errorInfo.message));
+        setTeamDiagnostics(diagnostics ?? null);
       } catch {
-        setTeamSetupGuidance(getSetupGuidanceFromDiagnostics(null, errorInfo.message));
+        setTeamDiagnostics(null);
       }
     } finally {
       setTeamLoading(false);
@@ -382,7 +386,7 @@ export default function AdminPage() {
             {metricsLoading ? (
               <EmptyState className="mt-6" title="Loading metrics" description="Loading admin metrics..." />
             ) : metricsError ? (
-              <SetupRequiredCard guidance={metricsSetupGuidance} errorInfo={metricsError} />
+              <SetupRequiredCard guidance={getSetupGuidanceFromDiagnostics(metricsDiagnostics, metricsError.message)} errorInfo={metricsError} />
             ) : (
               <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {renderedCards.map((metric) => {
@@ -441,7 +445,7 @@ export default function AdminPage() {
               </form>
             ) : null}
 
-            {teamError ? <SetupRequiredCard guidance={teamSetupGuidance} errorInfo={teamError} /> : null}
+            {teamError ? <SetupRequiredCard guidance={getSetupGuidanceFromDiagnostics(teamDiagnostics, teamError.message)} errorInfo={teamError} /> : null}
             {teamMessage ? (
               <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
                 {teamMessage}
