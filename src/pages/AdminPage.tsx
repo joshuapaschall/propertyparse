@@ -4,11 +4,13 @@ import AppShell from '../components/AppShell';
 import {
   getMetricsSummary,
   getOrgMembers,
+  getSystemDiagnostics,
   inviteOrgMember,
   MetricsRange,
   MetricsSummary,
   OrgMember,
   removeOrgMember,
+  SystemDiagnostics,
   updateOrgMemberRole,
 } from '../lib/api';
 
@@ -49,6 +51,39 @@ const toNumber = (value: unknown) => {
   return 0;
 };
 
+
+
+type SetupGuidance = {
+  title: string;
+  messages: string[];
+  rawError: string;
+};
+
+const getSetupGuidanceFromDiagnostics = (diagnostics: SystemDiagnostics | null, rawError: string): SetupGuidance => {
+  const messages: string[] = [];
+
+  if (diagnostics?.supabase_configured === false) {
+    messages.push('Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY on the API droplet and redeploy.');
+  }
+
+  const missingTables = Array.isArray(diagnostics?.tables_missing) ? diagnostics.tables_missing : [];
+  const migrationsNeeded = Array.isArray(diagnostics?.migrations_needed) ? diagnostics.migrations_needed : [];
+
+  if (missingTables.length > 0 || migrationsNeeded.length > 0) {
+    const migrationHint = migrationsNeeded.length > 0 ? ` Required migrations: ${migrationsNeeded.join(', ')}.` : '';
+    messages.push(`Run the SQL migrations in Supabase (show the filenames from migrations_needed).${migrationHint}`);
+  }
+
+  if (messages.length === 0) {
+    messages.push('Check API and Supabase connectivity, then redeploy the API after resolving setup issues.');
+  }
+
+  return {
+    title: 'Setup required',
+    messages,
+    rawError,
+  };
+};
 const getMemberValue = (member: OrgMember, keys: string[]) => {
   for (const key of keys) {
     const value = member[key];
@@ -70,10 +105,12 @@ export default function AdminPage() {
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
   const [metricsError, setMetricsError] = useState<string | null>(null);
+  const [metricsSetupGuidance, setMetricsSetupGuidance] = useState<SetupGuidance | null>(null);
 
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<string | null>(null);
+  const [teamSetupGuidance, setTeamSetupGuidance] = useState<SetupGuidance | null>(null);
   const [teamMessage, setTeamMessage] = useState<string | null>(null);
 
   const [inviteEmail, setInviteEmail] = useState('');
@@ -86,11 +123,19 @@ export default function AdminPage() {
   const loadMetrics = async (range: RangeKey) => {
     setMetricsLoading(true);
     setMetricsError(null);
+    setMetricsSetupGuidance(null);
     try {
       const data = await getMetricsSummary(range);
       setMetrics(data ?? null);
     } catch (err) {
-      setMetricsError((err as Error).message ?? 'Unable to load admin metrics.');
+      const rawError = (err as Error).message ?? 'Unable to load admin metrics.';
+      setMetricsError(rawError);
+      try {
+        const diagnostics = await getSystemDiagnostics();
+        setMetricsSetupGuidance(getSetupGuidanceFromDiagnostics(diagnostics, rawError));
+      } catch {
+        setMetricsSetupGuidance(getSetupGuidanceFromDiagnostics(null, rawError));
+      }
     } finally {
       setMetricsLoading(false);
     }
@@ -99,11 +144,19 @@ export default function AdminPage() {
   const loadMembers = async () => {
     setTeamLoading(true);
     setTeamError(null);
+    setTeamSetupGuidance(null);
     try {
       const list = await getOrgMembers();
       setMembers(Array.isArray(list) ? list : []);
     } catch (err) {
-      setTeamError((err as Error).message ?? 'Unable to load team members.');
+      const rawError = (err as Error).message ?? 'Unable to load team members.';
+      setTeamError(rawError);
+      try {
+        const diagnostics = await getSystemDiagnostics();
+        setTeamSetupGuidance(getSetupGuidanceFromDiagnostics(diagnostics, rawError));
+      } catch {
+        setTeamSetupGuidance(getSetupGuidanceFromDiagnostics(null, rawError));
+      }
     } finally {
       setTeamLoading(false);
     }
@@ -230,8 +283,17 @@ export default function AdminPage() {
                 Loading admin metrics...
               </div>
             ) : metricsError ? (
-              <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-6 py-5 text-sm text-red-600 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-200">
-                {metricsError}
+              <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 px-6 py-5 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
+                <p className="text-base font-semibold">{metricsSetupGuidance?.title ?? 'Setup required'}</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {(metricsSetupGuidance?.messages ?? ['Resolve setup issues and retry.']).map((message) => (
+                    <li key={message}>{message}</li>
+                  ))}
+                </ul>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide">Details</summary>
+                  <p className="mt-2 text-xs">{metricsError}</p>
+                </details>
               </div>
             ) : (
               <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -292,8 +354,17 @@ export default function AdminPage() {
             ) : null}
 
             {teamError ? (
-              <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600 dark:border-red-800/60 dark:bg-red-950/40 dark:text-red-200">
-                {teamError}
+              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
+                <p className="text-base font-semibold">{teamSetupGuidance?.title ?? 'Setup required'}</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5">
+                  {(teamSetupGuidance?.messages ?? ['Resolve setup issues and retry.']).map((message) => (
+                    <li key={message}>{message}</li>
+                  ))}
+                </ul>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide">Details</summary>
+                  <p className="mt-2 text-xs">{teamError}</p>
+                </details>
               </div>
             ) : null}
             {teamMessage ? (
