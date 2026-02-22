@@ -23,9 +23,12 @@ import {
 } from '../lib/parseUtils';
 import { canStartParse, hasValidLocation } from '../lib/parseValidation';
 import {
+  downloadJobExport,
   getJobDetail,
   getJobRows,
   getJobWithStatus,
+  JobExportType,
+  JOB_EXPORT_TYPES,
   JobRecord,
   parseFile,
   retryJobRow,
@@ -612,6 +615,8 @@ export default function ParsePage() {
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
   const [reviewAutoFocus, setReviewAutoFocus] = useState(false);
+  const [activeDownloadType, setActiveDownloadType] = useState<JobExportType | null>(null);
+  const [downloadSuccessLabel, setDownloadSuccessLabel] = useState<string | null>(null);
   const [progressInfo, setProgressInfo] = useState<{
     phase: string | null;
     done: number | null;
@@ -631,6 +636,7 @@ export default function ParsePage() {
   const pollingRef = useRef<number | null>(null);
   const progressSamplesRef = useRef<{ timestamp: number; done: number }[]>([]);
   const reviewInputRef = useRef<HTMLInputElement | null>(null);
+  const downloadSuccessTimerRef = useRef<number | null>(null);
 
   const hasFileSelected = Boolean(file);
   const hasLocation = hasValidLocation(stateValue, countyValue, cityValue);
@@ -668,6 +674,10 @@ export default function ParsePage() {
       if (pollingRef.current !== null) {
         window.clearInterval(pollingRef.current);
         pollingRef.current = null;
+      }
+      if (downloadSuccessTimerRef.current !== null) {
+        window.clearTimeout(downloadSuccessTimerRef.current);
+        downloadSuccessTimerRef.current = null;
       }
     };
   }, []);
@@ -1902,6 +1912,12 @@ export default function ParsePage() {
     setReviewSaving(false);
     setReviewAutoFocus(false);
     setReviewDrafts({});
+    if (downloadSuccessTimerRef.current !== null) {
+      window.clearTimeout(downloadSuccessTimerRef.current);
+      downloadSuccessTimerRef.current = null;
+    }
+    setActiveDownloadType(null);
+    setDownloadSuccessLabel(null);
     setStateValue('');
     setCountyValue('');
     setCityValue('');
@@ -1987,6 +2003,46 @@ export default function ParsePage() {
         'raw_row_json',
       ],
     });
+  };
+
+  const handleDownloadJobExport = async (type: JobExportType, label: string) => {
+    if (!jobId) {
+      setError('Missing job ID. Please re-run the parse job.');
+      return;
+    }
+    setActiveDownloadType(type);
+    setPollError(null);
+    try {
+      const { blob, filename } = await downloadJobExport(jobId, type);
+      const href = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = href;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(href);
+      setDownloadSuccessLabel(`${label} downloaded`);
+      if (downloadSuccessTimerRef.current !== null) {
+        window.clearTimeout(downloadSuccessTimerRef.current);
+      }
+      downloadSuccessTimerRef.current = window.setTimeout(() => {
+        setDownloadSuccessLabel(null);
+        downloadSuccessTimerRef.current = null;
+      }, 2000);
+    } catch (err) {
+      setPollError((err as Error).message ?? 'Failed to download export.');
+    } finally {
+      setActiveDownloadType(null);
+    }
+  };
+
+  const downloadLabels: Record<JobExportType, string> = {
+    unique_valid: 'Unique Valid CSV',
+    needs_review: 'Needs Review CSV',
+    processing_report: 'Processing Report CSV',
+    matched: 'Matched CSV',
+    unmatched: 'Unmatched CSV',
   };
 
   const openProcessingReport = (filter: ProcessingReportFilter) => {
@@ -2393,6 +2449,35 @@ export default function ParsePage() {
                 ) : null}
               </div>
             </div>
+
+            {parseSummary ? (
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/40">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-100">Downloads</h3>
+                  {downloadSuccessLabel ? (
+                    <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                      Downloaded
+                    </span>
+                  ) : null}
+                </div>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Export parse results directly from this page.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {JOB_EXPORT_TYPES.map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => handleDownloadJobExport(type, downloadLabels[type])}
+                      disabled={!jobId || activeDownloadType !== null}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      {activeDownloadType === type ? 'Downloading…' : `Download ${downloadLabels[type]}`}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
 
             {parseSummary ? (
               <div className="mt-4 flex flex-wrap gap-3">
