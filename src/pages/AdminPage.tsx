@@ -5,6 +5,8 @@ import Button from '../components/ui/Button';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import {
+  ApiErrorInfo,
+  getApiErrorInfo,
   getMetricsSummary,
   getOrgMembers,
   getSystemDiagnostics,
@@ -109,7 +111,7 @@ const formatMetricValue = (metricKey: string, value: number) => {
   return formatNumber(value);
 };
 
-function SetupRequiredCard({ guidance, errorMessage }: { guidance: SetupGuidance | null; errorMessage: string }) {
+function SetupRequiredCard({ guidance, errorInfo }: { guidance: SetupGuidance | null; errorInfo: ApiErrorInfo }) {
   const checklist = [
     {
       label: 'Supabase configured',
@@ -134,13 +136,18 @@ function SetupRequiredCard({ guidance, errorMessage }: { guidance: SetupGuidance
     '',
     'Next steps:',
     ...(guidance?.messages ?? ['Resolve setup issues and retry.']).map((message) => `- ${message}`),
+    '',
+    'Request diagnostics:',
+    `- Endpoint: ${errorInfo.endpoint}`,
+    `- Status: ${errorInfo.status ?? 'n/a'}`,
+    `- Message: ${errorInfo.message}`,
   ].join('\n');
 
   const handleCopyInstructions = async () => {
     try {
       await navigator.clipboard.writeText(setupInstructions);
     } catch {
-      window.prompt('Copy setup instructions:', setupInstructions);
+      window.prompt('Copy details:', setupInstructions);
     }
   };
 
@@ -152,7 +159,7 @@ function SetupRequiredCard({ guidance, errorMessage }: { guidance: SetupGuidance
           <p className="mt-1 text-xs text-amber-800/90 dark:text-amber-200/90">Complete these steps to restore admin data.</p>
         </div>
         <Button type="button" size="sm" variant="secondary" onClick={() => void handleCopyInstructions()}>
-          Copy setup instructions
+          Copy details
         </Button>
       </div>
 
@@ -174,7 +181,11 @@ function SetupRequiredCard({ guidance, errorMessage }: { guidance: SetupGuidance
 
       <details className="mt-3">
         <summary className="cursor-pointer text-xs font-semibold uppercase tracking-wide">Details</summary>
-        <p className="mt-2 text-xs">{errorMessage}</p>
+        <div className="mt-2 space-y-1 text-xs">
+          <p><span className="font-semibold">Endpoint:</span> {errorInfo.endpoint}</p>
+          <p><span className="font-semibold">Status:</span> {errorInfo.status ?? 'n/a'}</p>
+          <p><span className="font-semibold">Message:</span> {errorInfo.message}</p>
+        </div>
       </details>
     </div>
   );
@@ -199,12 +210,12 @@ export default function AdminPage() {
 
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
-  const [metricsError, setMetricsError] = useState<string | null>(null);
+  const [metricsError, setMetricsError] = useState<ApiErrorInfo | null>(null);
   const [metricsSetupGuidance, setMetricsSetupGuidance] = useState<SetupGuidance | null>(null);
 
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [teamLoading, setTeamLoading] = useState(false);
-  const [teamError, setTeamError] = useState<string | null>(null);
+  const [teamError, setTeamError] = useState<ApiErrorInfo | null>(null);
   const [teamSetupGuidance, setTeamSetupGuidance] = useState<SetupGuidance | null>(null);
   const [teamMessage, setTeamMessage] = useState<string | null>(null);
 
@@ -223,13 +234,13 @@ export default function AdminPage() {
       const data = await getMetricsSummary(range);
       setMetrics(data ?? null);
     } catch (err) {
-      const rawError = (err as Error).message ?? 'Unable to load admin metrics.';
-      setMetricsError(rawError);
+      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to load admin metrics.', endpoint: '/metrics/summary' };
+      setMetricsError(errorInfo);
       try {
         const diagnostics = await getSystemDiagnostics();
-        setMetricsSetupGuidance(getSetupGuidanceFromDiagnostics(diagnostics, rawError));
+        setMetricsSetupGuidance(getSetupGuidanceFromDiagnostics(diagnostics, errorInfo.message));
       } catch {
-        setMetricsSetupGuidance(getSetupGuidanceFromDiagnostics(null, rawError));
+        setMetricsSetupGuidance(getSetupGuidanceFromDiagnostics(null, errorInfo.message));
       }
     } finally {
       setMetricsLoading(false);
@@ -244,13 +255,13 @@ export default function AdminPage() {
       const list = await getOrgMembers();
       setMembers(Array.isArray(list) ? list : []);
     } catch (err) {
-      const rawError = (err as Error).message ?? 'Unable to load team members.';
-      setTeamError(rawError);
+      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to load team members.', endpoint: '/org/members' };
+      setTeamError(errorInfo);
       try {
         const diagnostics = await getSystemDiagnostics();
-        setTeamSetupGuidance(getSetupGuidanceFromDiagnostics(diagnostics, rawError));
+        setTeamSetupGuidance(getSetupGuidanceFromDiagnostics(diagnostics, errorInfo.message));
       } catch {
-        setTeamSetupGuidance(getSetupGuidanceFromDiagnostics(null, rawError));
+        setTeamSetupGuidance(getSetupGuidanceFromDiagnostics(null, errorInfo.message));
       }
     } finally {
       setTeamLoading(false);
@@ -299,7 +310,7 @@ export default function AdminPage() {
       setTeamMessage('Invitation sent.');
       await loadMembers();
     } catch (err) {
-      setTeamError((err as Error).message ?? 'Unable to send invitation.');
+      setTeamError(getApiErrorInfo(err) ?? { message: 'Unable to send invitation.', endpoint: '/org/invite' });
     } finally {
       setInviteLoading(false);
     }
@@ -315,7 +326,7 @@ export default function AdminPage() {
       setTeamMessage('Member role updated.');
       await loadMembers();
     } catch (err) {
-      setTeamError((err as Error).message ?? 'Unable to update member role.');
+      setTeamError(getApiErrorInfo(err) ?? { message: 'Unable to update member role.', endpoint: `/org/members/${userId}` });
     } finally {
       setUpdatingRoleByUserId((prev) => ({ ...prev, [userId]: false }));
     }
@@ -334,7 +345,7 @@ export default function AdminPage() {
       setTeamMessage('Member removed.');
       await loadMembers();
     } catch (err) {
-      setTeamError((err as Error).message ?? 'Unable to remove member.');
+      setTeamError(getApiErrorInfo(err) ?? { message: 'Unable to remove member.', endpoint: `/org/members/${userId}` });
     } finally {
       setRemovingByUserId((prev) => ({ ...prev, [userId]: false }));
     }
@@ -371,7 +382,7 @@ export default function AdminPage() {
             {metricsLoading ? (
               <EmptyState className="mt-6" title="Loading metrics" description="Loading admin metrics..." />
             ) : metricsError ? (
-              <SetupRequiredCard guidance={metricsSetupGuidance} errorMessage={metricsError} />
+              <SetupRequiredCard guidance={metricsSetupGuidance} errorInfo={metricsError} />
             ) : (
               <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                 {renderedCards.map((metric) => {
@@ -430,7 +441,7 @@ export default function AdminPage() {
               </form>
             ) : null}
 
-            {teamError ? <SetupRequiredCard guidance={teamSetupGuidance} errorMessage={teamError} /> : null}
+            {teamError ? <SetupRequiredCard guidance={teamSetupGuidance} errorInfo={teamError} /> : null}
             {teamMessage ? (
               <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
                 {teamMessage}
