@@ -375,8 +375,20 @@ export async function getSystemDiagnostics() {
   return (res.data ?? res.items ?? res) as SystemDiagnostics;
 }
 
-export async function inviteOrgMember(payload: { firstName: string; lastName: string; email: string; role: string }) {
-  return postJson<JsonValue>('/org/invite', payload, { headers: getAuthHeaders() });
+export type InviteOrgMemberResponse = {
+  temporaryPassword?: string;
+  tempPassword?: string;
+  [key: string]: JsonValue | undefined;
+};
+
+export async function inviteOrgMember(payload: {
+  firstName: string;
+  lastName: string;
+  email: string;
+  role: string;
+  generateTemporaryPassword?: boolean;
+}) {
+  return postJson<InviteOrgMemberResponse>('/org/invite', payload, { headers: getAuthHeaders() });
 }
 
 export async function updateOrgMember(userId: string, payload: { firstName: string; lastName: string; role: string }) {
