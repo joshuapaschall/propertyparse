@@ -24,6 +24,12 @@ type ApiResponse<T> = {
 
 export type JobRecord = Record<string, JsonValue>;
 export type JobExportType = 'matched' | 'unmatched';
+export type MeResponse = {
+  userId: string;
+  email: string;
+  orgId: string;
+  role: string;
+};
 
 const normalizedApiBaseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
 const joinUrl = (path: string) =>
@@ -210,6 +216,18 @@ export async function retryJobBatch(
 
 export async function getHealth() {
   return requestJson<JsonValue>('/health', { method: 'GET' });
+}
+
+export async function getMe(): Promise<MeResponse> {
+  return requestJson<MeResponse>('/me', { method: 'GET', headers: getAuthHeaders() });
+}
+
+export async function acceptInvitation(): Promise<{ ok: boolean }> {
+  return requestJson<{ ok: boolean }>('/org/invitations/accept', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({}),
+  });
 }
 
 export async function validateApiKeys() {
