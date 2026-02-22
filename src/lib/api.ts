@@ -31,6 +31,28 @@ export type MeResponse = {
   role: string;
 };
 
+export type MetricsRange = 'today' | 'week' | 'month' | 'year';
+
+export type MetricsSummary = {
+  uploads: number;
+  leads: number;
+  matched: number;
+  unmatched: number;
+  exports: number;
+  googleCalls: number;
+  ocrCalls?: number;
+  ocrSpend?: number;
+  [key: string]: JsonValue | undefined;
+};
+
+export type OrgMember = {
+  userId: string;
+  email: string;
+  role: string;
+  createdAt?: string;
+  [key: string]: JsonValue | undefined;
+};
+
 const normalizedApiBaseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
 const joinUrl = (path: string) =>
   new URL(path.startsWith('/') ? path.slice(1) : path, normalizedApiBaseUrl).toString();
@@ -237,6 +259,45 @@ export async function validateApiKeys() {
 export async function getJobs() {
   const res = await requestJson<ApiResponse<JobRecord[]>>('/jobs', { method: 'GET', headers: getAuthHeaders() });
   return (res.items ?? res.data ?? res) as JobRecord[];
+}
+
+export async function getMetricsSummary(range: MetricsRange) {
+  const params = new URLSearchParams({ range });
+  const res = await requestJson<ApiResponse<MetricsSummary>>(`/metrics/summary?${params.toString()}`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+  return (res.data ?? res.items ?? res) as MetricsSummary;
+}
+
+export async function getOrgMembers() {
+  const res = await requestJson<ApiResponse<OrgMember[]>>('/org/members', {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+  return (res.items ?? res.data ?? res) as OrgMember[];
+}
+
+export async function inviteOrgMember(email: string, role: string) {
+  return postJson<JsonValue>('/org/invite', { email, role }, { headers: getAuthHeaders() });
+}
+
+export async function updateOrgMemberRole(userId: string, role: string) {
+  return requestJson<JsonValue>(`/org/members/${userId}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ role }),
+  });
+}
+
+export async function removeOrgMember(userId: string) {
+  const res = await fetch(joinUrl(`/org/members/${userId}`), {
+    method: 'DELETE',
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(await getErrorMessage(res));
+  }
 }
 
 export async function getJob(jobId: string) {
