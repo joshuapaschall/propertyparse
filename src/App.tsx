@@ -8,6 +8,7 @@ import HistoryPage from './pages/HistoryPage';
 import ParsePage from './pages/ParsePage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import LoadingSpinner from './LoadingSpinner';
+import { ToastProvider } from './components/ui/ToastProvider';
 import { acceptInvitation, getMe } from './lib/api';
 import { clearAuthHeaderState, setAuthHeaderState } from './lib/authState';
 import { supabase } from './lib/supabase';
@@ -500,9 +501,11 @@ function App() {
   return (
     <AuthProvider>
       <ThemeProvider>
-        <BrowserRouter>
-          <AppRoutes />
-        </BrowserRouter>
+        <ToastProvider>
+          <BrowserRouter>
+            <AppRoutes />
+          </BrowserRouter>
+        </ToastProvider>
       </ThemeProvider>
     </AuthProvider>
   );

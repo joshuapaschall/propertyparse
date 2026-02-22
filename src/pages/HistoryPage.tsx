@@ -6,6 +6,7 @@ import Button from '../components/ui/Button';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import { downloadJobExport, JobExportType, JobRecord, getJobs } from '../lib/api';
+import { useToast } from '../components/ui/ToastProvider';
 
 const EXPORT_OPTIONS: Array<{ label: string; type: JobExportType }> = [
   { label: 'Unique Valid', type: 'unique_valid' },
@@ -78,6 +79,7 @@ const twoLineClampStyle: CSSProperties = {
 };
 
 export default function HistoryPage() {
+  const { showToast } = useToast();
   const navigate = useNavigate();
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,7 +100,9 @@ export default function HistoryPage() {
         }
       } catch (err) {
         if (active) {
-          setError((err as Error).message ?? 'Unable to load history.');
+          const message = (err as Error).message ?? 'Unable to load history.';
+          setError(message);
+          showToast({ title: message, variant: 'error' });
         }
       } finally {
         if (active) setLoading(false);
@@ -180,8 +184,11 @@ export default function HistoryPage() {
     try {
       const result = await downloadJobExport(jobId, type);
       triggerDownload(result.blob, filename ?? result.filename);
+      showToast({ title: 'Export downloaded', variant: 'success' });
     } catch (err) {
-      setError((err as Error).message ?? 'Export failed.');
+      const message = (err as Error).message ?? 'Export failed.';
+      setError(message);
+      showToast({ title: message, variant: 'error' });
     } finally {
       setDownloading((prev) => ({ ...prev, [key]: false }));
     }
