@@ -16,8 +16,9 @@ import {
   MetricsSummary,
   OrgMember,
   removeOrgMember,
+  resetOrgMemberPassword,
   SystemDiagnostics,
-  updateOrgMemberRole,
+  updateOrgMember,
 } from '../lib/api';
 
 type RangeKey = MetricsRange;
@@ -56,8 +57,6 @@ const toNumber = (value: unknown) => {
   }
   return 0;
 };
-
-
 
 type SetupGuidance = {
   title: string;
@@ -198,6 +197,7 @@ function SetupRequiredCard({ guidance, errorInfo }: { guidance: SetupGuidance | 
     </div>
   );
 }
+
 const getMemberValue = (member: OrgMember, keys: string[]) => {
   for (const key of keys) {
     const value = member[key];
@@ -207,6 +207,9 @@ const getMemberValue = (member: OrgMember, keys: string[]) => {
   }
   return null;
 };
+
+const getMemberFirstName = (member: OrgMember) => String(getMemberValue(member, ['firstName', 'first_name']) ?? '').trim();
+const getMemberLastName = (member: OrgMember) => String(getMemberValue(member, ['lastName', 'last_name']) ?? '').trim();
 
 export default function AdminPage() {
   const { role } = useAuthControls();
@@ -228,12 +231,20 @@ export default function AdminPage() {
   const [teamDiagnostics, setTeamDiagnostics] = useState<SystemDiagnostics | null>(null);
   const [teamMessage, setTeamMessage] = useState<string | null>(null);
 
+  const [inviteFirstName, setInviteFirstName] = useState('');
+  const [inviteLastName, setInviteLastName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('member');
   const [inviteLoading, setInviteLoading] = useState(false);
 
-  const [updatingRoleByUserId, setUpdatingRoleByUserId] = useState<Record<string, boolean>>({});
+  const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
+  const [editFirstName, setEditFirstName] = useState('');
+  const [editLastName, setEditLastName] = useState('');
+  const [editRole, setEditRole] = useState('member');
+  const [editLoading, setEditLoading] = useState(false);
+
   const [removingByUserId, setRemovingByUserId] = useState<Record<string, boolean>>({});
+  const [resettingByUserId, setResettingByUserId] = useState<Record<string, boolean>>({});
 
   const loadMetrics = async (range: RangeKey) => {
     setMetricsLoading(true);
@@ -313,10 +324,17 @@ export default function AdminPage() {
     setTeamError(null);
     setTeamMessage(null);
     try {
-      await inviteOrgMember(inviteEmail.trim(), inviteRole);
+      await inviteOrgMember({
+        firstName: inviteFirstName.trim(),
+        lastName: inviteLastName.trim(),
+        email: inviteEmail.trim(),
+        role: inviteRole,
+      });
+      setInviteFirstName('');
+      setInviteLastName('');
       setInviteEmail('');
       setInviteRole('member');
-      setTeamMessage('Invitation sent.');
+      setTeamMessage('Invitation sent. Ask the invited user to accept their invite, then visit Account > Security to set a password.');
       showToast({ title: 'Invitation created', variant: 'success' });
       await loadMembers();
     } catch (err) {
@@ -328,21 +346,55 @@ export default function AdminPage() {
     }
   };
 
-  const handleRoleChange = async (userId: string, nextRole: string) => {
-    if (!canManageTeam) return;
+  const handleOpenEdit = (member: OrgMember) => {
+    const userId = String(getMemberValue(member, ['userId', 'user_id', 'id']) ?? '');
+    if (!userId) return;
+    setEditingMemberId(userId);
+    setEditFirstName(getMemberFirstName(member));
+    setEditLastName(getMemberLastName(member));
+    setEditRole(String(getMemberValue(member, ['role']) ?? 'member'));
+  };
+
+  const handleEditMember = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canManageTeam || !editingMemberId) return;
+    setEditLoading(true);
     setTeamError(null);
     setTeamMessage(null);
-    setUpdatingRoleByUserId((prev) => ({ ...prev, [userId]: true }));
     try {
-      await updateOrgMemberRole(userId, nextRole);
-      setTeamMessage('Member role updated.');
+      await updateOrgMember(editingMemberId, {
+        firstName: editFirstName.trim(),
+        lastName: editLastName.trim(),
+        role: editRole,
+      });
+      setEditingMemberId(null);
+      setTeamMessage('Member updated.');
+      showToast({ title: 'Member updated', variant: 'success' });
       await loadMembers();
     } catch (err) {
-      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to update member role.', endpoint: `/org/members/${userId}` };
+      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to update member.', endpoint: `/org/members/${editingMemberId}` };
       setTeamError(errorInfo);
       showToast({ title: errorInfo.message, variant: 'error' });
     } finally {
-      setUpdatingRoleByUserId((prev) => ({ ...prev, [userId]: false }));
+      setEditLoading(false);
+    }
+  };
+
+  const handleResetPassword = async (userId: string) => {
+    if (!canManageTeam) return;
+    setResettingByUserId((prev) => ({ ...prev, [userId]: true }));
+    setTeamError(null);
+    setTeamMessage(null);
+    try {
+      await resetOrgMemberPassword(userId);
+      setTeamMessage('Password reset email sent.');
+      showToast({ title: 'Password reset email sent', variant: 'success' });
+    } catch (err) {
+      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to reset member password.', endpoint: `/org/members/${userId}/reset-password` };
+      setTeamError(errorInfo);
+      showToast({ title: errorInfo.message, variant: 'error' });
+    } finally {
+      setResettingByUserId((prev) => ({ ...prev, [userId]: false }));
     }
   };
 
@@ -427,7 +479,23 @@ export default function AdminPage() {
             <SectionHeader title="Team" subtitle="Manage members and organization access." />
 
             {canManageTeam ? (
-              <form onSubmit={handleInvite} className="mt-5 grid gap-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800 md:grid-cols-[1fr_180px_auto]">
+              <form onSubmit={handleInvite} className="mt-5 grid gap-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800 md:grid-cols-2 xl:grid-cols-[1fr_1fr_1.2fr_180px_auto]">
+                <input
+                  type="text"
+                  value={inviteFirstName}
+                  onChange={(event) => setInviteFirstName(event.target.value)}
+                  required
+                  placeholder="First name"
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:focus:ring-indigo-900"
+                />
+                <input
+                  type="text"
+                  value={inviteLastName}
+                  onChange={(event) => setInviteLastName(event.target.value)}
+                  required
+                  placeholder="Last name"
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:focus:ring-indigo-900"
+                />
                 <input
                   type="email"
                   value={inviteEmail}
@@ -447,11 +515,7 @@ export default function AdminPage() {
                     </option>
                   ))}
                 </select>
-                <Button
-                  type="submit"
-                  disabled={inviteLoading}
-                  variant="primary"
-                >
+                <Button type="submit" disabled={inviteLoading} variant="primary">
                   {inviteLoading ? 'Inviting...' : 'Invite Member'}
                 </Button>
               </form>
@@ -471,6 +535,7 @@ export default function AdminPage() {
                 <table className="min-w-full divide-y divide-slate-200 dark:divide-slate-800">
                   <thead>
                     <tr className="text-left text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                      <th className="px-3 py-2">Name</th>
                       <th className="px-3 py-2">Email</th>
                       <th className="px-3 py-2">Role</th>
                       <th className="px-3 py-2">Joined</th>
@@ -480,6 +545,9 @@ export default function AdminPage() {
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-900">
                     {members.map((member) => {
                       const userId = String(getMemberValue(member, ['userId', 'user_id', 'id']) ?? '');
+                      const firstName = getMemberFirstName(member);
+                      const lastName = getMemberLastName(member);
+                      const fullName = `${firstName} ${lastName}`.trim() || 'No name';
                       const email = String(getMemberValue(member, ['email']) ?? 'Unknown email');
                       const memberRole = String(getMemberValue(member, ['role']) ?? 'member');
                       const joinedValue = getMemberValue(member, ['createdAt', 'created_at']);
@@ -490,36 +558,33 @@ export default function AdminPage() {
 
                       return (
                         <tr key={userId || email}>
-                          <td className="px-3 py-3 text-sm font-medium text-slate-800 dark:text-slate-100">{email}</td>
-                          <td className="px-3 py-3 text-sm text-slate-600 dark:text-slate-300">
-                            {canManageTeam ? (
-                              <select
-                                value={memberRole}
-                                onChange={(event) => void handleRoleChange(userId, event.target.value)}
-                                disabled={Boolean(updatingRoleByUserId[userId]) || !userId}
-                                className="rounded-lg border border-slate-300 px-2 py-1 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:focus:ring-indigo-900"
-                              >
-                                {roleOptions.map((option) => (
-                                  <option key={option} value={option}>
-                                    {option}
-                                  </option>
-                                ))}
-                              </select>
-                            ) : (
-                              <span className="capitalize">{memberRole}</span>
-                            )}
-                          </td>
+                          <td className="px-3 py-3 text-sm font-medium text-slate-800 dark:text-slate-100">{fullName}</td>
+                          <td className="px-3 py-3 text-sm text-slate-600 dark:text-slate-300">{email}</td>
+                          <td className="px-3 py-3 text-sm text-slate-600 dark:text-slate-300"><span className="capitalize">{memberRole}</span></td>
                           <td className="px-3 py-3 text-sm text-slate-500 dark:text-slate-400">{joinedLabel}</td>
                           <td className="px-3 py-3 text-right text-sm">
                             {canManageTeam ? (
-                              <Button
-                                type="button"
-                                disabled={Boolean(removingByUserId[userId]) || !userId}
-                                onClick={() => void handleRemove(userId, email)}
-                                variant="destructive"
-                              >
-                                {removingByUserId[userId] ? 'Removing...' : 'Remove'}
-                              </Button>
+                              <div className="flex justify-end gap-2">
+                                <Button type="button" disabled={!userId} onClick={() => handleOpenEdit(member)} variant="secondary">
+                                  Edit
+                                </Button>
+                                <Button
+                                  type="button"
+                                  disabled={Boolean(resettingByUserId[userId]) || !userId}
+                                  onClick={() => void handleResetPassword(userId)}
+                                  variant="ghost"
+                                >
+                                  {resettingByUserId[userId] ? 'Sending...' : 'Reset Password'}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  disabled={Boolean(removingByUserId[userId]) || !userId}
+                                  onClick={() => void handleRemove(userId, email)}
+                                  variant="destructive"
+                                >
+                                  {removingByUserId[userId] ? 'Removing...' : 'Remove'}
+                                </Button>
+                              </div>
                             ) : (
                               <span className="text-slate-400">--</span>
                             )}
@@ -529,7 +594,7 @@ export default function AdminPage() {
                     })}
                     {members.length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
+                        <td colSpan={5} className="px-3 py-6 text-center text-sm text-slate-500 dark:text-slate-400">
                           No team members found.
                         </td>
                       </tr>
@@ -541,6 +606,54 @@ export default function AdminPage() {
           </Card>
         </div>
       )}
+
+      {editingMemberId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-800 dark:bg-slate-950">
+            <h3 className="text-lg font-semibold">Edit team member</h3>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Update name and role for this user.</p>
+            <form className="mt-4 space-y-4" onSubmit={handleEditMember}>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <input
+                  type="text"
+                  value={editFirstName}
+                  onChange={(event) => setEditFirstName(event.target.value)}
+                  placeholder="First name"
+                  required
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:focus:ring-indigo-900"
+                />
+                <input
+                  type="text"
+                  value={editLastName}
+                  onChange={(event) => setEditLastName(event.target.value)}
+                  placeholder="Last name"
+                  required
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:focus:ring-indigo-900"
+                />
+              </div>
+              <select
+                value={editRole}
+                onChange={(event) => setEditRole(event.target.value)}
+                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 dark:border-slate-700 dark:bg-slate-900 dark:focus:ring-indigo-900"
+              >
+                {roleOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="ghost" onClick={() => setEditingMemberId(null)} disabled={editLoading}>
+                  Cancel
+                </Button>
+                <Button type="submit" variant="primary" disabled={editLoading}>
+                  {editLoading ? 'Saving...' : 'Save Changes'}
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      ) : null}
     </AppShell>
   );
 }
