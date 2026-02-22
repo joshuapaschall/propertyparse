@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
-import { downloadJobExport, getJobDetail, getJobRows, JobRecord } from '../lib/api';
+import { downloadJobExport, getJobDetail, getJobRows, JobExportType, JobRecord } from '../lib/api';
 
 type ParsedPreviewRow = {
   id: string;
@@ -109,11 +109,11 @@ export default function HistoryDetailPage() {
   const [job, setJob] = useState<JobRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'matched' | 'unmatched'>('matched');
+  const [activeTab, setActiveTab] = useState<'valid' | 'needs_review'>('valid');
   const [showRaw, setShowRaw] = useState(false);
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
-  const [matchedRows, setMatchedRows] = useState<ParsedPreviewRow[]>([]);
-  const [unmatchedRows, setUnmatchedRows] = useState<ParsedPreviewRow[]>([]);
+  const [validRows, setValidRows] = useState<ParsedPreviewRow[]>([]);
+  const [needsReviewRows, setNeedsReviewRows] = useState<ParsedPreviewRow[]>([]);
 
   useEffect(() => {
     if (!jobId) return;
@@ -122,10 +122,10 @@ export default function HistoryDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const [jobResponse, matchedResponse, unmatchedResponse] = await Promise.all([
+        const [jobResponse, validResponse, needsReviewResponse] = await Promise.all([
           getJobDetail(jobId),
-          getJobRows(jobId, 'Matched', PREVIEW_LIMIT, 0),
-          getJobRows(jobId, 'Unmatched', PREVIEW_LIMIT, 0),
+          getJobRows(jobId, 'valid', PREVIEW_LIMIT, 0),
+          getJobRows(jobId, 'needs_review', PREVIEW_LIMIT, 0),
         ]);
         if (active) {
           const combinedJob = {
@@ -133,8 +133,8 @@ export default function HistoryDetailPage() {
             ...(jobResponse.job ?? {}),
           };
           setJob(Object.keys(combinedJob).length ? combinedJob : null);
-          setMatchedRows(normalizeRows(matchedResponse ?? []));
-          setUnmatchedRows(normalizeRows(unmatchedResponse ?? []));
+          setValidRows(normalizeRows(validResponse ?? []));
+          setNeedsReviewRows(normalizeRows(needsReviewResponse ?? []));
         }
       } catch (err) {
         if (active) setError((err as Error).message ?? 'Unable to load job details.');
@@ -165,6 +165,11 @@ export default function HistoryDetailPage() {
       rowsReceived: pickNumber(job, ['rowsReceived', 'rows_received', 'total_rows', 'rows', 'rowCount']),
       matched: pickNumber(job, ['matched', 'matched_count', 'matchedCount']),
       unmatched: pickNumber(job, ['unmatched', 'unmatched_count', 'unmatchedCount']),
+      deduped: pickNumber(job, ['deduped', 'deduped_count', 'duplicate_count', 'duplicates']),
+      valid: pickNumber(job, ['valid', 'valid_count', 'validCount']),
+      needsReview: pickNumber(job, ['needs_review', 'needsReview', 'needs_review_count']),
+      skipped: pickNumber(job, ['skipped', 'skipped_count']),
+      outOfScope: pickNumber(job, ['out_of_scope', 'outOfScope', 'out_of_scope_count']),
       cacheHits: pickNumber(job, ['cacheHits', 'cache_hits', 'cache_hit_count']),
       googleCallsUsed: pickNumber(job, [
         'googleCallsUsed',
@@ -175,7 +180,7 @@ export default function HistoryDetailPage() {
     };
   }, [job]);
 
-  const handleDownload = async (type: 'matched' | 'unmatched') => {
+  const handleDownload = async (type: JobExportType) => {
     if (!jobId) return;
     const key = `${jobId}-${type}`;
     setDownloading((prev) => ({ ...prev, [key]: true }));
@@ -190,7 +195,7 @@ export default function HistoryDetailPage() {
   };
 
   return (
-    <AppShell title="Job Details" subtitle="Review matched and unmatched previews.">
+    <AppShell title="Job Details" subtitle="Review valid and needs-review previews.">
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link
@@ -202,11 +207,28 @@ export default function HistoryDetailPage() {
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
+              onClick={() => handleDownload('unique_valid')}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              disabled={!jobId || downloading[`${jobId}-unique_valid`]}
+            >
+              {downloading[`${jobId}-unique_valid`] ? 'Downloading...' : 'Download Unique Valid CSV'}
+            </button>
+            <button
+              type="button"
               onClick={() => handleDownload('matched')}
               className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               disabled={!jobId || downloading[`${jobId}-matched`]}
             >
-              {downloading[`${jobId}-matched`] ? 'Downloading...' : 'Download matched CSV'}
+              {downloading[`${jobId}-matched`] ? 'Downloading...' : 'Download Matched CSV'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleDownload('needs_review')}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              disabled={!jobId || downloading[`${jobId}-needs_review`]}
+            >
+              {downloading[`${jobId}-needs_review`] ? 'Downloading...' : 'Download Needs Review CSV'}
             </button>
             <button
               type="button"
@@ -214,7 +236,15 @@ export default function HistoryDetailPage() {
               className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
               disabled={!jobId || downloading[`${jobId}-unmatched`]}
             >
-              {downloading[`${jobId}-unmatched`] ? 'Downloading...' : 'Download unmatched CSV'}
+              {downloading[`${jobId}-unmatched`] ? 'Downloading...' : 'Download Unmatched CSV'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDownload('processing_report')}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              disabled={!jobId || downloading[`${jobId}-processing_report`]}
+            >
+              {downloading[`${jobId}-processing_report`] ? 'Downloading...' : 'Download Processing Report (All rows)'}
             </button>
           </div>
         </div>
@@ -252,6 +282,36 @@ export default function HistoryDetailPage() {
                   </p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Valid</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {jobSummary.valid ?? '--'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Needs Review</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {jobSummary.needsReview ?? '--'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Deduped</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {jobSummary.deduped ?? '--'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Skipped</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {jobSummary.skipped ?? '--'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Out of Scope</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    {jobSummary.outOfScope ?? '--'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Cache Hits</p>
                   <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {jobSummary.cacheHits ?? '--'}
@@ -282,25 +342,25 @@ export default function HistoryDetailPage() {
             <div className="flex gap-3">
               <button
                 type="button"
-                onClick={() => setActiveTab('matched')}
+                onClick={() => setActiveTab('valid')}
                 className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  activeTab === 'matched'
+                  activeTab === 'valid'
                     ? 'bg-indigo-600 text-white'
                     : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                 }`}
               >
-                Matched Preview
+                Valid (Unique + Duplicates) Preview
               </button>
               <button
                 type="button"
-                onClick={() => setActiveTab('unmatched')}
+                onClick={() => setActiveTab('needs_review')}
                 className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  activeTab === 'unmatched'
+                  activeTab === 'needs_review'
                     ? 'bg-indigo-600 text-white'
                     : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                 }`}
               >
-                Unmatched Preview
+                Needs Review Preview
               </button>
             </div>
             <button
@@ -324,7 +384,7 @@ export default function HistoryDetailPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {(activeTab === 'matched' ? matchedRows : unmatchedRows).length === 0 ? (
+                  {(activeTab === 'valid' ? validRows : needsReviewRows).length === 0 ? (
                     <tr>
                       <td
                         className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
@@ -334,7 +394,7 @@ export default function HistoryDetailPage() {
                       </td>
                     </tr>
                   ) : (
-                    (activeTab === 'matched' ? matchedRows : unmatchedRows).map((row) => (
+                    (activeTab === 'valid' ? validRows : needsReviewRows).map((row) => (
                       <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
                         <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
                           {row.rowIndex ?? '--'}

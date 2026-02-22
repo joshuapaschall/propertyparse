@@ -23,7 +23,12 @@ type ApiResponse<T> = {
 };
 
 export type JobRecord = Record<string, JsonValue>;
-export type JobExportType = 'matched' | 'unmatched';
+export type JobExportType =
+  | 'matched'
+  | 'unmatched'
+  | 'unique_valid'
+  | 'needs_review'
+  | 'processing_report';
 export type MeResponse = {
   userId: string;
   email: string;
