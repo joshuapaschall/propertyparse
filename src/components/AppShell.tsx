@@ -92,7 +92,7 @@ export default function AppShell({ title, subtitle, actions, children }: AppShel
             </div>
             <div>
               <p className="text-sm font-semibold">PropertyParse</p>
-              <p className="text-xs text-slate-500 dark:text-slate-400">Legacy Dashboard</p>
+              <p className="text-xs text-slate-500 dark:text-slate-400">Parsing operations center</p>
             </div>
           </div>
           <div className="mt-8">{renderNavLinks()}</div>
@@ -113,7 +113,7 @@ export default function AppShell({ title, subtitle, actions, children }: AppShel
               </div>
               <div>
                 <p className="text-sm font-semibold">PropertyParse</p>
-                <p className="text-xs text-slate-500 dark:text-slate-400">Legacy Dashboard</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Parsing operations center</p>
               </div>
             </div>
             <button
@@ -172,7 +172,7 @@ export default function AppShell({ title, subtitle, actions, children }: AppShel
               </div>
             </div>
           </header>
-          <main className="mx-auto w-full max-w-6xl px-6 py-8">
+          <main className="mx-auto w-full max-w-7xl px-6 py-8">
             <div className="mb-8">
               <h1 className="text-2xl font-semibold">{title}</h1>
               {subtitle ? (

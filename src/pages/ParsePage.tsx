@@ -46,6 +46,18 @@ import type {
 } from '../types/parse';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Finalizing'];
+
+const ResultsTableSkeleton = () => (
+  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+    <div className="animate-pulse space-y-3 p-4">
+      <div className="h-4 w-40 rounded bg-slate-200 dark:bg-slate-800" />
+      <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
+      <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
+      <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
+      <div className="h-10 rounded-lg bg-slate-100 dark:bg-slate-900" />
+    </div>
+  </div>
+);
 const LAST_JOB_STORAGE_KEY = 'pp-parse-last-job';
 const LAST_JOB_STORAGE_VERSION = 1;
 
@@ -2041,8 +2053,8 @@ export default function ParsePage() {
     unique_valid: 'Unique Valid CSV',
     needs_review: 'Needs Review CSV',
     processing_report: 'Processing Report CSV',
-    matched: 'Matched CSV',
-    unmatched: 'Unmatched CSV',
+    matched: 'Valid CSV',
+    unmatched: 'Needs Review CSV',
   };
 
   const openProcessingReport = (filter: ProcessingReportFilter) => {
@@ -2242,11 +2254,20 @@ export default function ParsePage() {
               </div>
               <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                 <div>
-                  <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                    Force re-verify (ignore cache)
-                  </p>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      Force re-verify addresses
+                    </p>
+                    <span
+                      title="Uses more Google calls."
+                      className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-xs font-semibold text-slate-500 dark:border-slate-600 dark:text-slate-300"
+                      aria-label="Uses more Google calls."
+                    >
+                      i
+                    </span>
+                  </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Uses more API calls. Only enable if you suspect cached results are stale.
+                    Uses more Google calls. Enable only when cached verification may be outdated.
                   </p>
                 </div>
                 <button
@@ -2540,29 +2561,8 @@ export default function ParsePage() {
                 ) : null}
               </div>
             ) : (
-              <div className="mt-4 flex flex-wrap gap-3">
-                <button
-                  type="button"
-                  onClick={() => setLegacyTab('matched')}
-                  className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                    legacyTab === 'matched'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                  }`}
-                >
-                  Matched ({dedupedMatched.length})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLegacyTab('unmatched')}
-                  className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                    legacyTab === 'unmatched'
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                  }`}
-                >
-                  Unmatched ({dedupedUnmatched.length})
-                </button>
+              <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                Run a parse to see results.
               </div>
             )}
           </div>
@@ -2712,12 +2712,24 @@ export default function ParsePage() {
                 </p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                  Matched / Unmatched
-                </p>
-                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                  {dedupedMatched.length} / {dedupedUnmatched.length}
-                </p>
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Valid (Unique)</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{dedupedMatched.length}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Needs Review</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{dedupedUnmatched.length}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Skipped</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">0</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Duplicates</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">0</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Out of Scope</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">0</p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                 <p className="text-xs uppercase text-slate-500 dark:text-slate-400">API Calls Used</p>
@@ -2804,6 +2816,7 @@ export default function ParsePage() {
             </div>
           ) : null}
           <div className="mt-6">
+            {busy && !parseSummary ? <ResultsTableSkeleton /> : null}
             {parseSummary ? (
               <>
                 {activeTab === 'valid' ? (
@@ -3184,7 +3197,7 @@ export default function ParsePage() {
                   </div>
                 ) : null}
               </>
-            ) : (
+            ) : busy ? null : (
               <>
                 <div className="mt-6 flex flex-wrap items-center justify-between gap-4">
                   <div className="flex flex-wrap items-center gap-3">
@@ -3203,8 +3216,8 @@ export default function ParsePage() {
                       onClick={() =>
                         downloadCsv(
                           legacyTab === 'matched'
-                            ? 'matched-addresses.csv'
-                            : 'unmatched-addresses.csv',
+                            ? 'valid-addresses.csv'
+                            : 'needs-review-addresses.csv',
                           (legacyTab === 'matched' ? dedupedMatched : dedupedUnmatched).map(
                             (row) => ({
                               full_address: row.fullAddress,
@@ -3220,7 +3233,7 @@ export default function ParsePage() {
                       }
                       className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                     >
-                      Download {legacyTab === 'matched' ? 'Matched' : 'Unmatched'} CSV
+                      Download {legacyTab === 'matched' ? 'Valid' : 'Needs Review'} CSV
                     </button>
                   </div>
                 </div>
