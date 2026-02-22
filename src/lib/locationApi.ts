@@ -85,14 +85,14 @@ async function postSearch(endpoint: string, payload: SearchPayload): Promise<str
   return normalized;
 }
 
-export async function searchStates(query: string, limit = 100) {
-  return postSearch('/states/search', { query, limit });
+export async function searchStates(query = '', limit = 200) {
+  return postSearch('/states/search', { query: query ?? '', limit });
 }
 
-export async function searchCounties(state: string, query: string, limit = 5000) {
-  return postSearch('/counties/search', { state, query, limit });
+export async function searchCounties(state: string, query = '', limit = 10000) {
+  return postSearch('/counties/search', { state, query: query ?? '', limit });
 }
 
-export async function searchCities(state: string, query: string, county?: string, limit = 50000) {
-  return postSearch('/cities/search', { state, query, county, limit });
+export async function searchCities(state: string, query = '', county?: string, limit = 50000) {
+  return postSearch('/cities/search', { state, query: query ?? '', county, limit });
 }
