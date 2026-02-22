@@ -66,6 +66,13 @@ export type OrgMember = {
   [key: string]: JsonValue | undefined;
 };
 
+export type SystemDiagnostics = {
+  supabase_configured?: boolean;
+  tables_missing?: string[];
+  migrations_needed?: string[];
+  [key: string]: JsonValue | undefined;
+};
+
 const normalizedApiBaseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
 const joinUrl = (path: string) =>
   new URL(path.startsWith('/') ? path.slice(1) : path, normalizedApiBaseUrl).toString();
@@ -289,6 +296,14 @@ export async function getOrgMembers() {
     headers: getAuthHeaders(),
   });
   return (res.items ?? res.data ?? res) as OrgMember[];
+}
+
+export async function getSystemDiagnostics() {
+  const res = await requestJson<ApiResponse<SystemDiagnostics>>('/system/diagnostics', {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+  return (res.data ?? res.items ?? res) as SystemDiagnostics;
 }
 
 export async function inviteOrgMember(email: string, role: string) {
