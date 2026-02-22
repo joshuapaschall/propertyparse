@@ -26,11 +26,13 @@ import {
   downloadJobExport,
   getJobDetail,
   getJobRows,
+  getJobResults,
   getJobWithStatus,
   JobExportType,
   JOB_EXPORT_TYPES,
   JobRecord,
   parseFile,
+  parseFileAsync,
   retryJobRow,
   retryParseBatch,
   retryParseRow,
@@ -46,6 +48,9 @@ import type {
 } from '../types/parse';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Finalizing'];
+const ASYNC_PARSE_FILE_SIZE_THRESHOLD = 5 * 1024 * 1024;
+const ASYNC_PARSE_MIME_PREFIXES = ['application/pdf', 'image/'];
+const ASYNC_PARSE_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'tiff', 'tif', 'bmp', 'heic', 'heif'];
 
 const ResultsTableSkeleton = () => (
   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
@@ -498,6 +503,17 @@ const normalizePhase = (value: unknown) => {
   return null;
 };
 
+const shouldUseAsyncParse = (selectedFile: File | null) => {
+  if (!selectedFile) return false;
+  if (selectedFile.size > ASYNC_PARSE_FILE_SIZE_THRESHOLD) return true;
+  const mimeType = selectedFile.type.toLowerCase();
+  if (ASYNC_PARSE_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix))) {
+    return true;
+  }
+  const extension = selectedFile.name.split('.').pop()?.toLowerCase() ?? '';
+  return ASYNC_PARSE_EXTENSIONS.includes(extension);
+};
+
 const mapPhaseToStep = (phase: string | null) => {
   switch (phase) {
     case 'UPLOADING':
@@ -731,17 +747,25 @@ export default function ParsePage() {
       setPollError(null);
       setPollErrorCount(0);
       try {
-        const [jobDetail, jobRows] = await Promise.all([
+        const [jobDetail, resultsResponse] = await Promise.all([
           getJobDetail(jobIdToLoad),
-          getJobRows(jobIdToLoad),
+          getJobResults(jobIdToLoad).catch(() => null),
         ]);
         const combinedJob: JobRecord = {
           ...(jobDetail.summary ?? {}),
           ...(jobDetail.job ?? {}),
         };
-        const normalizedRows = (jobRows ?? []).map((row, index) =>
-          normalizeJobRowResult(row as JobRecord, index),
-        );
+        let normalizedRows: RowResult[] = [];
+        if (resultsResponse?.row_results && Array.isArray(resultsResponse.row_results)) {
+          normalizedRows = (resultsResponse.row_results as RowResult[]).map((row, index) =>
+            normalizeJobRowResult(row as unknown as JobRecord, index),
+          );
+        } else {
+          const jobRows = await getJobRows(jobIdToLoad);
+          normalizedRows = (jobRows ?? []).map((row, index) =>
+            normalizeJobRowResult(row as JobRecord, index),
+          );
+        }
         const summary = buildParseSummaryFromJob(combinedJob);
         const createdAt = pickString(combinedJob, [
           'created_at',
@@ -1048,7 +1072,7 @@ export default function ParsePage() {
 
   const progressDetail = useMemo(() => {
     if (isStartingParse) {
-      return 'Starting parse…';
+      return 'Job running…';
     }
     const done = progressInfo.done;
     const total = progressInfo.total;
@@ -1420,13 +1444,14 @@ export default function ParsePage() {
     }
   };
 
-  const startPolling = (jobId: string) => {
+  const startPolling = (jobIdToWatch: string, options?: { onFinished?: () => Promise<void> | void }) => {
     stopPolling();
     progressSamplesRef.current = [];
     pollingRef.current = window.setInterval(async () => {
       try {
-        const { job } = await getJobWithStatus(jobId);
+        const { job } = await getJobWithStatus(jobIdToWatch);
         const phase = normalizePhase(job.phase);
+        const status = normalizePhase(job.status);
         const done =
           normalizeNumber(job.progress_done) ?? normalizeNumber(job.progressDone) ?? null;
         const total =
@@ -1475,10 +1500,23 @@ export default function ParsePage() {
         });
         setPollErrorCount(0);
         setPollError(null);
-        if (phase === 'DONE') {
-          setProgressPercent(100);
-          setProgressStep(mapPhaseToStep(phase));
+        if (status === 'FAILED' || phase === 'FAILED') {
+          const errorMessage =
+            (typeof job.error_message === 'string' && job.error_message) ||
+            (typeof job.errorMessage === 'string' && job.errorMessage) ||
+            'Parse job failed.';
+          setError(errorMessage);
           stopPolling();
+          setBusy(false);
+          return;
+        }
+        if (status === 'DONE' || phase === 'DONE' || status === 'COMPLETED') {
+          setProgressPercent(100);
+          setProgressStep(mapPhaseToStep('DONE'));
+          stopPolling();
+          if (options?.onFinished) {
+            await options.onFinished();
+          }
         }
       } catch (err) {
         const message = (err as Error).message ?? 'Polling failed.';
@@ -1487,6 +1525,98 @@ export default function ParsePage() {
       }
     }, 900);
   };
+
+  const applyParsedResponse = useCallback(
+    (parsed: Record<string, unknown>, fallbackRowsReceived: number | null) => {
+      setParseTimestamp(new Date().toISOString());
+      setParsePayload(parsed);
+      setProgressStep(3);
+      setProgressStep(4);
+      const parseResponse = parsed as unknown as {
+        summary?: ParseSummary;
+        row_results?: RowResult[];
+        canonical_addresses?: CanonicalAddress[];
+        duplicate_groups?: DuplicateGroup[];
+        debug?: ParseDebugInfo;
+        matched?: unknown[];
+        unmatched?: unknown[];
+        items?: unknown[];
+        metadata?: Record<string, unknown>;
+      };
+      const hasRowAccounting = Boolean(parseResponse.summary && parseResponse.row_results);
+      if (hasRowAccounting) {
+        const summary = parseResponse.summary as ParseSummary;
+        const rowAccountingMetadata: Record<string, unknown> = {
+          ...((parsed.metadata as Record<string, unknown>) ?? {}),
+        };
+        const responseRowsReceived =
+          typeof parsed.rows_received === 'number'
+            ? parsed.rows_received
+            : summary.rows_received ?? fallbackRowsReceived ?? null;
+
+        rowAccountingMetadata.rows_received = responseRowsReceived;
+        if (typeof parsed.accounted_rows === 'number') {
+          rowAccountingMetadata.accounted_rows = parsed.accounted_rows;
+        }
+        if (typeof parsed.extraction_method === 'string') {
+          rowAccountingMetadata.extraction_method = parsed.extraction_method;
+        }
+        if (parsed.warnings) {
+          rowAccountingMetadata.warnings = parsed.warnings;
+        }
+        if (typeof parsed.google_calls_used === 'number') {
+          rowAccountingMetadata.google_calls_used = parsed.google_calls_used;
+        }
+        if (typeof parsed.cache_hits === 'number') {
+          rowAccountingMetadata.cache_hits = parsed.cache_hits;
+        }
+
+        setParseSummary(summary);
+        setRowsReceived(responseRowsReceived);
+        const canonicalRows = (parseResponse.canonical_addresses ?? []) as CanonicalAddress[];
+        setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
+        setRowResults((parseResponse.row_results ?? []) as RowResult[]);
+        setDuplicateGroups((parseResponse.duplicate_groups ?? []) as DuplicateGroup[]);
+        setDebugInfo((parseResponse.debug ?? null) as ParseDebugInfo | null);
+        setMetadata(Object.keys(rowAccountingMetadata).length ? rowAccountingMetadata : null);
+        setLegacyMode(false);
+      } else {
+        setLegacyMode(true);
+        const parsedHasBuckets = 'matched' in parseResponse || 'unmatched' in parseResponse;
+        if (parsedHasBuckets) {
+          const rawMatched = (parseResponse.matched || []) as unknown[];
+          const rawUnmatched = (parseResponse.unmatched || []) as unknown[];
+          setLegacyMatchedRows(normalizeRows(rawMatched));
+          setLegacyUnmatchedRows(normalizeRows(rawUnmatched));
+        } else {
+          const rawItems = (parseResponse.items || []) as Record<string, unknown>[];
+          const matchedItems = rawItems.filter((item) => item.status === 'Matched');
+          const unmatchedItems = rawItems.filter((item) => item.status !== 'Matched');
+          setLegacyMatchedRows(normalizeRows(matchedItems));
+          setLegacyUnmatchedRows(normalizeRows(unmatchedItems));
+        }
+        setMetadata((parseResponse.metadata as Record<string, unknown>) || null);
+      }
+      const progressMeta = (parseResponse.metadata as Record<string, unknown> | undefined)?.progress;
+      if (typeof progressMeta === 'number') {
+        setProgressPercent(progressMeta);
+      } else if (typeof progressMeta === 'object' && progressMeta !== null) {
+        const percent = (progressMeta as { percent?: number }).percent;
+        if (typeof percent === 'number') {
+          setProgressPercent(percent);
+        }
+      }
+    },
+    [],
+  );
+
+  const hydrateCompletedAsyncJob = useCallback(
+    async (completedJobId: string, fallbackRowsReceived: number | null) => {
+      const results = await getJobResults(completedJobId);
+      applyParsedResponse(results as unknown as Record<string, unknown>, fallbackRowsReceived);
+    },
+    [applyParsedResponse],
+  );
 
   const resetForFreshParse = () => {
     setError(null);
@@ -1632,83 +1762,42 @@ export default function ParsePage() {
       setRowsReceived(upload.rowsReceived ?? null);
       setProgressStep(1);
       setProgressStep(2);
-      startPolling(newJobId);
-      const parsed = await parseFile(upload.fileId, {
-        state: stateValue,
-        county: countyValue,
-        city: cityValue,
-        force_refresh: forceRefresh,
-        jobId: newJobId,
-        jobName: trimmedCampaignName || undefined,
-      });
-      setParseTimestamp(new Date().toISOString());
-      setParsePayload(parsed as Record<string, unknown>);
-      setProgressStep(3);
-      setProgressStep(4);
-      const hasRowAccounting = Boolean(parsed.summary && parsed.row_results);
-      if (hasRowAccounting) {
-        const parsedRecord = parsed as Record<string, unknown>;
-        const summary = parsed.summary as ParseSummary;
-        const rowAccountingMetadata: Record<string, unknown> = {
-          ...((parsedRecord.metadata as Record<string, unknown>) ?? {}),
-        };
-        const responseRowsReceived =
-          typeof parsedRecord.rows_received === 'number'
-            ? parsedRecord.rows_received
-            : summary.rows_received ?? upload.rowsReceived ?? null;
 
-        rowAccountingMetadata.rows_received = responseRowsReceived;
-        if (typeof parsedRecord.accounted_rows === 'number') {
-          rowAccountingMetadata.accounted_rows = parsedRecord.accounted_rows;
-        }
-        if (typeof parsedRecord.extraction_method === 'string') {
-          rowAccountingMetadata.extraction_method = parsedRecord.extraction_method;
-        }
-        if (parsedRecord.warnings) {
-          rowAccountingMetadata.warnings = parsedRecord.warnings;
-        }
-        if (typeof parsedRecord.google_calls_used === 'number') {
-          rowAccountingMetadata.google_calls_used = parsedRecord.google_calls_used;
-        }
-        if (typeof parsedRecord.cache_hits === 'number') {
-          rowAccountingMetadata.cache_hits = parsedRecord.cache_hits;
-        }
-
-        setParseSummary(summary);
-        setRowsReceived(responseRowsReceived);
-        const canonicalRows = (parsed.canonical_addresses ?? []) as CanonicalAddress[];
-        setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
-        setRowResults((parsed.row_results ?? []) as RowResult[]);
-        setDuplicateGroups((parsed.duplicate_groups ?? []) as DuplicateGroup[]);
-        setDebugInfo((parsed.debug ?? null) as ParseDebugInfo | null);
-        setMetadata(Object.keys(rowAccountingMetadata).length ? rowAccountingMetadata : null);
-        setLegacyMode(false);
+      const useAsyncMode = shouldUseAsyncParse(file);
+      if (useAsyncMode) {
+        setProgressInfo((prev) => ({
+          ...prev,
+          phase: 'PARSING',
+        }));
+        startPolling(newJobId, {
+          onFinished: async () => {
+            await hydrateCompletedAsyncJob(newJobId, upload.rowsReceived ?? null);
+            setBusy(false);
+          },
+        });
+        await parseFileAsync(upload.fileId, {
+          state: stateValue,
+          county: countyValue,
+          city: cityValue,
+          force_refresh: forceRefresh,
+          jobId: newJobId,
+          jobName: trimmedCampaignName || undefined,
+        });
       } else {
-        setLegacyMode(true);
-        const parsedHasBuckets = 'matched' in parsed || 'unmatched' in parsed;
-        if (parsedHasBuckets) {
-          const rawMatched = (parsed.matched || []) as unknown[];
-          const rawUnmatched = (parsed.unmatched || []) as unknown[];
-          setLegacyMatchedRows(normalizeRows(rawMatched));
-          setLegacyUnmatchedRows(normalizeRows(rawUnmatched));
-        } else {
-          const rawItems = (parsed.items || []) as Record<string, unknown>[];
-          const matchedItems = rawItems.filter((item) => item.status === 'Matched');
-          const unmatchedItems = rawItems.filter((item) => item.status !== 'Matched');
-          setLegacyMatchedRows(normalizeRows(matchedItems));
-          setLegacyUnmatchedRows(normalizeRows(unmatchedItems));
-        }
-        setMetadata((parsed.metadata as Record<string, unknown>) || null);
+        startPolling(newJobId);
+        const parsed = await parseFile(upload.fileId, {
+          state: stateValue,
+          county: countyValue,
+          city: cityValue,
+          force_refresh: forceRefresh,
+          jobId: newJobId,
+          jobName: trimmedCampaignName || undefined,
+        });
+        applyParsedResponse(parsed as unknown as Record<string, unknown>, upload.rowsReceived ?? null);
+        stopPolling();
+        setBusy(false);
       }
-      const progressMeta = (parsed.metadata as Record<string, unknown> | undefined)?.progress;
-      if (typeof progressMeta === 'number') {
-        setProgressPercent(progressMeta);
-      } else if (typeof progressMeta === 'object' && progressMeta !== null) {
-        const percent = (progressMeta as { percent?: number }).percent;
-        if (typeof percent === 'number') {
-          setProgressPercent(percent);
-        }
-      }
+
       updateJobQueryParam(newJobId);
       writeLastJobState({
         version: LAST_JOB_STORAGE_VERSION,
@@ -1720,9 +1809,9 @@ export default function ParsePage() {
       });
     } catch (err) {
       setError((err as Error).message ?? 'Parsing failed.');
-    } finally {
       stopPolling();
       setBusy(false);
+      return;
     }
   };
 
@@ -2338,7 +2427,7 @@ export default function ParsePage() {
               </div>
               {isStartingParse ? (
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-                  Starting…
+                  Job running…
                 </span>
               ) : null}
             </div>

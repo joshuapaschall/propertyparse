@@ -207,6 +207,24 @@ export async function parseFile(
   return postJson<ParseResponse>('/parse', { fileId, ...payload }, { headers: getAuthHeaders() });
 }
 
+export async function parseFileAsync(
+  fileId: string,
+  payload: {
+    state: string;
+    county: string;
+    city?: string;
+    force_refresh?: boolean;
+    jobId?: string;
+    jobName?: string;
+  },
+) {
+  return postJson<ParseResponse>(
+    '/parse?async_mode=true',
+    { fileId, ...payload },
+    { headers: getAuthHeaders() },
+  );
+}
+
 export async function retryParseRow(payload: unknown) {
   return postJson<ParseResponse>('/parse/retry', payload);
 }
@@ -356,6 +374,13 @@ export async function getJobWithStatus(jobId: string) {
     job: (data.job ?? data.data ?? data.items ?? data) as JobRecord,
     status: res.status,
   };
+}
+
+export async function getJobResults(jobId: string) {
+  return requestJson<ParseResponse>(`/jobs/${jobId}/results`, {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
 }
 
 export async function getJobDetail(jobId: string) {
