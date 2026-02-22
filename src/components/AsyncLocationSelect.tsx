@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import AsyncSelect from 'react-select/async';
 import type { SingleValue } from 'react-select';
 
@@ -12,6 +12,7 @@ type AsyncLocationSelectProps = {
   required?: boolean;
   helperText?: string;
   cacheScope?: string;
+  noOptionsMessage?: string;
   loadOptions: (inputValue: string) => Promise<string[]>;
   onChange: (value: string) => void;
   onClear: () => void;
@@ -25,17 +26,16 @@ export default function AsyncLocationSelect({
   required,
   helperText,
   cacheScope = 'default',
+  noOptionsMessage,
   loadOptions,
   onChange,
   onClear,
 }: AsyncLocationSelectProps) {
-  const [defaultOptions, setDefaultOptions] = useState<Option[]>([]);
   const cacheRef = useRef<Map<string, Option[]>>(new Map());
   const debounceRef = useRef<number | null>(null);
 
   useEffect(() => {
     cacheRef.current.clear();
-    setDefaultOptions([]);
   }, [cacheScope]);
 
   useEffect(() => {
@@ -73,19 +73,25 @@ export default function AsyncLocationSelect({
         window.clearTimeout(debounceRef.current);
       }
 
+      const resolveAndCache = async () => {
+        try {
+          const result = await loadOptions(query);
+          const options = toOptions(result);
+          cacheRef.current.set(cacheKey, options);
+          return options;
+        } catch {
+          return [];
+        }
+      };
+
+      if (!query) {
+        return resolveAndCache();
+      }
+
       return new Promise<Option[]>((resolve) => {
         debounceRef.current = window.setTimeout(async () => {
-          try {
-            const result = await loadOptions(query);
-            const options = toOptions(result);
-            cacheRef.current.set(cacheKey, options);
-            if (!query) {
-              setDefaultOptions(options);
-            }
-            resolve(options);
-          } catch {
-            resolve([]);
-          }
+          const options = await resolveAndCache();
+          resolve(options);
         }, 250);
       });
     },
@@ -108,14 +114,15 @@ export default function AsyncLocationSelect({
           <AsyncSelect<Option, false>
             unstyled
             isSearchable
-            cacheOptions
-            defaultOptions={defaultOptions.length ? defaultOptions : true}
+            cacheOptions={true}
+            defaultOptions={true}
             value={selectedOption}
             isDisabled={disabled}
             placeholder={placeholder}
             maxMenuHeight={300}
             loadOptions={fetchOptions}
             onChange={(option: SingleValue<Option>) => onChange(option?.value ?? '')}
+            noOptionsMessage={() => noOptionsMessage ?? 'No matches'}
             classNames={{
               control: (state) =>
                 [
