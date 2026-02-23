@@ -32,7 +32,7 @@ type AuthContextValue = {
   hasPendingInvitation: boolean;
   requiresPasswordSetup: boolean;
   loginWithPassword: (email: string, password: string) => Promise<void>;
-  loginWithMagicLink: (email: string) => Promise<void>;
+  loginWithMagicLink: (email: string, emailRedirectTo?: string) => Promise<void>;
   signUpWithPassword: (email: string, password: string) => Promise<{ needsEmailConfirmation: boolean }>;
   logout: () => Promise<void>;
   refreshBootstrap: () => Promise<void>;
@@ -208,10 +208,10 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const loginWithMagicLink = useCallback(async (email: string) => {
+  const loginWithMagicLink = useCallback(async (email: string, emailRedirectTo?: string) => {
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: emailRedirectTo ?? window.location.origin },
     });
     if (error) {
       throw error;

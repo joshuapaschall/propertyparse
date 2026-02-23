@@ -144,7 +144,7 @@ export default function AuthPage() {
     setResetError(null);
     setIsSubmitting(true);
     try {
-      await loginWithMagicLink(email);
+      await loginWithMagicLink(email, `${window.location.origin}/auth/callback?flow=login`);
       setStatus('Magic link sent! Check your inbox to finish signing in.');
     } catch (err) {
       handleAuthError(err, 'Unable to send magic link.');
