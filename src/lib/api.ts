@@ -376,18 +376,23 @@ export async function getSystemDiagnostics() {
 }
 
 export type InviteOrgMemberResponse = {
+  ok?: boolean;
+  message?: string;
   temporaryPassword?: string;
   tempPassword?: string;
   [key: string]: JsonValue | undefined;
 };
 
-export async function inviteOrgMember(payload: {
+export type InviteOrgMemberPayload = {
   firstName: string;
   lastName: string;
   email: string;
   role: string;
   generateTemporaryPassword?: boolean;
-}) {
+  resend?: boolean;
+};
+
+export async function inviteOrgMember(payload: InviteOrgMemberPayload) {
   return postJson<InviteOrgMemberResponse>('/org/invite', payload, { headers: getAuthHeaders() });
 }
 
