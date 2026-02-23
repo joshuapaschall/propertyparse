@@ -80,7 +80,7 @@ const redactSupabaseUrl = (url: string | undefined) => {
 };
 
 export default function AuthPage() {
-  const { loginWithPassword, loginWithMagicLink, signUpWithPassword, session } = useAuthControls();
+  const { loginWithPassword, loginWithMagicLink, signUpWithPassword, session, isAuthenticated, bootstrapError, logout } = useAuthControls();
   const [authMode, setAuthMode] = useState<AuthMode>('sign-in');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -144,7 +144,7 @@ export default function AuthPage() {
     setResetError(null);
     setIsSubmitting(true);
     try {
-      await loginWithMagicLink(email, `${window.location.origin}/auth/callback?flow=login`);
+      await loginWithMagicLink(email, `${window.location.origin}/auth/callback`);
       setStatus('Magic link sent! Check your inbox to finish signing in.');
     } catch (err) {
       handleAuthError(err, 'Unable to send magic link.');
@@ -380,6 +380,28 @@ export default function AuthPage() {
                 Send magic link
               </button>
               <span className="text-xs text-white/50">No password needed — check your email.</span>
+            </div>
+          ) : null}
+          {isAuthenticated && bootstrapError ? (
+            <div className="rounded-xl border border-amber-300/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+              <p>You are signed in, but backend bootstrap failed. Check API diagnostics.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <a
+                  href={`${import.meta.env.VITE_API_BASE_URL}/system/diagnostics`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded-lg border border-amber-200/50 px-3 py-1.5 text-xs font-semibold hover:bg-amber-200/10"
+                >
+                  Open diagnostics
+                </a>
+                <button
+                  type="button"
+                  onClick={() => void logout()}
+                  className="rounded-lg border border-amber-200/50 px-3 py-1.5 text-xs font-semibold hover:bg-amber-200/10"
+                >
+                  Sign out
+                </button>
+              </div>
             </div>
           ) : null}
           {status ? <p className="text-sm text-emerald-300">{status}</p> : null}

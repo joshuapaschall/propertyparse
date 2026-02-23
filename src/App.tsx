@@ -211,7 +211,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithMagicLink = useCallback(async (email: string, emailRedirectTo?: string) => {
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: emailRedirectTo ?? window.location.origin },
+      options: { emailRedirectTo: emailRedirectTo ?? `${window.location.origin}/auth/callback` },
     });
     if (error) {
       throw error;
@@ -222,7 +222,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: window.location.origin },
+      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
     });
     if (error) {
       throw error;
@@ -434,7 +434,16 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function LoginGate() {
-  const { isAuthenticated, isReady, isSessionLoading, isBootstrapping, requiresPasswordSetup } = useAuth();
+  const {
+    isAuthenticated,
+    isReady,
+    isSessionLoading,
+    isBootstrapping,
+    bootstrapError,
+    refreshBootstrap,
+    logout,
+    requiresPasswordSetup,
+  } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -451,6 +460,43 @@ function LoginGate() {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
         <LoadingSpinner />
+      </div>
+    );
+  }
+
+  if (isAuthenticated && !isReady && !isBootstrapping && bootstrapError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white px-6">
+        <div className="w-full max-w-lg rounded-2xl border border-white/10 bg-white/5 p-8">
+          <h2 className="text-xl font-semibold">Signed in, but workspace setup failed</h2>
+          <pre className="mt-4 max-h-60 overflow-auto rounded-lg border border-white/10 bg-slate-900/60 p-4 text-sm text-red-200 whitespace-pre-wrap break-words">
+            {bootstrapError}
+          </pre>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => void refreshBootstrap()}
+              className="rounded-lg bg-white px-4 py-2 text-sm font-semibold text-slate-900"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => void logout()}
+              className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold"
+            >
+              Sign out
+            </button>
+            <a
+              href={joinUrl('/system/diagnostics')}
+              target="_blank"
+              rel="noreferrer"
+              className="rounded-lg border border-white/20 px-4 py-2 text-sm font-semibold hover:bg-white/10"
+            >
+              Open API diagnostics
+            </a>
+          </div>
+        </div>
       </div>
     );
   }
