@@ -39,16 +39,6 @@ const navItems: NavItem[] = [
     ),
   },
   {
-    label: 'Account Security',
-    to: '/account/security',
-    icon: (
-      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 3l7 4v5c0 5-3.5 8.5-7 9-3.5-.5-7-4-7-9V7l7-4z" />
-        <path strokeLinecap="round" strokeLinejoin="round" d="M9.5 12.5l1.8 1.8 3.2-3.2" />
-      </svg>
-    ),
-  },
-  {
     label: 'Admin & Team',
     to: '/admin',
     icon: (

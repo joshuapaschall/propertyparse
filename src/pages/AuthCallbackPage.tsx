@@ -3,6 +3,7 @@ import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../LoadingSpinner';
 import { supabase } from '../lib/supabase';
 import { useAuthControls } from '../App';
+import { acceptInvitation } from '../lib/api';
 
 const parseHashTokens = (hash: string) => {
   const rawHash = hash.startsWith('#') ? hash.slice(1) : hash;
@@ -20,7 +21,6 @@ export default function AuthCallbackPage() {
     isSessionLoading,
     isAuthenticated,
     refreshBootstrap,
-    acceptPendingInvitation,
   } = useAuthControls();
 
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +56,7 @@ export default function AuthCallbackPage() {
 
         const flow = params.get('flow');
         if (flow === 'invite') {
-          await acceptPendingInvitation();
+          await acceptInvitation();
           await refreshBootstrap();
         }
 
@@ -74,7 +74,7 @@ export default function AuthCallbackPage() {
     return () => {
       isMounted = false;
     };
-  }, [acceptPendingInvitation, location.key, navigate, refreshBootstrap]);
+  }, [location.key, navigate, refreshBootstrap]);
 
   if (error) {
     return (
