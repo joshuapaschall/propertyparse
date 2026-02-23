@@ -235,9 +235,8 @@ export default function AdminPage() {
   const [inviteLastName, setInviteLastName] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState('member');
-  const [inviteGenerateTempPassword, setInviteGenerateTempPassword] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
-  const [generatedTempPassword, setGeneratedTempPassword] = useState<string | null>(null);
+  const [inviteNextStepsEmail, setInviteNextStepsEmail] = useState<string | null>(null);
   const [pendingInviteEmail, setPendingInviteEmail] = useState<string | null>(null);
   const [pendingInviteResendLoading, setPendingInviteResendLoading] = useState(false);
 
@@ -343,7 +342,7 @@ export default function AdminPage() {
 
     setTeamError(null);
     setTeamMessage(null);
-    setGeneratedTempPassword(null);
+    setInviteNextStepsEmail(null);
 
     try {
       const inviteResponse = await inviteOrgMember({
@@ -351,20 +350,16 @@ export default function AdminPage() {
         lastName,
         email,
         role: inviteRole,
-        generateTemporaryPassword: inviteGenerateTempPassword,
         resend,
       });
 
-      const tempPassword = inviteResponse.temporaryPassword ?? inviteResponse.tempPassword ?? null;
-      setGeneratedTempPassword(tempPassword);
+      setInviteNextStepsEmail(email);
       setPendingInviteEmail(null);
 
       const responseMessage =
         typeof inviteResponse.message === 'string' && inviteResponse.message.trim().length > 0
           ? inviteResponse.message.trim()
-          : tempPassword
-            ? 'Invitation sent. Share the temporary password securely. The user will be forced to change it.'
-            : 'Invitation sent. The user can finish onboarding from their invite email.';
+          : 'Invite email sent. The user can finish onboarding from their invite email.';
 
       setTeamMessage(responseMessage);
       showToast({ title: responseMessage, variant: 'success' });
@@ -374,7 +369,6 @@ export default function AdminPage() {
         setInviteLastName('');
         setInviteEmail('');
         setInviteRole('member');
-        setInviteGenerateTempPassword(false);
       }
 
       await loadMembers();
@@ -383,11 +377,13 @@ export default function AdminPage() {
 
       if (errorInfo.status === 409) {
         setPendingInviteEmail(email);
+        setInviteNextStepsEmail(null);
         const pendingMessage = 'An invitation is already pending for this email. You can resend the invite now.';
         setTeamError({ ...errorInfo, message: pendingMessage });
         showToast({ title: pendingMessage, variant: 'info' });
       } else {
         setPendingInviteEmail(null);
+        setInviteNextStepsEmail(null);
         setTeamError(errorInfo);
         showToast({ title: errorInfo.message, variant: 'error' });
       }
@@ -407,6 +403,18 @@ export default function AdminPage() {
 
   const handleResendInvite = async () => {
     await sendInvite({ resend: true });
+  };
+
+  const handleCopyInviteTroubleshooting = async () => {
+    const troubleshootingSteps = 'Check Supabase Email settings + URL Configuration Redirect URLs.';
+
+    try {
+      await navigator.clipboard.writeText(troubleshootingSteps);
+      showToast({ title: 'Troubleshooting steps copied', variant: 'success' });
+    } catch {
+      window.prompt('Copy troubleshooting steps:', troubleshootingSteps);
+      showToast({ title: 'Troubleshooting steps copied', variant: 'info' });
+    }
   };
 
   const handleOpenEdit = (member: OrgMember) => {
@@ -578,27 +586,24 @@ export default function AdminPage() {
                     </option>
                   ))}
                 </select>
-                <label className="md:col-span-2 xl:col-span-5 flex items-start gap-3 rounded-lg border border-slate-300/70 px-3 py-2 text-sm dark:border-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={inviteGenerateTempPassword}
-                    onChange={(event) => setInviteGenerateTempPassword(event.target.checked)}
-                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                  />
-                  <span>
-                    <span className="font-medium text-slate-700 dark:text-slate-200">Generate temporary password</span>
-                    <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
-                      Share temp password securely; user will be forced to change it.
-                    </span>
-                  </span>
-                </label>
                 <Button type="submit" disabled={inviteLoading} variant="primary">
                   {inviteLoading ? 'Inviting...' : 'Invite Member'}
                 </Button>
               </form>
             ) : null}
 
-            {teamError && teamError.status !== 409 ? <SetupRequiredCard guidance={getSetupGuidanceFromDiagnostics(teamDiagnostics, teamError.message)} errorInfo={teamError} /> : null}
+            {teamError && teamError.status !== 409 && teamError.status !== 502 ? <SetupRequiredCard guidance={getSetupGuidanceFromDiagnostics(teamDiagnostics, teamError.message)} errorInfo={teamError} /> : null}
+            {teamError?.status === 502 ? (
+              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-100">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p>{teamError.message}</p>
+                  <Button type="button" variant="secondary" onClick={() => void handleCopyInviteTroubleshooting()}>
+                    Copy troubleshooting steps
+                  </Button>
+                </div>
+                <p className="mt-2 text-xs text-rose-700 dark:text-rose-200">Check Supabase Email settings + URL Configuration Redirect URLs.</p>
+              </div>
+            ) : null}
             {teamError?.status === 409 && pendingInviteEmail ? (
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
                 <p>
@@ -614,11 +619,10 @@ export default function AdminPage() {
                 {teamMessage}
               </div>
             ) : null}
-            {generatedTempPassword ? (
-              <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/70 dark:bg-amber-950/30 dark:text-amber-200">
-                <p className="font-semibold">Temporary password (shown once)</p>
-                <p className="mt-2 rounded bg-white/70 px-3 py-2 font-mono text-base text-amber-950 dark:bg-slate-900/60 dark:text-amber-100">{generatedTempPassword}</p>
-                <p className="mt-2 text-xs">Share temp password securely; user will be forced to change it.</p>
+            {inviteNextStepsEmail ? (
+              <div className="mt-4 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900 dark:border-indigo-800/70 dark:bg-indigo-950/30 dark:text-indigo-100">
+                <p className="font-semibold">Next steps</p>
+                <p className="mt-1">We emailed <span className="font-semibold">{inviteNextStepsEmail}</span>. They must click the link, then set a password to finish setup.</p>
               </div>
             ) : null}
 
