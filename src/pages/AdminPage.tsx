@@ -238,6 +238,8 @@ export default function AdminPage() {
   const [inviteGenerateTempPassword, setInviteGenerateTempPassword] = useState(false);
   const [inviteLoading, setInviteLoading] = useState(false);
   const [generatedTempPassword, setGeneratedTempPassword] = useState<string | null>(null);
+  const [pendingInviteEmail, setPendingInviteEmail] = useState<string | null>(null);
+  const [pendingInviteResendLoading, setPendingInviteResendLoading] = useState(false);
 
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [editFirstName, setEditFirstName] = useState('');
@@ -319,42 +321,92 @@ export default function AdminPage() {
     return cards.slice(0, 6);
   }, [metrics]);
 
-  const handleInvite = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const sendInvite = async ({ resend = false }: { resend?: boolean } = {}) => {
     if (!canManageTeam) return;
-    setInviteLoading(true);
+
+    const firstName = inviteFirstName.trim();
+    const lastName = inviteLastName.trim();
+    const email = inviteEmail.trim();
+
+    if (!firstName || !lastName || !email) {
+      const message = 'First name, last name, and email are required.';
+      setTeamError({ message, endpoint: '/org/invite' });
+      showToast({ title: message, variant: 'error' });
+      return;
+    }
+
+    if (resend) {
+      setPendingInviteResendLoading(true);
+    } else {
+      setInviteLoading(true);
+    }
+
     setTeamError(null);
     setTeamMessage(null);
     setGeneratedTempPassword(null);
+
     try {
       const inviteResponse = await inviteOrgMember({
-        firstName: inviteFirstName.trim(),
-        lastName: inviteLastName.trim(),
-        email: inviteEmail.trim(),
+        firstName,
+        lastName,
+        email,
         role: inviteRole,
         generateTemporaryPassword: inviteGenerateTempPassword,
+        resend,
       });
-      setInviteFirstName('');
-      setInviteLastName('');
-      setInviteEmail('');
-      setInviteRole('member');
-      setInviteGenerateTempPassword(false);
+
       const tempPassword = inviteResponse.temporaryPassword ?? inviteResponse.tempPassword ?? null;
       setGeneratedTempPassword(tempPassword);
-      setTeamMessage(
-        tempPassword
-          ? 'Invitation sent. Share the temporary password securely. The user will be forced to change it.'
-          : 'Invitation sent. The user can finish onboarding from their invite email.'
-      );
-      showToast({ title: 'Invitation created', variant: 'success' });
+      setPendingInviteEmail(null);
+
+      const responseMessage =
+        typeof inviteResponse.message === 'string' && inviteResponse.message.trim().length > 0
+          ? inviteResponse.message.trim()
+          : tempPassword
+            ? 'Invitation sent. Share the temporary password securely. The user will be forced to change it.'
+            : 'Invitation sent. The user can finish onboarding from their invite email.';
+
+      setTeamMessage(responseMessage);
+      showToast({ title: responseMessage, variant: 'success' });
+
+      if (!resend) {
+        setInviteFirstName('');
+        setInviteLastName('');
+        setInviteEmail('');
+        setInviteRole('member');
+        setInviteGenerateTempPassword(false);
+      }
+
       await loadMembers();
     } catch (err) {
       const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to send invitation.', endpoint: '/org/invite' };
-      setTeamError(errorInfo);
-      showToast({ title: errorInfo.message, variant: 'error' });
+
+      if (errorInfo.status === 409) {
+        setPendingInviteEmail(email);
+        const pendingMessage = 'An invitation is already pending for this email. You can resend the invite now.';
+        setTeamError({ ...errorInfo, message: pendingMessage });
+        showToast({ title: pendingMessage, variant: 'info' });
+      } else {
+        setPendingInviteEmail(null);
+        setTeamError(errorInfo);
+        showToast({ title: errorInfo.message, variant: 'error' });
+      }
     } finally {
-      setInviteLoading(false);
+      if (resend) {
+        setPendingInviteResendLoading(false);
+      } else {
+        setInviteLoading(false);
+      }
     }
+  };
+
+  const handleInvite = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await sendInvite();
+  };
+
+  const handleResendInvite = async () => {
+    await sendInvite({ resend: true });
   };
 
   const handleOpenEdit = (member: OrgMember) => {
@@ -546,7 +598,17 @@ export default function AdminPage() {
               </form>
             ) : null}
 
-            {teamError ? <SetupRequiredCard guidance={getSetupGuidanceFromDiagnostics(teamDiagnostics, teamError.message)} errorInfo={teamError} /> : null}
+            {teamError && teamError.status !== 409 ? <SetupRequiredCard guidance={getSetupGuidanceFromDiagnostics(teamDiagnostics, teamError.message)} errorInfo={teamError} /> : null}
+            {teamError?.status === 409 && pendingInviteEmail ? (
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
+                <p>
+                  Invite already pending for <span className="font-semibold">{pendingInviteEmail}</span>.
+                </p>
+                <Button type="button" variant="secondary" onClick={() => void handleResendInvite()} disabled={pendingInviteResendLoading || inviteLoading}>
+                  {pendingInviteResendLoading ? 'Resending...' : 'Resend invite'}
+                </Button>
+              </div>
+            ) : null}
             {teamMessage ? (
               <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
                 {teamMessage}
