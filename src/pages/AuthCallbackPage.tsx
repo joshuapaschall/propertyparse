@@ -1,71 +1,49 @@
 import { useEffect, useState } from 'react';
-import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../LoadingSpinner';
-import { supabase } from '../lib/supabase';
 import { useAuthControls } from '../App';
 import { acceptInvitation } from '../lib/api';
-
-const parseHashTokens = (hash: string) => {
-  const rawHash = hash.startsWith('#') ? hash.slice(1) : hash;
-  const params = new URLSearchParams(rawHash);
-  const accessToken = params.get('access_token');
-  const refreshToken = params.get('refresh_token');
-  return { accessToken, refreshToken };
-};
+import { consumeSupabaseAuthRedirect } from '../lib/supabaseAuthRedirect';
 
 export default function AuthCallbackPage() {
-  const location = useLocation();
   const navigate = useNavigate();
-  const {
-    session,
-    isSessionLoading,
-    isAuthenticated,
-    refreshBootstrap,
-  } = useAuthControls();
+  const { refreshBootstrap } = useAuthControls();
 
-  const [error, setError] = useState<string | null>(null);
+  const [isInvalidLink, setIsInvalidLink] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
 
     const run = async () => {
       try {
-        const params = new URLSearchParams(window.location.search);
-        const code = params.get('code');
+        const authResult = await consumeSupabaseAuthRedirect();
 
-        if (code) {
-          const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(window.location.href);
-          if (exchangeError) {
-            throw exchangeError;
-          }
-        } else {
-          const { accessToken, refreshToken } = parseHashTokens(window.location.hash);
-          if (accessToken && refreshToken) {
-            const { error: setSessionError } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken,
-            });
-            if (setSessionError) {
-              throw setSessionError;
-            }
-            window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
-          }
+        if (!isMounted) return;
+
+        if (!authResult.sessionEstablished) {
+          setIsInvalidLink(true);
+          return;
         }
 
         await refreshBootstrap();
 
-        const flow = params.get('flow');
-        if (flow === 'invite') {
+        if (authResult.flow === 'invite') {
           await acceptInvitation();
           await refreshBootstrap();
+          if (!isMounted) return;
+          navigate('/welcome/set-password', { replace: true });
+          return;
         }
 
+        if (authResult.type === 'recovery') {
+          navigate('/reset-password', { replace: true });
+          return;
+        }
+
+        navigate('/parse', { replace: true });
+      } catch (_error) {
         if (!isMounted) return;
-        navigate('/welcome/set-password', { replace: true });
-      } catch (err) {
-        if (!isMounted) return;
-        const message = err instanceof Error ? err.message : 'Unable to complete authentication callback.';
-        setError(message);
+        setIsInvalidLink(true);
       }
     };
 
@@ -74,14 +52,16 @@ export default function AuthCallbackPage() {
     return () => {
       isMounted = false;
     };
-  }, [location.key, navigate, refreshBootstrap]);
+  }, [navigate, refreshBootstrap]);
 
-  if (error) {
+  if (isInvalidLink) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white px-6">
         <div className="max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 text-center">
-          <h1 className="text-xl font-semibold">Invite link issue</h1>
-          <p className="mt-3 text-sm text-white/70">{error}</p>
+          <h1 className="text-xl font-semibold">Link invalid or expired</h1>
+          <p className="mt-3 text-sm text-white/70">
+            Please request a new authentication email and try again.
+          </p>
           <button
             type="button"
             onClick={() => navigate('/login', { replace: true })}
@@ -92,10 +72,6 @@ export default function AuthCallbackPage() {
         </div>
       </div>
     );
-  }
-
-  if (!isSessionLoading && isAuthenticated && session) {
-    return <Navigate to="/welcome/set-password" replace />;
   }
 
   return (

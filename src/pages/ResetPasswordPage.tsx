@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuthControls } from '../App';
+import { consumeSupabaseAuthRedirect } from '../lib/supabaseAuthRedirect';
 
 export default function ResetPasswordPage() {
   const navigate = useNavigate();
@@ -15,15 +16,30 @@ export default function ResetPasswordPage() {
 
   useEffect(() => {
     let isMounted = true;
-    supabase.auth.getSession().then(({ data, error: sessionError }) => {
+
+    const run = async () => {
+      const params = new URLSearchParams(window.location.search);
+      const hasRedirectTokens =
+        (Boolean(params.get('token_hash')) && Boolean(params.get('type'))) || Boolean(params.get('code'));
+
+      if (hasRedirectTokens) {
+        await consumeSupabaseAuthRedirect();
+      }
+
+      const { data, error: sessionError } = await supabase.auth.getSession();
       if (!isMounted) return;
+
       if (sessionError) {
         setError(sessionError.message);
         setHasRecoverySession(false);
         return;
       }
+
       setHasRecoverySession(Boolean(data.session));
-    });
+    };
+
+    void run();
+
     return () => {
       isMounted = false;
     };
