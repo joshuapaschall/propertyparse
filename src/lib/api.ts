@@ -393,14 +393,29 @@ export type InviteOrgMemberPayload = {
 };
 
 export async function inviteOrgMember(payload: InviteOrgMemberPayload) {
-  return postJson<InviteOrgMemberResponse>('/org/invite', payload, { headers: getAuthHeaders() });
+  return postJson<InviteOrgMemberResponse>(
+    '/org/invite',
+    {
+      first_name: payload.firstName,
+      last_name: payload.lastName,
+      email: payload.email,
+      role: payload.role,
+      generate_temporary_password: payload.generateTemporaryPassword,
+      resend: payload.resend,
+    },
+    { headers: getAuthHeaders() },
+  );
 }
 
 export async function updateOrgMember(userId: string, payload: { firstName: string; lastName: string; role: string }) {
   return requestJson<JsonValue>(`/org/members/${userId}`, {
     method: 'PATCH',
     headers: { 'content-type': 'application/json', ...getAuthHeaders() },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      first_name: payload.firstName,
+      last_name: payload.lastName,
+      role: payload.role,
+    }),
   });
 }
 

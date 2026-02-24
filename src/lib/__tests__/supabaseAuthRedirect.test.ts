@@ -5,6 +5,7 @@ const authMocks = vi.hoisted(() => ({
   verifyOtp: vi.fn(),
   exchangeCodeForSession: vi.fn(),
   setSession: vi.fn(),
+  getSession: vi.fn(),
 }));
 
 vi.mock('../supabase', () => ({
@@ -13,6 +14,7 @@ vi.mock('../supabase', () => ({
       verifyOtp: authMocks.verifyOtp,
       exchangeCodeForSession: authMocks.exchangeCodeForSession,
       setSession: authMocks.setSession,
+      getSession: authMocks.getSession,
     },
   },
 }));
@@ -22,9 +24,11 @@ describe('consumeSupabaseAuthRedirect', () => {
     authMocks.verifyOtp.mockReset();
     authMocks.exchangeCodeForSession.mockReset();
     authMocks.setSession.mockReset();
+    authMocks.getSession.mockReset();
     authMocks.verifyOtp.mockResolvedValue({ error: null });
     authMocks.exchangeCodeForSession.mockResolvedValue({ error: null });
     authMocks.setSession.mockResolvedValue({ error: null });
+    authMocks.getSession.mockResolvedValue({ data: { session: null } });
     window.history.replaceState({}, document.title, '/auth/callback');
   });
 
@@ -44,5 +48,21 @@ describe('consumeSupabaseAuthRedirect', () => {
 
     expect(authMocks.exchangeCodeForSession).toHaveBeenCalledWith('oauth-code');
     expect(authMocks.verifyOtp).not.toHaveBeenCalled();
+  });
+
+  it('returns provider error details when error params are present', async () => {
+    window.history.replaceState(
+      {},
+      document.title,
+      '/auth/callback?error=access_denied&error_description=expired+or+invalid+link',
+    );
+
+    const result = await consumeSupabaseAuthRedirect();
+
+    expect(result.sessionEstablished).toBe(false);
+    expect(result.authError).toBe('access_denied');
+    expect(result.authErrorDescription).toBe('expired or invalid link');
+    expect(authMocks.verifyOtp).not.toHaveBeenCalled();
+    expect(authMocks.exchangeCodeForSession).not.toHaveBeenCalled();
   });
 });

@@ -10,6 +10,7 @@ export default function AuthCallbackPage() {
   const { refreshBootstrap } = useAuthControls();
 
   const [isInvalidLink, setIsInvalidLink] = useState(false);
+  const [invalidReason, setInvalidReason] = useState<string | null>(null);
   const [debugParams, setDebugParams] = useState<string | null>(null);
   const isDev = import.meta.env.DEV;
 
@@ -29,6 +30,7 @@ export default function AuthCallbackPage() {
         }
 
         if (!authResult.sessionEstablished) {
+          setInvalidReason(authResult.authErrorDescription ?? authResult.authError ?? null);
           setIsInvalidLink(true);
           return;
         }
@@ -49,8 +51,9 @@ export default function AuthCallbackPage() {
         }
 
         navigate('/parse', { replace: true });
-      } catch {
+      } catch (error) {
         if (!isMounted) return;
+        setInvalidReason(error instanceof Error ? error.message : null);
         setIsInvalidLink(true);
       }
     };
@@ -68,10 +71,13 @@ export default function AuthCallbackPage() {
         <div className="max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 text-center">
           <h1 className="text-xl font-semibold">Link invalid or expired</h1>
           <p className="mt-3 text-sm text-white/70">
-            Please request a new authentication email and try again.
+            {invalidReason ?? 'Please request a new authentication email and try again.'}
           </p>
           {isDev && debugParams ? (
-            <p className="mt-3 text-left text-xs text-white/60 break-all">Detected params: {debugParams}</p>
+            <div className="mt-3 rounded-md border border-white/10 bg-slate-900/40 p-3 text-left text-xs text-white/60">
+              <p className="font-semibold text-white/70">Auth callback debug</p>
+              <p className="mt-2 break-all">Detected params: {debugParams}</p>
+            </div>
           ) : null}
           <button
             type="button"
@@ -90,7 +96,10 @@ export default function AuthCallbackPage() {
       <div className="flex flex-col items-center gap-3">
         <LoadingSpinner />
         {isDev && debugParams ? (
-          <p className="max-w-xl px-4 text-center text-xs text-white/60 break-all">Detected params: {debugParams}</p>
+          <div className="max-w-xl rounded-md border border-white/10 bg-slate-900/40 px-4 py-3 text-center text-xs text-white/60">
+            <p className="font-semibold text-white/70">Auth callback debug</p>
+            <p className="mt-2 break-all">Detected params: {debugParams}</p>
+          </div>
         ) : null}
       </div>
     </div>
