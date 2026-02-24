@@ -71,6 +71,7 @@ ENVIRONMENT=development
 
 # Frontend .env
 VITE_API_URL=http://localhost:8000
+VITE_ALLOW_SELF_SIGNUP=false
 ```
 
 4. Start the development servers:

@@ -442,9 +442,12 @@ function LoginGate() {
     bootstrapError,
     refreshBootstrap,
     logout,
+    hasPendingInvitation,
+    acceptPendingInvitation,
     requiresPasswordSetup,
   } = useAuth();
   const navigate = useNavigate();
+  const [isAcceptingInvitation, setIsAcceptingInvitation] = useState(false);
 
   useEffect(() => {
     if (isAuthenticated && requiresPasswordSetup) {
@@ -473,6 +476,23 @@ function LoginGate() {
             {bootstrapError}
           </pre>
           <div className="mt-6 flex flex-wrap gap-3">
+            {hasPendingInvitation ? (
+              <button
+                type="button"
+                onClick={async () => {
+                  setIsAcceptingInvitation(true);
+                  try {
+                    await acceptPendingInvitation();
+                  } finally {
+                    setIsAcceptingInvitation(false);
+                  }
+                }}
+                className="rounded-lg bg-emerald-300 px-4 py-2 text-sm font-semibold text-emerald-950"
+                disabled={isAcceptingInvitation}
+              >
+                {isAcceptingInvitation ? 'Accepting invitation...' : 'Accept invitation'}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => void refreshBootstrap()}

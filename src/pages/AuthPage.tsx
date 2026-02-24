@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuthControls } from '../App';
 
@@ -79,6 +79,8 @@ const redactSupabaseUrl = (url: string | undefined) => {
   return `••••••${trimmed.slice(-6)}`;
 };
 
+const ALLOW_SELF_SIGNUP = String(import.meta.env.VITE_ALLOW_SELF_SIGNUP ?? 'false').toLowerCase() === 'true';
+
 export default function AuthPage() {
   const { loginWithPassword, loginWithMagicLink, signUpWithPassword, session, isAuthenticated, bootstrapError, logout } = useAuthControls();
   const [authMode, setAuthMode] = useState<AuthMode>('sign-in');
@@ -97,6 +99,12 @@ export default function AuthPage() {
   const [isResetting, setIsResetting] = useState(false);
   const [showResendConfirmation, setShowResendConfirmation] = useState(false);
   const [isResendingConfirmation, setIsResendingConfirmation] = useState(false);
+
+  useEffect(() => {
+    if (!ALLOW_SELF_SIGNUP && authMode === 'create-account') {
+      setAuthMode('sign-in');
+    }
+  }, [authMode]);
 
   const diagnostics = useMemo(
     () => ({
@@ -222,12 +230,16 @@ export default function AuthPage() {
           <h1 className="text-4xl font-semibold leading-tight">
             {authMode === 'sign-in'
               ? 'Sign in to launch the address parsing workspace.'
-              : 'Create your PropertyParse account to get started.'}
+              : ALLOW_SELF_SIGNUP
+                ? 'Create your PropertyParse account to get started.'
+                : 'Request an invite from your admin to access PropertyParse.'}
           </h1>
           <p className="text-lg text-white/70">
             {authMode === 'sign-in'
               ? 'Use your Supabase credentials to access PropertyParse. Magic links are available if you prefer passwordless sign-in.'
-              : 'Create an account with email and password. We will send a confirmation link if required.'}
+              : ALLOW_SELF_SIGNUP
+                ? 'Create an account with email and password. We will send a confirmation link if required.'
+                : 'Self-serve signup is disabled. Request an invite from your admin, then use password or magic link login.'}
           </p>
           <div className="inline-flex rounded-full border border-white/15 bg-white/5 p-1 text-sm">
             <button
@@ -245,26 +257,31 @@ export default function AuthPage() {
             >
               Sign in
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setAuthMode('create-account');
-                resetAuthFeedback();
-                setResetStatus(null);
-                setResetError(null);
-                setShowForgotPassword(false);
-              }}
-              className={`rounded-full px-4 py-1.5 font-semibold transition ${
-                authMode === 'create-account'
-                  ? 'bg-white text-slate-900'
-                  : 'text-white/70 hover:text-white'
-              }`}
-            >
-              Create account
-            </button>
+            {ALLOW_SELF_SIGNUP ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setAuthMode('create-account');
+                  resetAuthFeedback();
+                  setResetStatus(null);
+                  setResetError(null);
+                  setShowForgotPassword(false);
+                }}
+                className={`rounded-full px-4 py-1.5 font-semibold transition ${
+                  authMode === 'create-account'
+                    ? 'bg-white text-slate-900'
+                    : 'text-white/70 hover:text-white'
+                }`}
+              >
+                Create account
+              </button>
+            ) : null}
           </div>
+          {!ALLOW_SELF_SIGNUP ? (
+            <p className="text-sm text-white/70">Request an invite from your admin to create an account.</p>
+          ) : null}
           <form
-            onSubmit={authMode === 'sign-in' ? handlePasswordLogin : handleCreateAccount}
+            onSubmit={authMode === 'sign-in' || !ALLOW_SELF_SIGNUP ? handlePasswordLogin : handleCreateAccount}
             className="space-y-4"
           >
             <div className="space-y-2">

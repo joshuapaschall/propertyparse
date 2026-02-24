@@ -4,6 +4,8 @@ export type AuthRedirectResult = {
   sessionEstablished: boolean;
   flow?: string | null;
   type?: string | null;
+  authError?: string | null;
+  authErrorDescription?: string | null;
   debug?: {
     flow: string | null;
     type: string | null;
@@ -33,6 +35,8 @@ export async function consumeSupabaseAuthRedirect(): Promise<AuthRedirectResult>
   const tokenHash = params.get('token_hash');
   const type = params.get('type');
   const code = params.get('code');
+  const authError = params.get('error');
+  const authErrorDescription = params.get('error_description');
 
   const { data: sessionData } = await supabase.auth.getSession();
   const hasExistingSession = Boolean(sessionData.session);
@@ -48,10 +52,21 @@ export async function consumeSupabaseAuthRedirect(): Promise<AuthRedirectResult>
     hasExistingSession,
   };
 
+  if (authError || authErrorDescription) {
+    return {
+      sessionEstablished: false,
+      flow,
+      type,
+      authError,
+      authErrorDescription,
+      debug,
+    };
+  }
+
   if (tokenHash && type) {
     const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
     if (error) {
-      return { sessionEstablished: false, flow, type, debug };
+      return { sessionEstablished: false, flow, type, authErrorDescription: error.message, debug };
     }
     clearUrlParams();
     return { sessionEstablished: true, flow, type, debug };
@@ -60,7 +75,7 @@ export async function consumeSupabaseAuthRedirect(): Promise<AuthRedirectResult>
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
-      return { sessionEstablished: false, flow, type, debug };
+      return { sessionEstablished: false, flow, type, authErrorDescription: error.message, debug };
     }
     clearUrlParams();
     return { sessionEstablished: true, flow, type, debug };
@@ -72,7 +87,7 @@ export async function consumeSupabaseAuthRedirect(): Promise<AuthRedirectResult>
       refresh_token: refreshToken,
     });
     if (error) {
-      return { sessionEstablished: false, flow, type, debug };
+      return { sessionEstablished: false, flow, type, authErrorDescription: error.message, debug };
     }
     clearUrlParams();
     return { sessionEstablished: true, flow, type, debug };
