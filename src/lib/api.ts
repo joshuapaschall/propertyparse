@@ -6,6 +6,7 @@ import type {
   RowResult,
 } from '../types/parse';
 import { getAuthHeaderState } from './authState';
+import { supabase } from './supabase';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -334,9 +335,32 @@ export async function getMe(): Promise<MeResponse> {
 }
 
 export async function acceptInvitation(): Promise<{ ok: boolean }> {
+  let headers: Record<string, string>;
+
+  try {
+    headers = getAuthHeaders();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : '';
+    if (!message.includes('Missing auth context')) {
+      throw error;
+    }
+
+    const { data, error: sessionError } = await supabase.auth.getSession();
+    if (sessionError) {
+      throw sessionError;
+    }
+
+    const accessToken = data.session?.access_token;
+    if (!accessToken) {
+      throw error;
+    }
+
+    headers = { Authorization: `Bearer ${accessToken}` };
+  }
+
   return requestJson<{ ok: boolean }>('/org/invitations/accept', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...getAuthHeaders() },
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify({}),
   });
 }

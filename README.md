@@ -72,6 +72,7 @@ ENVIRONMENT=development
 # Frontend .env
 VITE_API_URL=http://localhost:8000
 VITE_ALLOW_SELF_SIGNUP=false
+VITE_SITE_URL=http://localhost:5173
 ```
 
 4. Start the development servers:
@@ -83,6 +84,14 @@ npm run dev
 # Backend
 uvicorn api:app --reload
 ```
+
+
+### Auth redirect configuration
+
+Set `VITE_SITE_URL` to your canonical frontend origin so Supabase magic/invite links always resolve to the correct host (no www/non-www token loss).
+
+- Development: `VITE_SITE_URL=http://localhost:5173`
+- Production: `VITE_SITE_URL=https://propertyparse.com`
 
 ## 📁 Project Structure
 

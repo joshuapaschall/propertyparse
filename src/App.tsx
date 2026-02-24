@@ -15,6 +15,7 @@ import { ToastProvider } from './components/ui/ToastProvider';
 import { acceptInvitation, getMe } from './lib/api';
 import { clearAuthHeaderState, setAuthHeaderState } from './lib/authState';
 import { supabase } from './lib/supabase';
+import { getSiteUrl } from './lib/siteUrl';
 import './App.css';
 
 type AuthContextValue = {
@@ -121,7 +122,12 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
             ? 'You have an invitation waiting. Accept to continue.'
             : 'No organization found for your account. Contact your admin or create an org.',
         );
-        clearAuthHeaderState();
+        setAuthHeaderState({
+          accessToken: currentSession.access_token,
+          orgId: null,
+          userId: currentSession.user.id,
+          role: null,
+        });
         return;
       }
 
@@ -211,7 +217,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithMagicLink = useCallback(async (email: string, emailRedirectTo?: string) => {
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: emailRedirectTo ?? `${window.location.origin}/auth/callback` },
+      options: { emailRedirectTo: emailRedirectTo ?? `${getSiteUrl()}/auth/callback` },
     });
     if (error) {
       throw error;
@@ -222,7 +228,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+      options: { emailRedirectTo: `${getSiteUrl()}/auth/callback` },
     });
     if (error) {
       throw error;
@@ -353,6 +359,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     requiresPasswordSetup,
   } = useAuth();
   const [isAcceptingInvitation, setIsAcceptingInvitation] = useState(false);
+  const [acceptInvitationError, setAcceptInvitationError] = useState<string | null>(null);
 
   if (isSessionLoading) {
     return (
@@ -392,14 +399,18 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
               {pendingInvitation?.role ? <p className="text-emerald-100/80">Role: {pendingInvitation.role}</p> : null}
             </div>
           ) : null}
+          {acceptInvitationError ? <p className="mt-4 text-sm text-red-300">{acceptInvitationError}</p> : null}
           <div className="mt-6 flex flex-wrap justify-center gap-3">
             {hasPendingInvitation ? (
               <button
                 type="button"
                 onClick={async () => {
+                  setAcceptInvitationError(null);
                   setIsAcceptingInvitation(true);
                   try {
                     await acceptPendingInvitation();
+                  } catch (error) {
+                    setAcceptInvitationError(error instanceof Error ? error.message : 'Unable to accept invitation.');
                   } finally {
                     setIsAcceptingInvitation(false);
                   }
@@ -448,6 +459,7 @@ function LoginGate() {
   } = useAuth();
   const navigate = useNavigate();
   const [isAcceptingInvitation, setIsAcceptingInvitation] = useState(false);
+  const [acceptInvitationError, setAcceptInvitationError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isAuthenticated && requiresPasswordSetup) {
@@ -475,14 +487,18 @@ function LoginGate() {
           <pre className="mt-4 max-h-60 overflow-auto rounded-lg border border-white/10 bg-slate-900/60 p-4 text-sm text-red-200 whitespace-pre-wrap break-words">
             {bootstrapError}
           </pre>
+          {acceptInvitationError ? <p className="mt-4 text-sm text-red-300">{acceptInvitationError}</p> : null}
           <div className="mt-6 flex flex-wrap gap-3">
             {hasPendingInvitation ? (
               <button
                 type="button"
                 onClick={async () => {
+                  setAcceptInvitationError(null);
                   setIsAcceptingInvitation(true);
                   try {
                     await acceptPendingInvitation();
+                  } catch (error) {
+                    setAcceptInvitationError(error instanceof Error ? error.message : 'Unable to accept invitation.');
                   } finally {
                     setIsAcceptingInvitation(false);
                   }
