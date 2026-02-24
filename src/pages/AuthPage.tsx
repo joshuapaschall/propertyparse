@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuthControls } from '../App';
+import { getSiteUrl } from '../lib/siteUrl';
 
 const features = [
   'Upload CSV, XLSX, PDF, image, or DOCX files.',
@@ -152,7 +153,7 @@ export default function AuthPage() {
     setResetError(null);
     setIsSubmitting(true);
     try {
-      await loginWithMagicLink(email, `${window.location.origin}/auth/callback`);
+      await loginWithMagicLink(email, `${getSiteUrl()}/auth/callback`);
       setStatus('Magic link sent! Check your inbox to finish signing in.');
     } catch (err) {
       handleAuthError(err, 'Unable to send magic link.');
@@ -187,7 +188,7 @@ export default function AuthPage() {
     setIsResetting(true);
     try {
       const { error: resetErrorResponse } = await supabase.auth.resetPasswordForEmail(resetEmail, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: `${getSiteUrl()}/reset-password`,
       });
       if (resetErrorResponse) {
         throw resetErrorResponse;

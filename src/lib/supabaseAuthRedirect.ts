@@ -63,8 +63,8 @@ export async function consumeSupabaseAuthRedirect(): Promise<AuthRedirectResult>
     };
   }
 
-  if (tokenHash && type) {
-    const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
+  if (code) {
+    const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
       return { sessionEstablished: false, flow, type, authErrorDescription: error.message, debug };
     }
@@ -72,8 +72,8 @@ export async function consumeSupabaseAuthRedirect(): Promise<AuthRedirectResult>
     return { sessionEstablished: true, flow, type, debug };
   }
 
-  if (code) {
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+  if (tokenHash && type) {
+    const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
     if (error) {
       return { sessionEstablished: false, flow, type, authErrorDescription: error.message, debug };
     }
