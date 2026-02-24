@@ -10,6 +10,8 @@ export default function AuthCallbackPage() {
   const { refreshBootstrap } = useAuthControls();
 
   const [isInvalidLink, setIsInvalidLink] = useState(false);
+  const [debugParams, setDebugParams] = useState<string | null>(null);
+  const isDev = import.meta.env.DEV;
 
   useEffect(() => {
     let isMounted = true;
@@ -19,6 +21,12 @@ export default function AuthCallbackPage() {
         const authResult = await consumeSupabaseAuthRedirect();
 
         if (!isMounted) return;
+
+        if (isDev && authResult.debug) {
+          const debugOutput = JSON.stringify(authResult.debug);
+          setDebugParams(debugOutput);
+          console.debug('[AuthCallbackPage] redirect debug', authResult.debug);
+        }
 
         if (!authResult.sessionEstablished) {
           setIsInvalidLink(true);
@@ -41,7 +49,7 @@ export default function AuthCallbackPage() {
         }
 
         navigate('/parse', { replace: true });
-      } catch (_error) {
+      } catch {
         if (!isMounted) return;
         setIsInvalidLink(true);
       }
@@ -52,7 +60,7 @@ export default function AuthCallbackPage() {
     return () => {
       isMounted = false;
     };
-  }, [navigate, refreshBootstrap]);
+  }, [isDev, navigate, refreshBootstrap]);
 
   if (isInvalidLink) {
     return (
@@ -62,6 +70,9 @@ export default function AuthCallbackPage() {
           <p className="mt-3 text-sm text-white/70">
             Please request a new authentication email and try again.
           </p>
+          {isDev && debugParams ? (
+            <p className="mt-3 text-left text-xs text-white/60 break-all">Detected params: {debugParams}</p>
+          ) : null}
           <button
             type="button"
             onClick={() => navigate('/login', { replace: true })}
@@ -76,7 +87,12 @@ export default function AuthCallbackPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 text-white">
-      <LoadingSpinner />
+      <div className="flex flex-col items-center gap-3">
+        <LoadingSpinner />
+        {isDev && debugParams ? (
+          <p className="max-w-xl px-4 text-center text-xs text-white/60 break-all">Detected params: {debugParams}</p>
+        ) : null}
+      </div>
     </div>
   );
 }

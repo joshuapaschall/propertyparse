@@ -4,6 +4,14 @@ export type AuthRedirectResult = {
   sessionEstablished: boolean;
   flow?: string | null;
   type?: string | null;
+  debug?: {
+    flow: string | null;
+    type: string | null;
+    hasTokenHash: boolean;
+    hasCode: boolean;
+    hasHashSessionTokens: boolean;
+    hasExistingSession: boolean;
+  };
 };
 
 const parseHashSession = (hash: string) => {
@@ -26,36 +34,53 @@ export async function consumeSupabaseAuthRedirect(): Promise<AuthRedirectResult>
   const type = params.get('type');
   const code = params.get('code');
 
+  const { data: sessionData } = await supabase.auth.getSession();
+  const hasExistingSession = Boolean(sessionData.session);
+
+  const { accessToken, refreshToken } = parseHashSession(window.location.hash);
+  const hasHashSessionTokens = Boolean(accessToken && refreshToken);
+  const debug = {
+    flow,
+    type,
+    hasTokenHash: Boolean(tokenHash),
+    hasCode: Boolean(code),
+    hasHashSessionTokens,
+    hasExistingSession,
+  };
+
   if (tokenHash && type) {
     const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
     if (error) {
-      return { sessionEstablished: false, flow, type };
+      return { sessionEstablished: false, flow, type, debug };
     }
     clearUrlParams();
-    return { sessionEstablished: true, flow, type };
+    return { sessionEstablished: true, flow, type, debug };
   }
 
   if (code) {
     const { error } = await supabase.auth.exchangeCodeForSession(code);
     if (error) {
-      return { sessionEstablished: false, flow, type };
+      return { sessionEstablished: false, flow, type, debug };
     }
     clearUrlParams();
-    return { sessionEstablished: true, flow, type };
+    return { sessionEstablished: true, flow, type, debug };
   }
 
-  const { accessToken, refreshToken } = parseHashSession(window.location.hash);
-  if (accessToken && refreshToken) {
+  if (hasHashSessionTokens && accessToken && refreshToken) {
     const { error } = await supabase.auth.setSession({
       access_token: accessToken,
       refresh_token: refreshToken,
     });
     if (error) {
-      return { sessionEstablished: false, flow, type };
+      return { sessionEstablished: false, flow, type, debug };
     }
     clearUrlParams();
-    return { sessionEstablished: true, flow, type };
+    return { sessionEstablished: true, flow, type, debug };
   }
 
-  return { sessionEstablished: false, flow, type };
+  if (hasExistingSession) {
+    return { sessionEstablished: true, flow, type, debug };
+  }
+
+  return { sessionEstablished: false, flow, type, debug };
 }
