@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { RowResult } from '../types/parse';
-import { retryJobBatch, retryJobRow } from '../lib/api';
+import { retryJobBatch, retryJobRow, runNeedsReviewAiFix } from '../lib/api';
 import {
   isDuplicateRow,
   isErrorRow,
@@ -123,6 +123,9 @@ export default function ProcessingReportModal({
   const [retryError, setRetryError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [savingRow, setSavingRow] = useState(false);
+  const [runningAiFix, setRunningAiFix] = useState(false);
+  const [aiFixRowsProcessed, setAiFixRowsProcessed] = useState<number | null>(null);
+  const [aiFixEstimatedCost, setAiFixEstimatedCost] = useState<number | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -173,6 +176,13 @@ export default function ProcessingReportModal({
 
   const canRetrySelected = selectedRowsWithEdits.length > 0 && !retrying && !savingRow;
 
+  const needsReviewRowsCount = useMemo(
+    () => rows.filter((row) => isNeedsReviewRow(row)).length,
+    [rows],
+  );
+
+  const canRunAiFix = Boolean(jobId) && showDebugMode && needsReviewRowsCount > 0 && !runningAiFix;
+
   const toggleRowSelection = (rowId: string) => {
     setSelectedRowIds((prev) => {
       const next = new Set(prev);
@@ -217,6 +227,31 @@ export default function ProcessingReportModal({
       setRetryError((err as Error).message ?? 'Retry selected failed.');
     } finally {
       setRetrying(false);
+    }
+  };
+
+
+  const handleRunAiFix = async () => {
+    if (!jobId) {
+      setRetryError('Missing job ID. Please re-run the parse job.');
+      return;
+    }
+    setRunningAiFix(true);
+    setRetryError(null);
+    try {
+      const response = await runNeedsReviewAiFix(jobId);
+      onApplyUpdates({
+        updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
+        updatedJob: response.updated_job as Record<string, unknown> | undefined,
+      });
+      const processed = response.rows_processed ?? response.ai_rows_processed ?? 0;
+      setAiFixRowsProcessed(processed);
+      const estimatedCost = response.estimated_extra_cost_usd;
+      setAiFixEstimatedCost(typeof estimatedCost === 'number' ? estimatedCost : null);
+    } catch (err) {
+      setRetryError((err as Error).message ?? 'AI Fix failed.');
+    } finally {
+      setRunningAiFix(false);
     }
   };
 
@@ -311,9 +346,25 @@ export default function ProcessingReportModal({
             >
               {retrying ? 'Retrying...' : 'Retry Selected'}
             </button>
+            {showDebugMode ? (
+              <button
+                type="button"
+                onClick={handleRunAiFix}
+                disabled={!canRunAiFix}
+                className="rounded-lg border border-fuchsia-200 px-3 py-2 text-xs font-semibold text-fuchsia-700 transition hover:bg-fuchsia-50 disabled:border-slate-200 disabled:text-slate-400 dark:border-fuchsia-500/40 dark:text-fuchsia-200 dark:hover:bg-fuchsia-500/10 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
+              >
+                {runningAiFix ? 'Running AI Fix...' : 'AI Fix Needs Review'}
+              </button>
+            ) : null}
             <span className="text-xs text-slate-500 dark:text-slate-400">
               Showing {filteredRows.length} of {rows.length}
             </span>
+            {showDebugMode ? (
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Rows processed: {aiFixRowsProcessed ?? 0} · Estimated extra cost:{' '}
+                {typeof aiFixEstimatedCost === 'number' ? `$${aiFixEstimatedCost.toFixed(4)}` : '$0.0000'}
+              </span>
+            ) : null}
           </div>
 
           {retryError ? (
