@@ -2,6 +2,8 @@ import type { RowResult } from '../types/parse';
 
 const normalizeValue = (value?: string) => (value ?? '').toUpperCase();
 
+const SKIPPED_REASON_CODES = new Set(['PO_BOX', 'NON_ADDRESS_TEXT']);
+
 type ReasonMetadata = {
   label: string;
   description: string;
@@ -117,6 +119,7 @@ export const getReasonMetadata = (row: RowResult) => {
 };
 
 export const isNeedsReviewRow = (row: RowResult) => {
+  if (isSkippedRow(row)) return false;
   const status = normalizeValue(row.status);
   const reason = normalizeValue(row.reason_code);
   return (
@@ -127,7 +130,11 @@ export const isNeedsReviewRow = (row: RowResult) => {
   );
 };
 
-export const isSkippedRow = (row: RowResult) => normalizeValue(row.status).startsWith('SKIPPED');
+export const isSkippedRow = (row: RowResult) => {
+  const status = normalizeValue(row.status);
+  const reason = normalizeValue(row.reason_code);
+  return status.startsWith('SKIPPED') || SKIPPED_REASON_CODES.has(reason);
+};
 
 export const isOutOfScopeRow = (row: RowResult) => {
   const status = normalizeValue(row.status);
