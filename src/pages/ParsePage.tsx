@@ -2590,7 +2590,7 @@ export default function ParsePage() {
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  Valid ({parseSummary.valid_unique})
+                  Valid (rows: {parseSummary.valid_total} · unique: {parseSummary.valid_unique})
                 </button>
                 <button
                   type="button"
