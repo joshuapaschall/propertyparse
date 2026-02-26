@@ -29,7 +29,10 @@ export type JobExportType =
   | 'unmatched'
   | 'unique_valid'
   | 'needs_review'
-  | 'processing_report';
+  | 'processing_report'
+  | 'out_of_scope'
+  | 'duplicates'
+  | 'skipped';
 
 export const JOB_EXPORT_TYPES: JobExportType[] = [
   'unique_valid',
@@ -37,6 +40,9 @@ export const JOB_EXPORT_TYPES: JobExportType[] = [
   'processing_report',
   'matched',
   'unmatched',
+  'out_of_scope',
+  'duplicates',
+  'skipped',
 ];
 export type MeResponse = {
   userId: string;

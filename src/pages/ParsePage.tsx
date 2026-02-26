@@ -2150,11 +2150,14 @@ export default function ParsePage() {
     processing_report: 'Processing Report',
     matched: 'Matched',
     unmatched: 'Unmatched',
+    out_of_scope: 'Out of Scope',
+    duplicates: 'Duplicates',
+    skipped: 'Skipped',
   };
 
   const exportOptions = useMemo(
     () =>
-      (['unique_valid', 'needs_review', 'processing_report', 'matched', 'unmatched'] as JobExportType[]).map(
+      (['unique_valid', 'needs_review', 'processing_report', 'matched', 'unmatched', 'out_of_scope', 'duplicates', 'skipped'] as JobExportType[]).map(
         (type) => ({
           key: type,
           label: downloadLabels[type],
