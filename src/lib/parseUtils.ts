@@ -44,6 +44,12 @@ const REASON_METADATA: Record<string, ReasonMetadata> = {
     description: 'P.O. Boxes are skipped because they are not physical property addresses.',
     fix_hint: 'Replace with a physical street address.',
   },
+  NON_ADDRESS_TEXT: {
+    label: 'Non-address text (skipped)',
+    description:
+      'This row appears to contain non-address text (for example, RIGHT-OF-WAY or VACANT LOT) instead of a street address.',
+    fix_hint: 'Replace with a physical street address that includes a house number when available.',
+  },
   ADDRESS_NOT_FOUND: {
     label: "Address couldn't be found",
     description: "We couldn't verify this as a deliverable street address.",
