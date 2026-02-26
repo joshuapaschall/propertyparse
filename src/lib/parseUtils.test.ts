@@ -20,10 +20,18 @@ describe('parseUtils filters', () => {
     expect(isNeedsReviewRow(buildRow({ status: 'VALID' }))).toBe(false);
   });
 
-  it('flags skipped rows by status prefix', () => {
+  it('flags skipped rows by status prefix or skipped reason code', () => {
     expect(isSkippedRow(buildRow({ status: 'SKIPPED' }))).toBe(true);
     expect(isSkippedRow(buildRow({ status: 'SKIPPED_NO_ADDRESS_FOUND' }))).toBe(true);
+    expect(isSkippedRow(buildRow({ status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'NON_ADDRESS_TEXT' }))).toBe(true);
+    expect(isSkippedRow(buildRow({ status: 'VALID', reason_code: 'PO_BOX' }))).toBe(true);
     expect(isSkippedRow(buildRow({ status: 'VALID' }))).toBe(false);
+  });
+
+
+  it('keeps skipped non-address rows out of needs review', () => {
+    expect(isNeedsReviewRow(buildRow({ status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'NON_ADDRESS_TEXT' }))).toBe(false);
+    expect(isNeedsReviewRow(buildRow({ status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'PO_BOX' }))).toBe(false);
   });
 
   it('flags matched rows as valid', () => {
