@@ -332,6 +332,21 @@ export async function retryJobBatch(
   );
 }
 
+export type NeedsReviewAiFixResponse = {
+  updated_row_results?: RowResult[];
+  updated_rows?: RowResult[];
+  updated_job?: JobRecord;
+  rows_processed?: number;
+  ai_rows_processed?: number;
+  estimated_extra_cost_usd?: number;
+};
+
+export async function runNeedsReviewAiFix(jobId: string) {
+  return postJson<NeedsReviewAiFixResponse>(`/jobs/${jobId}/needs-review-ai-fix`, {
+    include_ai: true,
+  });
+}
+
 export async function getHealth() {
   return requestJson<JsonValue>('/health', { method: 'GET' });
 }
