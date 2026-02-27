@@ -40,6 +40,7 @@ import {
   retryJobRow,
   retryParseBatch,
   retryParseRow,
+  runAiFixFlaggedRows,
   uploadFile,
 } from '../lib/api';
 import { searchCities, searchCounties, searchStates } from '../lib/locationApi';
@@ -646,6 +647,7 @@ export default function ParsePage() {
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
+  const [runningAiFixFlaggedRows, setRunningAiFixFlaggedRows] = useState(false);
   const [reviewAutoFocus, setReviewAutoFocus] = useState(false);
   const [activeDownloadType, setActiveDownloadType] = useState<JobExportType | null>(null);
   const [downloadSuccessLabel, setDownloadSuccessLabel] = useState<string | null>(null);
@@ -2242,6 +2244,45 @@ export default function ParsePage() {
     }
   };
 
+  const handleAutoFixFlaggedRows = async () => {
+    if (!jobId) {
+      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+      return;
+    }
+
+    setRunningAiFixFlaggedRows(true);
+    try {
+      const response = await runAiFixFlaggedRows(jobId, true);
+      const attempted = response.attempted ?? 0;
+      const upgradedToValid = response.upgraded_to_valid ?? 0;
+      const stillNeedsReview = response.still_needs_review ?? 0;
+      const stillOutOfScope = response.still_out_of_scope ?? 0;
+
+      showToast({
+        title: 'AI auto-fix completed',
+        description: `Attempted ${attempted} · Upgraded ${upgradedToValid} · Needs review ${stillNeedsReview} · Out of scope ${stillOutOfScope}`,
+        variant: upgradedToValid > 0 ? 'success' : 'info',
+      });
+
+      await loadJobResults(jobId, {
+        version: LAST_JOB_STORAGE_VERSION,
+        jobId,
+        stateValue,
+        countyValue,
+        cityValue,
+        campaignName,
+      });
+    } catch (err) {
+      showToast({
+        title: 'AI auto-fix failed',
+        description: (err as Error).message ?? 'Unable to run AI auto-fix for flagged rows.',
+        variant: 'error',
+      });
+    } finally {
+      setRunningAiFixFlaggedRows(false);
+    }
+  };
+
   const downloadLabels: Record<JobExportType, string> = {
     unique_valid: 'Unique Valid',
     needs_review: 'Needs Review',
@@ -2640,6 +2681,16 @@ export default function ParsePage() {
                     className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
                     Processing Report
+                  </button>
+                ) : null}
+                {parseSummary ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleAutoFixFlaggedRows()}
+                    disabled={!jobId || runningAiFixFlaggedRows}
+                    className="rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-500/10"
+                  >
+                    {runningAiFixFlaggedRows ? 'Auto-fixing flagged rows…' : 'Auto-fix flagged rows (AI)'}
                   </button>
                 ) : null}
                 {parseSummary ? (
