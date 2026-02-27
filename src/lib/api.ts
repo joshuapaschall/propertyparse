@@ -347,6 +347,22 @@ export async function runNeedsReviewAiFix(jobId: string) {
   });
 }
 
+export type AiFixFlaggedResponse = {
+  updated_row_results?: RowResult[];
+  updated_rows?: RowResult[];
+  updated_job?: JobRecord;
+  attempted?: number;
+  upgraded_to_valid?: number;
+  still_needs_review?: number;
+  still_out_of_scope?: number;
+};
+
+export async function runAiFixFlaggedRows(jobId: string, includeOutOfScopeCounty = true) {
+  return postJson<AiFixFlaggedResponse>(`/jobs/${jobId}/ai-fix-flagged`, {
+    include_out_of_scope_county: includeOutOfScopeCounty,
+  });
+}
+
 export async function getHealth() {
   return requestJson<JsonValue>('/health', { method: 'GET' });
 }
