@@ -334,7 +334,7 @@ const toRecord = (value: unknown): Record<string, unknown> | undefined => {
 const pickStringValue = (row: JobRecord, keys: string[]) => {
   for (const key of keys) {
     const value = row[key];
-    if (typeof value === 'string' && value.trim()) return value;
+    if (typeof value === 'string' && value.trim().length > 0) return value;
     if (typeof value === 'number') return String(value);
   }
   return undefined;
@@ -1143,6 +1143,90 @@ export default function ParsePage() {
     return row.detected_address ?? row.formatted_address ?? '';
   };
 
+  const getRawRowValue = (row: RowResult, keys: string[]) => {
+    const rawRow = row.raw_row as Record<string, unknown> | undefined;
+    if (!rawRow) return '';
+    for (const key of keys) {
+      const value = rawRow[key];
+      if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+      if (typeof value === 'number') return String(value);
+    }
+    return '';
+  };
+
+  const getSkippedOriginalAddress = (row: RowResult) => {
+    const inputAddress = getInputAddress(row).trim();
+    return inputAddress ? inputAddress : '(Violation Address blank)';
+  };
+
+  const getMatchedAddress = (row: RowResult) => {
+    const rowRecord = row as Record<string, unknown>;
+    const matchedAddress = rowRecord.matched_address;
+    if (typeof matchedAddress === 'string' && matchedAddress.trim()) {
+      return matchedAddress.trim();
+    }
+    return row.formatted_address?.trim() || '';
+  };
+
+  const parseComponentsRecord = (components: unknown) => {
+    if (!components) return null;
+    if (typeof components === 'string') {
+      try {
+        const parsed = JSON.parse(components) as unknown;
+        if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+      } catch {
+        return null;
+      }
+      return null;
+    }
+    if (typeof components === 'object') {
+      return components as Record<string, unknown>;
+    }
+    return null;
+  };
+
+  const getMatchedCounty = (row: RowResult) => {
+    const componentsRecord = parseComponentsRecord(row.components);
+    if (!componentsRecord) return '';
+    const countyValue = componentsRecord.administrative_area_level_2;
+    if (typeof countyValue === 'string') return countyValue;
+    if (countyValue && typeof countyValue === 'object') {
+      const countyRecord = countyValue as Record<string, unknown>;
+      if (typeof countyRecord.long_name === 'string') return countyRecord.long_name;
+      if (typeof countyRecord.short_name === 'string') return countyRecord.short_name;
+      if (typeof countyRecord.name === 'string') return countyRecord.name;
+    }
+    return '';
+  };
+
+  const getGoogleTypes = (row: RowResult) => {
+    const rowRecord = row as Record<string, unknown>;
+    const rawValue = rowRecord.google_types ?? rowRecord.types;
+    if (Array.isArray(rawValue)) {
+      return rawValue.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
+    }
+    if (typeof rawValue === 'string' && rawValue.trim()) {
+      const trimmedValue = rawValue.trim();
+      if (trimmedValue.startsWith('[') && trimmedValue.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(trimmedValue) as unknown;
+          if (Array.isArray(parsed)) {
+            return parsed.filter(
+              (value): value is string => typeof value === 'string' && value.trim().length > 0,
+            );
+          }
+        } catch {
+          // No-op: fall through to comma-split parsing.
+        }
+      }
+      return trimmedValue
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean);
+    }
+    return [] as string[];
+  };
+
   const getDebugLocation = (row: RowResult) => {
     const rawRow = row.raw_row as Record<string, unknown> | undefined;
     const candidate =
@@ -1241,7 +1325,7 @@ export default function ParsePage() {
     if (!scope) return null;
     for (const key of keys) {
       const value = scope[key];
-      if (typeof value === 'string' && value.trim()) return value.trim();
+      if (typeof value === 'string' && value.trim().length > 0) return value.trim();
     }
     return null;
   };
@@ -2977,6 +3061,7 @@ export default function ParsePage() {
                           <tr>
                             <th className="px-4 py-3">Record ID / Row</th>
                             <th className="px-4 py-3">Original Address</th>
+                            <th className="px-4 py-3">Google matched</th>
                             <th className="px-4 py-3">Status</th>
                             <th className="px-4 py-3">Reason</th>
                             {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
@@ -2988,7 +3073,7 @@ export default function ParsePage() {
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                colSpan={showDebugMode ? 6 : 5}
+                                colSpan={showDebugMode ? 7 : 6}
                               >
                                 No rows need review.
                               </td>
@@ -3005,6 +3090,19 @@ export default function ParsePage() {
                                 </td>
                                 <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                                   {getInputAddress(row) || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span>{getMatchedAddress(row) || '--'}</span>
+                                    {getGoogleTypes(row).slice(0, 2).map((type) => (
+                                      <span
+                                        key={`${row.source_row_id}-${type}`}
+                                        className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                                      >
+                                        {type.replace(/_/g, ' ')}
+                                      </span>
+                                    ))}
+                                  </div>
                                 </td>
                                 <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                   {getStatusLabel(row)}
@@ -3058,11 +3156,18 @@ export default function ParsePage() {
                 ) : null}
                 {activeTab === 'skipped' ? (
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
+                    <div className="border-b border-slate-200 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
+                      Skipped = Violation Address blank OR non-address text like RIGHT-OF-WAY/HWY.
+                      Click Review to see full row data.
+                    </div>
                     <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
                         <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
                             <th className="px-4 py-3">Record ID / Row</th>
+                            <th className="px-4 py-3">Case Number</th>
+                            <th className="px-4 py-3">Violation</th>
+                            <th className="px-4 py-3">Violation Address (raw)</th>
                             <th className="px-4 py-3">Original Address</th>
                             <th className="px-4 py-3">Status</th>
                             <th className="px-4 py-3">Reason</th>
@@ -3075,7 +3180,7 @@ export default function ParsePage() {
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                colSpan={showDebugMode ? 6 : 5}
+                                colSpan={showDebugMode ? 10 : 9}
                               >
                                 No rows were skipped.
                               </td>
@@ -3091,7 +3196,21 @@ export default function ParsePage() {
                                   {getRowDisplayId(row)}
                                 </td>
                                 <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getInputAddress(row) || '--'}
+                                  {getRawRowValue(row, ['Case Number', 'case_number', 'caseNumber']) ||
+                                    '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getRawRowValue(row, ['Violation', 'violation']) || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getRawRowValue(row, [
+                                    'Violation Address',
+                                    'violation_address',
+                                    'violationAddress',
+                                  ]) || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getSkippedOriginalAddress(row)}
                                 </td>
                                 <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                   {getStatusLabel(row)}
@@ -3200,6 +3319,8 @@ export default function ParsePage() {
                           <tr>
                             <th className="px-4 py-3">Record ID / Row</th>
                             <th className="px-4 py-3">Original Address</th>
+                            <th className="px-4 py-3">Matched Address</th>
+                            <th className="px-4 py-3">Matched County</th>
                             <th className="px-4 py-3">Status</th>
                             <th className="px-4 py-3">Reason</th>
                             {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
@@ -3211,7 +3332,7 @@ export default function ParsePage() {
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                colSpan={showDebugMode ? 6 : 5}
+                                colSpan={showDebugMode ? 8 : 7}
                               >
                                 No out-of-scope rows.
                               </td>
@@ -3228,6 +3349,12 @@ export default function ParsePage() {
                                 </td>
                                 <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                                   {getInputAddress(row) || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getMatchedAddress(row) || '--'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getMatchedCounty(row) || '--'}
                                 </td>
                                 <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                   {getStatusLabel(row)}
