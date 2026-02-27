@@ -339,11 +339,15 @@ export type NeedsReviewAiFixResponse = {
   rows_processed?: number;
   ai_rows_processed?: number;
   estimated_extra_cost_usd?: number;
+  attempted?: number;
+  upgraded_to_valid?: number;
+  still_needs_review?: number;
+  still_out_of_scope?: number;
 };
 
 export async function runNeedsReviewAiFix(jobId: string) {
-  return postJson<NeedsReviewAiFixResponse>(`/jobs/${jobId}/needs-review-ai-fix`, {
-    include_ai: true,
+  return postJson<NeedsReviewAiFixResponse>(`/jobs/${jobId}/ai-fix-flagged`, {
+    include_out_of_scope_county: true,
   });
 }
 
