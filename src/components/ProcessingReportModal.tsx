@@ -244,7 +244,7 @@ export default function ProcessingReportModal({
         updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
         updatedJob: response.updated_job as Record<string, unknown> | undefined,
       });
-      const processed = response.rows_processed ?? response.ai_rows_processed ?? 0;
+      const processed = response.rows_processed ?? response.ai_rows_processed ?? response.attempted ?? 0;
       setAiFixRowsProcessed(processed);
       const estimatedCost = response.estimated_extra_cost_usd;
       setAiFixEstimatedCost(typeof estimatedCost === 'number' ? estimatedCost : null);
