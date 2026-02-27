@@ -1091,7 +1091,7 @@ export default function ParsePage() {
     ) {
       return null;
     }
-    const detail = `Validating addresses: ${done ?? '--'}/${total ?? '--'} • Google calls ${
+    const detail = `Validating addresses: ${done ?? '--'}/${total ?? '--'} • Verification calls ${
       googleCallsValue ?? '--'
     } • Cache hits ${cacheHitsValue ?? '--'}`;
     return progressInfo.eta ? `${detail} • ETA ~ ${progressInfo.eta}` : detail;
@@ -1143,29 +1143,58 @@ export default function ParsePage() {
     return row.detected_address ?? row.formatted_address ?? '';
   };
 
-  const getRawRowValue = (row: RowResult, keys: string[]) => {
-    const rawRow = row.raw_row as Record<string, unknown> | undefined;
-    if (!rawRow) return '';
-    for (const key of keys) {
-      const value = rawRow[key];
-      if (typeof value === 'string' && value.trim().length > 0) return value.trim();
-      if (typeof value === 'number') return String(value);
-    }
-    return '';
-  };
-
   const getSkippedOriginalAddress = (row: RowResult) => {
     const inputAddress = getInputAddress(row).trim();
-    return inputAddress ? inputAddress : '(Violation Address blank)';
+    return inputAddress ? inputAddress : '(blank)';
   };
 
   const getMatchedAddress = (row: RowResult) => {
     const rowRecord = row as Record<string, unknown>;
+    const verificationRecord =
+      rowRecord.verification && typeof rowRecord.verification === 'object'
+        ? (rowRecord.verification as Record<string, unknown>)
+        : null;
+    const verifierAddress = verificationRecord?.google_formatted_address;
+    if (typeof verifierAddress === 'string' && verifierAddress.trim()) {
+      return verifierAddress.trim();
+    }
     const matchedAddress = rowRecord.matched_address;
     if (typeof matchedAddress === 'string' && matchedAddress.trim()) {
       return matchedAddress.trim();
     }
     return row.formatted_address?.trim() || '';
+  };
+
+  const getScopeDebugGroup = (scopeDebug: unknown, key: 'selected' | 'matched') => {
+    if (!scopeDebug || typeof scopeDebug !== 'object') return null;
+    const scopeRecord = scopeDebug as Record<string, unknown>;
+    const direct = scopeRecord[key];
+    if (direct && typeof direct === 'object') {
+      return direct as Record<string, unknown>;
+    }
+    const camel = scopeRecord[`${key}Scope`];
+    if (camel && typeof camel === 'object') {
+      return camel as Record<string, unknown>;
+    }
+    const snake = scopeRecord[`${key}_scope`];
+    if (snake && typeof snake === 'object') {
+      return snake as Record<string, unknown>;
+    }
+    return null;
+  };
+
+  const getScopeDebugValue = (
+    row: RowResult,
+    group: 'selected' | 'matched',
+    field: 'state' | 'county' | 'city',
+  ) => {
+    const scopeGroup = getScopeDebugGroup(row.scope_debug, group);
+    const direct = (row.scope_debug as Record<string, unknown> | undefined)?.[`${group}_${field}`];
+    if (typeof direct === 'string' && direct.trim()) return direct.trim();
+    if (!scopeGroup) return '';
+    const candidate = scopeGroup[field];
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+    return '';
   };
 
   const parseComponentsRecord = (components: unknown) => {
@@ -1186,6 +1215,8 @@ export default function ParsePage() {
   };
 
   const getMatchedCounty = (row: RowResult) => {
+    const scopeCounty = getScopeDebugValue(row, 'matched', 'county');
+    if (scopeCounty) return scopeCounty;
     const componentsRecord = parseComponentsRecord(row.components);
     if (!componentsRecord) return '';
     const countyValue = componentsRecord.administrative_area_level_2;
@@ -1198,6 +1229,8 @@ export default function ParsePage() {
     }
     return '';
   };
+
+  const getMatchedCity = (row: RowResult) => getScopeDebugValue(row, 'matched', 'city');
 
   const getGoogleTypes = (row: RowResult) => {
     const rowRecord = row as Record<string, unknown>;
@@ -1227,54 +1260,35 @@ export default function ParsePage() {
     return [] as string[];
   };
 
-  const getDebugLocation = (row: RowResult) => {
-    const rawRow = row.raw_row as Record<string, unknown> | undefined;
-    const candidate =
-      (row as Record<string, unknown>).debug_location ??
-      rawRow?.debug_location ??
-      rawRow?.detected_location;
-    if (!candidate) return null;
-    if (typeof candidate === 'string') return candidate;
-    if (typeof candidate === 'object') {
-      const location = candidate as Record<string, unknown>;
-      const parts = [
-        location.city,
-        location.county,
-        location.state,
-        location.zip,
-        location.zip_code,
-      ]
-        .map((value) => (typeof value === 'string' ? value : null))
-        .filter(Boolean);
-      if (parts.length) return parts.join(', ');
-    }
-    return null;
+  const getPrecisionTags = (row: RowResult) => {
+    const types = getGoogleTypes(row);
+    const tags: string[] = [];
+    if (types.includes('street_address')) tags.push('street_address');
+    if (types.includes('route')) tags.push('route');
+    const countyOnly =
+      types.includes('administrative_area_level_2') &&
+      !types.includes('street_address') &&
+      !types.includes('premise') &&
+      !types.includes('subpremise') &&
+      !types.includes('route');
+    if (countyOnly) tags.push('county-only');
+    return tags;
   };
 
-  const getMismatchActual = (row: RowResult) => {
-    const rowRecord = row as Record<string, unknown>;
-    const rawRow = row.raw_row as Record<string, unknown> | undefined;
-    const candidate =
-      rowRecord.mismatch_actual ??
-      rowRecord.mismatchActual ??
-      rawRow?.mismatch_actual ??
-      rawRow?.mismatchActual;
-    if (!candidate) return null;
-    if (typeof candidate === 'string') return candidate;
-    if (typeof candidate === 'object') {
-      const mismatch = candidate as Record<string, unknown>;
-      const parts = [
-        mismatch.city,
-        mismatch.county,
-        mismatch.state,
-        mismatch.zip,
-        mismatch.zip_code,
-      ]
-        .map((value) => (typeof value === 'string' ? value : null))
-        .filter(Boolean);
-      if (parts.length) return parts.join(', ');
-    }
-    return null;
+  const getReasonSummary = (row: RowResult) => {
+    const reasonCode = row.reason_code?.toLowerCase() ?? '';
+    const summaryByReason: Record<string, string> = {
+      out_of_scope: 'The matched location falls outside your selected area.',
+      city_mismatch: 'The matched city does not match your selected city filter.',
+      county_mismatch: 'The matched county does not match your selected county filter.',
+      state_mismatch: 'The matched state does not match your selected state filter.',
+      no_match: 'We could not confidently verify this as a complete property address.',
+      low_confidence: 'The verifier returned a low-confidence result and needs your review.',
+      po_box: 'This row was skipped because it appears to be a PO Box, not a property address.',
+      missing_address: 'This row was skipped because no usable address was detected.',
+      blank_address: 'This row was skipped because no usable address was detected.',
+    };
+    return summaryByReason[reasonCode] || getReasonMetadata(row).description;
   };
 
   const getOriginalRowFields = (row: RowResult) => {
@@ -2346,17 +2360,21 @@ export default function ParsePage() {
 
   const reviewReason = reviewRow ? getReasonMetadata(reviewRow) : null;
   const reviewRecordId = reviewRow ? getRecordId(reviewRow) : null;
-  const reviewDetectedLocation = reviewRow ? getDebugLocation(reviewRow) : null;
-  const reviewMismatchActual = reviewRow ? getMismatchActual(reviewRow) : null;
   const reviewStatusLabel = reviewRow ? getStatusLabel(reviewRow) : '';
   const reviewDetectedAddress = reviewRow?.detected_address ?? reviewRow?.formatted_address ?? '';
-  const reviewVerifiedAddress = reviewRow?.formatted_address ?? '';
+  const reviewVerifiedAddress = reviewRow
+    ? reviewRow.formatted_address ?? getMatchedAddress(reviewRow)
+    : '';
+  const reviewSelectedState = reviewRow ? getScopeDebugValue(reviewRow, 'selected', 'state') : '';
+  const reviewSelectedCounty = reviewRow ? getScopeDebugValue(reviewRow, 'selected', 'county') : '';
+  const reviewSelectedCity = reviewRow ? getScopeDebugValue(reviewRow, 'selected', 'city') : '';
+  const reviewMatchedState = reviewRow ? getScopeDebugValue(reviewRow, 'matched', 'state') : '';
+  const reviewMatchedCounty = reviewRow ? getScopeDebugValue(reviewRow, 'matched', 'county') : '';
+  const reviewMatchedCity = reviewRow ? getScopeDebugValue(reviewRow, 'matched', 'city') : '';
+  const reviewMismatchField =
+    (reviewRow as Record<string, unknown> | null)?.mismatch_field || '';
   const reviewNeedsReview = reviewRow ? isNeedsReviewRow(reviewRow) : false;
   const reviewOutOfScope = reviewRow ? isOutOfScopeRow(reviewRow) : false;
-  const reviewSkipped = reviewRow ? isSkippedRow(reviewRow) : false;
-  const selectedLocationSummary = [countyValue || cityValue || null, stateValue || null]
-    .filter(Boolean)
-    .join(', ');
   const canEditReview = reviewNeedsReview;
 
   const handleCopyRowJson = async (payload: unknown) => {
@@ -2475,15 +2493,15 @@ export default function ParsePage() {
                       Force re-verify addresses
                     </p>
                     <span
-                      title="Uses more Google calls."
+                      title="Uses more verification calls."
                       className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-300 text-xs font-semibold text-slate-500 dark:border-slate-600 dark:text-slate-300"
-                      aria-label="Uses more Google calls."
+                      aria-label="Uses more verification calls."
                     >
                       i
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Uses more Google calls. Enable only when cached verification may be outdated.
+                    Uses more verification calls. Enable only when cached verification may be outdated.
                   </p>
                 </div>
                 <button
@@ -2778,7 +2796,7 @@ export default function ParsePage() {
           ) : null}
           {cityValue && unmatchedCount > 0 ? (
             <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
-              Some addresses failed because Google returned a different city. Leave City blank if
+              Some addresses failed because verification returned a different city. Leave City blank if
               your file spans multiple cities.
             </div>
           ) : null}
@@ -2935,7 +2953,7 @@ export default function ParsePage() {
               {googleCallsUsed !== null ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                    Google Calls Used
+                    Verification Calls Used
                   </p>
                   <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                     {googleCallsUsed}
@@ -2962,7 +2980,7 @@ export default function ParsePage() {
           ) : null}
           {parseSummary && (googleCallsUsed !== null || cacheHits !== null || cacheBackend) ? (
             <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-              Google calls used: {googleCallsUsed ?? 0} • Cache hits: {cacheHits ?? 0}
+              Verification calls used: {googleCallsUsed ?? 0} • Cache hits: {cacheHits ?? 0}
               {cacheBackend ? ` • Cache backend: ${cacheBackend}` : ''}
             </p>
           ) : null}
@@ -3061,7 +3079,7 @@ export default function ParsePage() {
                           <tr>
                             <th className="px-4 py-3">Record ID / Row</th>
                             <th className="px-4 py-3">Original Address</th>
-                            <th className="px-4 py-3">Google matched</th>
+                            <th className="px-4 py-3">Matched Address</th>
                             <th className="px-4 py-3">Status</th>
                             <th className="px-4 py-3">Reason</th>
                             {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
@@ -3094,7 +3112,7 @@ export default function ParsePage() {
                                 <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                                   <div className="flex flex-wrap items-center gap-2">
                                     <span>{getMatchedAddress(row) || '--'}</span>
-                                    {getGoogleTypes(row).slice(0, 2).map((type) => (
+                                    {getPrecisionTags(row).map((type) => (
                                       <span
                                         key={`${row.source_row_id}-${type}`}
                                         className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300"
@@ -3157,7 +3175,7 @@ export default function ParsePage() {
                 {activeTab === 'skipped' ? (
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                     <div className="border-b border-slate-200 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
-                      Skipped = Violation Address blank OR non-address text like RIGHT-OF-WAY/HWY.
+                      Skipped rows were ignored because no usable property address could be detected.
                       Click Review to see full row data.
                     </div>
                     <div className="overflow-auto">
@@ -3165,10 +3183,7 @@ export default function ParsePage() {
                         <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
                             <th className="px-4 py-3">Record ID / Row</th>
-                            <th className="px-4 py-3">Case Number</th>
-                            <th className="px-4 py-3">Violation</th>
-                            <th className="px-4 py-3">Violation Address (raw)</th>
-                            <th className="px-4 py-3">Original Address</th>
+                            <th className="px-4 py-3">Detected Address</th>
                             <th className="px-4 py-3">Status</th>
                             <th className="px-4 py-3">Reason</th>
                             {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
@@ -3180,7 +3195,7 @@ export default function ParsePage() {
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                colSpan={showDebugMode ? 10 : 9}
+                                colSpan={showDebugMode ? 7 : 6}
                               >
                                 No rows were skipped.
                               </td>
@@ -3194,20 +3209,6 @@ export default function ParsePage() {
                               >
                                 <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                                   {getRowDisplayId(row)}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getRawRowValue(row, ['Case Number', 'case_number', 'caseNumber']) ||
-                                    '--'}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getRawRowValue(row, ['Violation', 'violation']) || '--'}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getRawRowValue(row, [
-                                    'Violation Address',
-                                    'violation_address',
-                                    'violationAddress',
-                                  ]) || '--'}
                                 </td>
                                 <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                                   {getSkippedOriginalAddress(row)}
@@ -3321,6 +3322,7 @@ export default function ParsePage() {
                             <th className="px-4 py-3">Original Address</th>
                             <th className="px-4 py-3">Matched Address</th>
                             <th className="px-4 py-3">Matched County</th>
+                            <th className="px-4 py-3">Matched City</th>
                             <th className="px-4 py-3">Status</th>
                             <th className="px-4 py-3">Reason</th>
                             {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
@@ -3332,7 +3334,7 @@ export default function ParsePage() {
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                colSpan={showDebugMode ? 8 : 7}
+                                colSpan={showDebugMode ? 9 : 8}
                               >
                                 No out-of-scope rows.
                               </td>
@@ -3350,11 +3352,14 @@ export default function ParsePage() {
                                 <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
                                   {getInputAddress(row) || '--'}
                                 </td>
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getMatchedAddress(row) || '--'}
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words">
+                                  {getMatchedAddress(row) || '—'}
                                 </td>
                                 <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getMatchedCounty(row) || '--'}
+                                  {getMatchedCounty(row) || '—'}
+                                </td>
+                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                  {getMatchedCity(row) || '—'}
                                 </td>
                                 <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                   {getStatusLabel(row)}
@@ -3617,32 +3622,39 @@ export default function ParsePage() {
                   Why this happened
                 </p>
                 <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  {reviewRow?.reason_code || reviewReason?.label || 'Needs review'}
+                  {reviewReason?.label || 'Needs review'}
                 </p>
                 <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
-                  {reviewOutOfScope ? (
-                    <div className="space-y-3">
-                      <p>Out of scope for selected location.</p>
-                      <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-slate-500 dark:text-slate-400">Selected</span>
-                          <span className="font-semibold text-slate-800 dark:text-slate-100">
-                            {selectedLocationSummary || '—'}
-                          </span>
-                        </div>
-                        <div className="mt-2 flex items-center justify-between gap-3">
-                          <span className="text-slate-500 dark:text-slate-400">Detected</span>
-                          <span className="font-semibold text-slate-800 dark:text-slate-100">
-                            {reviewMismatchActual ?? reviewDetectedLocation ?? '—'}
-                          </span>
-                        </div>
-                      </div>
+                  <p>{reviewRow ? getReasonSummary(reviewRow) : 'Review this row for more context.'}</p>
+                  {showDebugMode && reviewRow?.reason_code ? (
+                    <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+                      Reason code: {reviewRow.reason_code}
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+
+
+              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Location check</p>
+                <div className="mt-2 space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500 dark:text-slate-400">Selected</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-100">
+                      {[reviewSelectedCity || null, reviewSelectedCounty || null, reviewSelectedState || null].filter(Boolean).join(', ') || '—'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-slate-500 dark:text-slate-400">Detected</span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-100">
+                      {[reviewMatchedCity || null, reviewMatchedCounty || null, reviewMatchedState || null].filter(Boolean).join(', ') || '—'}
+                    </span>
+                  </div>
+                  {reviewMismatchField ? (
+                    <div className="rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-500/10 dark:text-amber-200">
+                      Mismatch: {String(reviewMismatchField).replace(/_/g, ' ')}
                     </div>
-                  ) : reviewSkipped ? (
-                    <p>P.O. Boxes are skipped because they aren’t physical property addresses.</p>
-                  ) : (
-                    <p>{reviewRow?.reason_detail || reviewReason?.description || 'Review this row for more context.'}</p>
-                  )}
+                  ) : null}
                 </div>
               </div>
 
