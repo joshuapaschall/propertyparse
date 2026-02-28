@@ -234,6 +234,10 @@ const normalizeNumber = (value: unknown) => {
   return null;
 };
 
+const normalizeStatus = (value?: string) => (value ?? '').toUpperCase();
+
+const isOutOfScopeMarkerRow = (row: RowResult) => normalizeStatus(row.status) === 'OUT_OF_SCOPE_MARKER';
+
 const pickValue = (record: JobRecord, keys: string[]) => {
   for (const key of keys) {
     const value = record[key];
@@ -958,9 +962,19 @@ export default function ParsePage() {
     );
   }, [debugInfo?.no_addresses_detected, parseSummary]);
 
-  const needsReviewRows = useMemo(() => rowResults.filter(isNeedsReviewRow), [rowResults]);
-  const skippedRows = useMemo(() => rowResults.filter(isSkippedRow), [rowResults]);
-  const outOfScopeRows = useMemo(() => rowResults.filter(isOutOfScopeRow), [rowResults]);
+  const validRows = useMemo(() => rowResults.filter(isValidRow), [rowResults]);
+  const needsReviewRows = useMemo(
+    () => rowResults.filter((row) => normalizeStatus(row.status) === 'UNMATCHED_NEEDS_REVIEW'),
+    [rowResults],
+  );
+  const skippedRows = useMemo(
+    () => rowResults.filter((row) => normalizeStatus(row.status).startsWith('SKIPPED')),
+    [rowResults],
+  );
+  const outOfScopeRows = useMemo(
+    () => rowResults.filter((row) => normalizeStatus(row.status).startsWith('OUT_OF_SCOPE')),
+    [rowResults],
+  );
   const outOfScopeCityRowsCount = useMemo(
     () =>
       outOfScopeRows.filter((row) =>
@@ -970,6 +984,30 @@ export default function ParsePage() {
   );
   const canRerunWithoutCityFilter = Boolean(cityValue) && outOfScopeCityRowsCount > 0;
   const errorRows = useMemo(() => rowResults.filter(isErrorRow), [rowResults]);
+
+  const computedParseSummary = useMemo(() => {
+    if (!parseSummary) return null;
+    const validKeys = new Set<string>();
+    validRows.forEach((row) => {
+      const key = (row.canonical_id ?? row.formatted_address ?? row.detected_address ?? row.source_row_id ?? '')
+        .toString()
+        .trim()
+        .toLowerCase();
+      if (key) validKeys.add(key);
+    });
+    const validUnique = validKeys.size;
+    const duplicates = Math.max(validRows.length - validUnique, 0);
+    return {
+      ...parseSummary,
+      rows_received: rowResults.length || parseSummary.rows_received,
+      valid_total: validRows.length,
+      valid_unique: validUnique,
+      unmatched: needsReviewRows.length,
+      skipped: skippedRows.length,
+      duplicates,
+      out_of_scope: outOfScopeRows.length,
+    } satisfies ParseSummary;
+  }, [needsReviewRows.length, outOfScopeRows.length, parseSummary, rowResults.length, skippedRows.length, validRows]);
 
   useEffect(() => {
     setResultsPage(1);
@@ -1057,14 +1095,14 @@ export default function ParsePage() {
     const accountedRows =
       (metadata?.accounted_rows as number) || (metadata?.accountedRows as number);
     if (typeof accountedRows === 'number') return accountedRows;
-    if (!parseSummary) return null;
+    if (!computedParseSummary) return null;
     return (
-      parseSummary.valid_total +
-      parseSummary.unmatched +
-      parseSummary.skipped +
-      (parseSummary.out_of_scope ?? 0)
+      computedParseSummary.valid_total +
+      computedParseSummary.unmatched +
+      computedParseSummary.skipped +
+      (computedParseSummary.out_of_scope ?? 0)
     );
-  }, [metadata, parseSummary]);
+  }, [computedParseSummary, metadata]);
 
   const responseRowsReceived = useMemo(() => {
     const metaRows =
@@ -1151,6 +1189,7 @@ export default function ParsePage() {
   };
 
   const getMatchedAddress = (row: RowResult) => {
+    if (isOutOfScopeMarkerRow(row)) return 'Not verified (scope marker)';
     const rowRecord = row as Record<string, unknown>;
     const verificationRecord =
       rowRecord.verification && typeof rowRecord.verification === 'object'
@@ -1217,6 +1256,7 @@ export default function ParsePage() {
   };
 
   const getMatchedCounty = (row: RowResult) => {
+    if (isOutOfScopeMarkerRow(row)) return '—';
     const scopeCounty = getScopeDebugValue(row, 'matched', 'county');
     if (scopeCounty) return scopeCounty;
     const componentsRecord = parseComponentsRecord(row.components);
@@ -1232,7 +1272,10 @@ export default function ParsePage() {
     return '';
   };
 
-  const getMatchedCity = (row: RowResult) => getScopeDebugValue(row, 'matched', 'city');
+  const getMatchedCity = (row: RowResult) => {
+    if (isOutOfScopeMarkerRow(row)) return '—';
+    return getScopeDebugValue(row, 'matched', 'city');
+  };
 
   const getGoogleTypes = (row: RowResult) => {
     const rowRecord = row as Record<string, unknown>;
@@ -1508,7 +1551,7 @@ export default function ParsePage() {
   }, [navigateReviewRow, reviewRow]);
 
   const handleCopyDebugInfo = async () => {
-    const debugInfo = [
+    const debugText = [
       `Timestamp: ${parseTimestamp ?? new Date().toISOString()}`,
       `State: ${stateValue || '--'}`,
       `County: ${countyValue || '--'}`,
@@ -1527,7 +1570,7 @@ export default function ParsePage() {
     ].join('\n');
 
     try {
-      await copyTextToClipboard(debugInfo);
+      await copyTextToClipboard(debugText);
       showToast({ title: 'Copied', variant: 'success' });
     } catch {
       showToast({ title: 'Unable to copy debug info', variant: 'error' });
@@ -2253,16 +2296,22 @@ export default function ParsePage() {
     setRunningAiFixFlaggedRows(true);
     try {
       const response = await runAiFixFlaggedRows(jobId, true);
-      const attempted = response.attempted ?? 0;
-      const upgradedToValid = response.upgraded_to_valid ?? 0;
-      const stillNeedsReview = response.still_needs_review ?? 0;
-      const stillOutOfScope = response.still_out_of_scope ?? 0;
+      const attemptedCount = response.attempted ?? 0;
+      const upgradedCount = response.upgraded_to_valid ?? 0;
+      const rewrittenCount = response.rewritten_count ?? response.rewritten ?? 0;
 
-      showToast({
-        title: 'AI auto-fix completed',
-        description: `Attempted ${attempted} · Upgraded ${upgradedToValid} · Needs review ${stillNeedsReview} · Out of scope ${stillOutOfScope}`,
-        variant: upgradedToValid > 0 ? 'success' : 'info',
-      });
+      if (attemptedCount === 0) {
+        showToast({
+          title: 'No eligible flagged rows to fix',
+          variant: 'info',
+        });
+      } else {
+        showToast({
+          title: 'AI auto-fix completed',
+          description: `Attempted ${attemptedCount} · Upgraded ${upgradedCount} · Rewritten ${rewrittenCount}`,
+          variant: upgradedCount > 0 ? 'success' : 'info',
+        });
+      }
 
       await loadJobResults(jobId, {
         version: LAST_JOB_STORAGE_VERSION,
@@ -2690,7 +2739,12 @@ export default function ParsePage() {
                     disabled={!jobId || runningAiFixFlaggedRows}
                     className="rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-500/10"
                   >
-                    {runningAiFixFlaggedRows ? 'Auto-fixing flagged rows…' : 'Auto-fix flagged rows (AI)'}
+                    {runningAiFixFlaggedRows ? (
+                      <span className="inline-flex items-center gap-2">
+                        <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-300 border-t-indigo-700 dark:border-indigo-300/40 dark:border-t-indigo-100" aria-hidden="true" />
+                        Auto-fixing flagged rows…
+                      </span>
+                    ) : 'Auto-fix flagged rows (AI)'}
                   </button>
                 ) : null}
                 {parseSummary ? (
@@ -2743,7 +2797,7 @@ export default function ParsePage() {
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  Valid (rows: {parseSummary.valid_total} · unique: {parseSummary.valid_unique})
+                  Valid (rows: {computedParseSummary?.valid_total ?? 0} · unique: {computedParseSummary?.valid_unique ?? 0})
                 </button>
                 <button
                   type="button"
@@ -2754,7 +2808,7 @@ export default function ParsePage() {
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  Needs Review ({parseSummary.unmatched})
+                  Needs Review ({computedParseSummary?.unmatched ?? 0})
                 </button>
                 <button
                   type="button"
@@ -2765,7 +2819,7 @@ export default function ParsePage() {
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  Skipped ({parseSummary.skipped})
+                  Skipped ({computedParseSummary?.skipped ?? 0})
                 </button>
                 <button
                   type="button"
@@ -2776,9 +2830,9 @@ export default function ParsePage() {
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  Duplicates ({parseSummary.duplicates})
+                  Duplicates ({computedParseSummary?.duplicates ?? 0})
                 </button>
-                {typeof parseSummary.out_of_scope === 'number' ? (
+                {typeof computedParseSummary?.out_of_scope === 'number' ? (
                   <button
                     type="button"
                     onClick={() => handleKpiTabClick('out_of_scope')}
@@ -2788,7 +2842,7 @@ export default function ParsePage() {
                         : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                     }`}
                   >
-                    Out of Scope ({parseSummary.out_of_scope})
+                    Out of Scope ({computedParseSummary?.out_of_scope})
                   </button>
                 ) : null}
               </div>
@@ -2891,7 +2945,7 @@ export default function ParsePage() {
                   Unique Valid Addresses
                 </p>
                 <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                  {parseSummary.valid_unique}
+                  {computedParseSummary?.valid_unique ?? 0}
                 </p>
               </button>
               <button
@@ -2901,7 +2955,7 @@ export default function ParsePage() {
               >
                 <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Needs Review</p>
                 <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                  {parseSummary.unmatched}
+                  {computedParseSummary?.unmatched ?? 0}
                 </p>
               </button>
               <button
@@ -2911,7 +2965,7 @@ export default function ParsePage() {
               >
                 <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Skipped</p>
                 <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                  {parseSummary.skipped}
+                  {computedParseSummary?.skipped ?? 0}
                 </p>
               </button>
               <button
@@ -2921,10 +2975,10 @@ export default function ParsePage() {
               >
                 <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Duplicates</p>
                 <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                  {parseSummary.duplicates}
+                  {computedParseSummary?.duplicates ?? 0}
                 </p>
               </button>
-              {typeof parseSummary.out_of_scope === 'number' ? (
+              {typeof computedParseSummary?.out_of_scope === 'number' ? (
                 <button
                   type="button"
                   onClick={() => handleKpiTabClick('out_of_scope')}
@@ -2934,7 +2988,7 @@ export default function ParsePage() {
                     Out of Scope
                   </p>
                   <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {parseSummary.out_of_scope}
+                    {computedParseSummary?.out_of_scope}
                   </p>
                 </button>
               ) : null}
