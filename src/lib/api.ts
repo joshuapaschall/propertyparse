@@ -357,6 +357,8 @@ export type AiFixFlaggedResponse = {
   updated_job?: JobRecord;
   attempted?: number;
   upgraded_to_valid?: number;
+  rewritten_count?: number;
+  rewritten?: number;
   still_needs_review?: number;
   still_out_of_scope?: number;
 };
