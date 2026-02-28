@@ -1480,8 +1480,17 @@ export default function ParsePage() {
   const renderReasonCell = (row: RowResult) => {
     const { label, description, fix_hint: fixHint } = getReasonMetadata(row);
     const reasonCode = row.reason_code?.trim();
+    const normalizedReasonCode = reasonCode?.toUpperCase() ?? '';
+    const isMarkerVerificationFailure =
+      normalizedReasonCode === 'OUT_OF_SCOPE_MARKER_VERIFICATION_FAILED';
     const tooltip = `${description}${fixHint ? `\nHow to fix: ${fixHint}` : ''}`;
     const detailText = getReasonDetailText(row);
+    const markerFailureSecondaryText =
+      isMarkerVerificationFailure &&
+      detailText &&
+      !detailText.toLowerCase().includes('no plausible candidate found')
+        ? 'Verification failed; no plausible candidate found.'
+        : '';
     return (
       <div className="space-y-1">
         <span
@@ -1490,7 +1499,18 @@ export default function ParsePage() {
         >
           {label}
         </span>
-        {detailText ? (
+        {isMarkerVerificationFailure && detailText ? (
+          <div
+            className="text-sm font-semibold text-rose-700 dark:text-rose-300"
+            title={markerFailureSecondaryText || undefined}
+          >
+            {detailText}
+          </div>
+        ) : null}
+        {markerFailureSecondaryText ? (
+          <div className="text-xs text-slate-500 dark:text-slate-400">{markerFailureSecondaryText}</div>
+        ) : null}
+        {!isMarkerVerificationFailure && detailText ? (
           <div className="text-xs text-slate-500 dark:text-slate-400">
             {isOutOfScopeRow(row) ? `Why? ${detailText}` : detailText}
           </div>
