@@ -377,6 +377,7 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
         'matched_address',
         'matchedAddress',
       ]),
+      matched_address: pickStringValue(row, ['matched_address', 'matchedAddress']) || undefined,
       place_id: pickStringValue(row, ['place_id', 'placeId']),
       components: row.components ?? undefined,
       canonical_id: pickStringValue(row, ['canonical_id', 'canonicalId']),
