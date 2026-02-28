@@ -355,7 +355,9 @@ export type AiFixFlaggedResponse = {
   updated_row_results?: RowResult[];
   updated_rows?: RowResult[];
   updated_job?: JobRecord;
+  attempted_count?: number;
   attempted?: number;
+  upgraded_count?: number;
   upgraded_to_valid?: number;
   rewritten_count?: number;
   rewritten?: number;

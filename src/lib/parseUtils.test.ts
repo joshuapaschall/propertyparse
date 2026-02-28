@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RowResult } from '../types/parse';
-import { isNeedsReviewRow, isOutOfScopeRow, isSkippedRow, isValidRow } from './parseUtils';
+import { computeParseSummaryFromRowResults, isNeedsReviewRow, isOutOfScopeRow, isSkippedRow, isValidRow } from './parseUtils';
 
 const buildRow = (overrides: Partial<RowResult>): RowResult => ({
   source_row_index: 1,
@@ -36,6 +36,28 @@ describe('parseUtils filters', () => {
 
   it('flags matched rows as valid', () => {
     expect(isValidRow(buildRow({ status: 'MATCHED' }))).toBe(true);
+  });
+
+
+  it('treats duplicate rows as valid', () => {
+    expect(isValidRow(buildRow({ status: 'DUPLICATE' }))).toBe(true);
+    expect(isValidRow(buildRow({ status: 'UNMATCHED', is_duplicate: true }))).toBe(true);
+  });
+
+  it('computes duplicate counts from row results', () => {
+    const rows: RowResult[] = [
+      buildRow({ source_row_id: 'row-1', status: 'VALID', canonical_id: 'canon-1', formatted_address: '123 Main St' }),
+      buildRow({ source_row_id: 'row-2', status: 'DUPLICATE', canonical_id: 'canon-1', is_duplicate: true, duplicate_of_source_row_id: 'row-1' }),
+      buildRow({ source_row_id: 'row-3', status: 'UNMATCHED_NEEDS_REVIEW' }),
+    ];
+
+    const summary = computeParseSummaryFromRowResults(rows);
+
+    expect(summary.rows_received).toBe(3);
+    expect(summary.valid_total).toBe(2);
+    expect(summary.valid_unique).toBe(1);
+    expect(summary.duplicates).toBeGreaterThan(0);
+    expect(summary.unmatched).toBe(1);
   });
 
   it('flags out of scope rows by status or reason', () => {

@@ -30,6 +30,8 @@ export type RowResult = {
   reason_detail?: string;
   scope_debug?: unknown;
   formatted_address?: string;
+  matched_address?: string;
+  address_raw?: string;
   place_id?: string;
   components?: unknown;
   canonical_id?: string;
