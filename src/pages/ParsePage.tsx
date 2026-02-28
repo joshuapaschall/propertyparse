@@ -25,6 +25,7 @@ import {
   isSkippedRow,
   isValidRow,
   stringifyPreview,
+  computeParseSummaryFromRowResults,
 } from '../lib/parseUtils';
 import { canStartParse, hasValidLocation } from '../lib/parseValidation';
 import {
@@ -443,6 +444,8 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
         'matchedAddress',
       ]) ||
       undefined,
+    matched_address: pickStringValue(row, ['matched_address', 'matchedAddress']) || undefined,
+    address_raw: pickStringValue(row, ['address_raw', 'addressRaw']) || undefined,
     place_id: pickStringValue(row, ['place_id', 'placeId']) || undefined,
     components: (row.components as unknown) || undefined,
     canonical_id: pickStringValue(row, ['canonical_id', 'canonicalId']) || undefined,
@@ -461,8 +464,14 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
 const buildDuplicateGroupsFromRows = (rows: RowResult[]) => {
   const groups = new Map<string, DuplicateGroup>();
   rows.forEach((row) => {
-    if (!row.canonical_id) return;
-    const key = row.canonical_id;
+    const key =
+      row.canonical_id ??
+      row.formatted_address ??
+      row.matched_address ??
+      row.address_raw ??
+      row.detected_address ??
+      row.source_row_id;
+    if (!key) return;
     const existing = groups.get(key);
     if (existing) {
       existing.source_row_ids.push(row.source_row_id);
@@ -962,7 +971,6 @@ export default function ParsePage() {
     );
   }, [debugInfo?.no_addresses_detected, parseSummary]);
 
-  const validRows = useMemo(() => rowResults.filter(isValidRow), [rowResults]);
   const needsReviewRows = useMemo(
     () => rowResults.filter((row) => normalizeStatus(row.status) === 'UNMATCHED_NEEDS_REVIEW'),
     [rowResults],
@@ -987,27 +995,13 @@ export default function ParsePage() {
 
   const computedParseSummary = useMemo(() => {
     if (!parseSummary) return null;
-    const validKeys = new Set<string>();
-    validRows.forEach((row) => {
-      const key = (row.canonical_id ?? row.formatted_address ?? row.detected_address ?? row.source_row_id ?? '')
-        .toString()
-        .trim()
-        .toLowerCase();
-      if (key) validKeys.add(key);
-    });
-    const validUnique = validKeys.size;
-    const duplicates = Math.max(validRows.length - validUnique, 0);
+    const summaryFromRows = computeParseSummaryFromRowResults(rowResults);
     return {
       ...parseSummary,
+      ...summaryFromRows,
       rows_received: rowResults.length || parseSummary.rows_received,
-      valid_total: validRows.length,
-      valid_unique: validUnique,
-      unmatched: needsReviewRows.length,
-      skipped: skippedRows.length,
-      duplicates,
-      out_of_scope: outOfScopeRows.length,
     } satisfies ParseSummary;
-  }, [needsReviewRows.length, outOfScopeRows.length, parseSummary, rowResults.length, skippedRows.length, validRows]);
+  }, [parseSummary, rowResults]);
 
   useEffect(() => {
     setResultsPage(1);
@@ -2296,8 +2290,8 @@ export default function ParsePage() {
     setRunningAiFixFlaggedRows(true);
     try {
       const response = await runAiFixFlaggedRows(jobId, true);
-      const attemptedCount = response.attempted ?? 0;
-      const upgradedCount = response.upgraded_to_valid ?? 0;
+      const attemptedCount = response.attempted_count ?? response.attempted ?? 0;
+      const upgradedCount = response.upgraded_count ?? response.upgraded_to_valid ?? 0;
       const rewrittenCount = response.rewritten_count ?? response.rewritten ?? 0;
 
       if (attemptedCount === 0) {

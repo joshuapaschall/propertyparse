@@ -1,4 +1,4 @@
-import type { RowResult } from '../types/parse';
+import type { ParseSummary, RowResult } from '../types/parse';
 
 const normalizeValue = (value?: string) => (value ?? '').toUpperCase();
 
@@ -151,7 +151,35 @@ export const isErrorRow = (row: RowResult) => normalizeValue(row.status).startsW
 
 export const isValidRow = (row: RowResult) => {
   const status = normalizeValue(row.status);
-  return status === 'VALID' || status === 'MATCHED';
+  return status === 'VALID' || status === 'MATCHED' || status === 'DUPLICATE' || row.is_duplicate === true;
+};
+
+export const computeParseSummaryFromRowResults = (rows: RowResult[]): ParseSummary => {
+  const validRows = rows.filter(isValidRow);
+  const validKeys = new Set<string>();
+  validRows.forEach((row) => {
+    const key = (row.canonical_id ?? row.formatted_address ?? row.detected_address ?? row.source_row_id ?? '')
+      .toString()
+      .trim()
+      .toLowerCase();
+    if (key) validKeys.add(key);
+  });
+
+  const validUnique = validKeys.size;
+  const duplicates = Math.max(validRows.length - validUnique, 0);
+  const unmatched = rows.filter(isNeedsReviewRow).length;
+  const skipped = rows.filter(isSkippedRow).length;
+  const outOfScope = rows.filter(isOutOfScopeRow).length;
+
+  return {
+    rows_received: rows.length,
+    valid_total: validRows.length,
+    valid_unique: validUnique,
+    unmatched,
+    skipped,
+    duplicates,
+    out_of_scope: outOfScope,
+  };
 };
 
 export const buildReasonLabel = (row: RowResult) => getReasonMetadata(row).label;
