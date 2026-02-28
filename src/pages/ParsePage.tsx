@@ -237,7 +237,11 @@ const normalizeNumber = (value: unknown) => {
 
 const normalizeStatus = (value?: string) => (value ?? '').toUpperCase();
 
-const isOutOfScopeMarkerRow = (row: RowResult) => normalizeStatus(row.status) === 'OUT_OF_SCOPE_MARKER';
+const isOutOfScopeMarkerRow = (row: RowResult) => {
+  const status = normalizeStatus(row.status);
+  const reasonCode = normalizeStatus(row.reason_code);
+  return status === 'OUT_OF_SCOPE_MARKER' || reasonCode === 'OUT_OF_SCOPE_MARKER';
+};
 
 const pickValue = (record: JobRecord, keys: string[]) => {
   for (const key of keys) {

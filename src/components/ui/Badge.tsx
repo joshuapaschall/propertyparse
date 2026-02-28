@@ -42,7 +42,7 @@ export function getBadgeVariant(value: string | null | undefined): BadgeVariant 
   if (normalized === 'NEEDS_REVIEW') return 'needs_review';
   if (normalized === 'SKIPPED') return 'skipped';
   if (normalized === 'DUPLICATE') return 'duplicate';
-  if (normalized === 'OUT_OF_SCOPE') return 'out_of_scope';
+  if (normalized.startsWith('OUT_OF_SCOPE')) return 'out_of_scope';
   return 'neutral';
 }
 
