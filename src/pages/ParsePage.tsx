@@ -237,12 +237,6 @@ const normalizeNumber = (value: unknown) => {
 
 const normalizeStatus = (value?: string) => (value ?? '').toUpperCase();
 
-const isOutOfScopeMarkerRow = (row: RowResult) => {
-  const status = normalizeStatus(row.status);
-  const reasonCode = normalizeStatus(row.reason_code);
-  return status === 'OUT_OF_SCOPE_MARKER' || reasonCode === 'OUT_OF_SCOPE_MARKER';
-};
-
 const pickValue = (record: JobRecord, keys: string[]) => {
   for (const key of keys) {
     const value = record[key];
@@ -1187,7 +1181,6 @@ export default function ParsePage() {
   };
 
   const getMatchedAddress = (row: RowResult) => {
-    if (isOutOfScopeMarkerRow(row)) return 'Not verified (scope marker)';
     const rowRecord = row as Record<string, unknown>;
     const verificationRecord =
       rowRecord.verification && typeof rowRecord.verification === 'object'
@@ -1254,7 +1247,6 @@ export default function ParsePage() {
   };
 
   const getMatchedCounty = (row: RowResult) => {
-    if (isOutOfScopeMarkerRow(row)) return '—';
     const scopeCounty = getScopeDebugValue(row, 'matched', 'county');
     if (scopeCounty) return scopeCounty;
     const componentsRecord = parseComponentsRecord(row.components);
@@ -1271,8 +1263,38 @@ export default function ParsePage() {
   };
 
   const getMatchedCity = (row: RowResult) => {
-    if (isOutOfScopeMarkerRow(row)) return '—';
-    return getScopeDebugValue(row, 'matched', 'city');
+    const scopeCity = getScopeDebugValue(row, 'matched', 'city');
+    if (scopeCity) return scopeCity;
+    const componentsRecord = parseComponentsRecord(row.components);
+    if (!componentsRecord) return '';
+    const cityCandidates = [
+      componentsRecord.locality,
+      componentsRecord.postal_town,
+      componentsRecord.sublocality,
+      componentsRecord.sublocality_level_1,
+      componentsRecord.neighborhood,
+      componentsRecord.administrative_area_level_3,
+    ];
+
+    for (const candidate of cityCandidates) {
+      if (typeof candidate === 'string' && candidate.trim()) {
+        return candidate.trim();
+      }
+      if (candidate && typeof candidate === 'object') {
+        const cityRecord = candidate as Record<string, unknown>;
+        if (typeof cityRecord.long_name === 'string' && cityRecord.long_name.trim()) {
+          return cityRecord.long_name.trim();
+        }
+        if (typeof cityRecord.short_name === 'string' && cityRecord.short_name.trim()) {
+          return cityRecord.short_name.trim();
+        }
+        if (typeof cityRecord.name === 'string' && cityRecord.name.trim()) {
+          return cityRecord.name.trim();
+        }
+      }
+    }
+
+    return '';
   };
 
   const getGoogleTypes = (row: RowResult) => {
