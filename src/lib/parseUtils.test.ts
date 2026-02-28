@@ -65,4 +65,10 @@ describe('parseUtils filters', () => {
     expect(isOutOfScopeRow(buildRow({ reason_code: 'OUT_OF_SCOPE' }))).toBe(true);
     expect(isOutOfScopeRow(buildRow({ status: 'VALID' }))).toBe(false);
   });
+
+
+  it('treats out-of-scope marker rows as out of scope', () => {
+    expect(isOutOfScopeRow(buildRow({ status: 'OUT_OF_SCOPE_MARKER' }))).toBe(true);
+    expect(isOutOfScopeRow(buildRow({ reason_code: 'OUT_OF_SCOPE_MARKER' }))).toBe(true);
+  });
 });
