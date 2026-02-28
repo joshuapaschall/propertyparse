@@ -113,9 +113,23 @@ const getErrorMessage = async (res: Response) => {
     return `HTTP ${res.status}`;
   }
   try {
-    const parsed = JSON.parse(text) as { detail?: string };
+    const parsed = JSON.parse(text) as { detail?: unknown };
     if (typeof parsed.detail === 'string') {
       return parsed.detail;
+    }
+    if (parsed.detail && typeof parsed.detail === 'object') {
+      const detail = parsed.detail as { message?: unknown; code?: unknown };
+      const detailMessage = typeof detail.message === 'string' ? detail.message : null;
+      const detailCode = typeof detail.code === 'string' ? detail.code : null;
+      if (detailMessage && detailCode && detailCode !== detailMessage) {
+        return `[${detailCode}] ${detailMessage}`;
+      }
+      if (detailMessage) {
+        return detailMessage;
+      }
+      if (detailCode) {
+        return detailCode;
+      }
     }
   } catch {
     return text;
