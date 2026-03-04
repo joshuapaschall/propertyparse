@@ -107,29 +107,43 @@ const getAuthHeaders = () => {
   };
 };
 
+const appendErrorId = (message: string, errorId: unknown) => {
+  if (typeof errorId !== 'string' || !errorId.trim()) {
+    return message;
+  }
+  if (message.includes(errorId)) {
+    return message;
+  }
+  return `${message} (error_id=${errorId})`;
+};
+
 const getErrorMessage = async (res: Response) => {
   const text = await res.text();
   if (!text) {
     return `HTTP ${res.status}`;
   }
   try {
-    const parsed = JSON.parse(text) as { detail?: unknown };
+    const parsed = JSON.parse(text) as { detail?: unknown; error_id?: unknown };
+    const errorId = parsed.error_id;
     if (typeof parsed.detail === 'string') {
-      return parsed.detail;
+      return appendErrorId(parsed.detail, errorId);
     }
     if (parsed.detail && typeof parsed.detail === 'object') {
       const detail = parsed.detail as { message?: unknown; code?: unknown };
       const detailMessage = typeof detail.message === 'string' ? detail.message : null;
       const detailCode = typeof detail.code === 'string' ? detail.code : null;
       if (detailMessage && detailCode && detailCode !== detailMessage) {
-        return `[${detailCode}] ${detailMessage}`;
+        return appendErrorId(`[${detailCode}] ${detailMessage}`, errorId);
       }
       if (detailMessage) {
-        return detailMessage;
+        return appendErrorId(detailMessage, errorId);
       }
       if (detailCode) {
-        return detailCode;
+        return appendErrorId(detailCode, errorId);
       }
+    }
+    if (typeof errorId === 'string') {
+      return appendErrorId(text, errorId);
     }
   } catch {
     return text;
@@ -360,7 +374,7 @@ export type NeedsReviewAiFixResponse = {
 };
 
 export async function runNeedsReviewAiFix(jobId: string) {
-  return postJson<NeedsReviewAiFixResponse>(`/jobs/${jobId}/ai-fix-flagged`, {
+  return postJson<NeedsReviewAiFixResponse>(`/jobs/${jobId}/ai-fix-needs-review`, {
     include_out_of_scope_county: true,
   });
 }
