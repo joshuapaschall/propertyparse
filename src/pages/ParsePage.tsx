@@ -40,6 +40,7 @@ import {
   parseFile,
   parseFileAsync,
   approveMatchedJobRow,
+  approveMatchedJobRowsBatch,
   retryJobBatch,
   retryJobRow,
   retryParseBatch,
@@ -81,6 +82,7 @@ type CanonicalAddressComponents = {
   city?: string;
   state?: string;
   zip?: string;
+  zip_code?: string;
 };
 
 type NormalizedCanonicalAddress = CanonicalAddress & {
@@ -155,7 +157,7 @@ const normalizeCanonicalAddress = (row: CanonicalAddress): NormalizedCanonicalAd
   const street2 = row.street2 || components?.address2 || '';
   const city = row.city || components?.city || '';
   const state = row.state || components?.state || '';
-  const zip = row.zip || components?.zip || '';
+  const zip = row.zip || components?.zip || (components as any)?.zip_code || '';
 
   return {
     ...row,
@@ -543,6 +545,7 @@ const mapPhaseToStep = (phase: string | null) => {
       return 2;
     case 'VERIFYING':
     case 'VALIDATING':
+    case 'AI_FIXING':
       return 3;
     case 'DONE':
       return 4;
@@ -559,7 +562,7 @@ const computeProgressPercent = (phase: string | null, done: number | null, total
     }
     return 5;
   }
-  if (phase === 'VERIFYING' || phase === 'VALIDATING' || phase === 'PARSING') {
+  if (phase === 'VERIFYING' || phase === 'VALIDATING' || phase === 'PARSING' || phase === 'AI_FIXING') {
     if (typeof done === 'number' && typeof total === 'number' && total > 0) {
       return 10 + Math.min(85, Math.max(0, (done / total) * 85));
     }
@@ -664,7 +667,7 @@ export default function ParsePage() {
   const [reviewSaving, setReviewSaving] = useState(false);
   const [retryingRowIds, setRetryingRowIds] = useState<Set<string>>(new Set());
   const [approvingRowIds, setApprovingRowIds] = useState<Set<string>>(new Set());
-  const [applyApproveToDuplicates, setApplyApproveToDuplicates] = useState(true);
+  const [selectedNeedsReviewRowIds, setSelectedNeedsReviewRowIds] = useState<Set<string>>(new Set());
   const [runningAiFixFlaggedRows, setRunningAiFixFlaggedRows] = useState(false);
   const [reviewAutoFocus, setReviewAutoFocus] = useState(false);
   const [activeDownloadType, setActiveDownloadType] = useState<JobExportType | null>(null);
@@ -673,6 +676,7 @@ export default function ParsePage() {
     phase: string | null;
     done: number | null;
     total: number | null;
+    detail: string | null;
     cacheHits: number | null;
     googleCallsUsed: number | null;
     eta: string | null;
@@ -680,6 +684,7 @@ export default function ParsePage() {
     phase: null,
     done: null,
     total: null,
+    detail: null,
     cacheHits: null,
     googleCallsUsed: null,
     eta: null,
@@ -850,6 +855,7 @@ export default function ParsePage() {
           phase: 'DONE',
           done: summary?.rows_received ?? normalizedRows.length,
           total: summary?.rows_received ?? normalizedRows.length,
+          detail: null,
           cacheHits: cacheHitsValue,
           googleCallsUsed: googleCallsValue,
           eta: null,
@@ -1077,6 +1083,14 @@ export default function ParsePage() {
     () => paginateRows(needsReviewGroups),
     [needsReviewGroups, paginateRows],
   );
+  const allNeedsReviewRowIds = useMemo(
+    () => needsReviewGroups.flatMap((group) => group.memberRowIds),
+    [needsReviewGroups],
+  );
+  const allNeedsReviewSelected =
+    allNeedsReviewRowIds.length > 0 &&
+    allNeedsReviewRowIds.every((rowId) => selectedNeedsReviewRowIds.has(rowId));
+  const selectedNeedsReviewCount = selectedNeedsReviewRowIds.size;
   const paginatedSkippedRows = useMemo(
     () => paginateRows(skippedRows),
     [paginateRows, skippedRows],
@@ -1094,6 +1108,16 @@ export default function ParsePage() {
     rowResults.forEach((row) => map.set(row.source_row_id, row));
     return map;
   }, [rowResults]);
+
+  useEffect(() => {
+    const validIds = new Set(allNeedsReviewRowIds);
+    setSelectedNeedsReviewRowIds((prev) => {
+      if (prev.size === 0) return prev;
+      const filtered = Array.from(prev).filter((rowId) => validIds.has(rowId));
+      if (filtered.length === prev.size) return prev;
+      return new Set(filtered);
+    });
+  }, [allNeedsReviewRowIds]);
 
   const rowAccountingMismatch = useMemo(() => {
     if (!parseSummary) return false;
@@ -1133,11 +1157,13 @@ export default function ParsePage() {
     }
     const done = progressInfo.done;
     const total = progressInfo.total;
+    const backendDetail = progressInfo.detail;
     const cacheHitsValue = progressInfo.cacheHits;
     const googleCallsValue = progressInfo.googleCallsUsed;
     if (
       done === null &&
       total === null &&
+      !backendDetail &&
       cacheHitsValue === null &&
       googleCallsValue === null &&
       !progressInfo.eta
@@ -1147,7 +1173,8 @@ export default function ParsePage() {
     const detail = `Validating addresses: ${done ?? '--'}/${total ?? '--'} • Verification calls ${
       googleCallsValue ?? '--'
     } • Cache hits ${cacheHitsValue ?? '--'}`;
-    return progressInfo.eta ? `${detail} • ETA ~ ${progressInfo.eta}` : detail;
+    const detailWithBackend = backendDetail ? `${detail} • ${backendDetail}` : detail;
+    return progressInfo.eta ? `${detailWithBackend} • ETA ~ ${progressInfo.eta}` : detailWithBackend;
   }, [isStartingParse, progressInfo]);
 
   const shouldShowProgress = useMemo(
@@ -1710,6 +1737,10 @@ export default function ParsePage() {
           normalizeNumber(job.cache_hits) ?? normalizeNumber(job.cacheHits) ?? null;
         const googleCallsValue =
           normalizeNumber(job.google_calls_used) ?? normalizeNumber(job.googleCallsUsed) ?? null;
+        const progressDetail =
+          (typeof job.progress_detail === 'string' && job.progress_detail) ||
+          (typeof job.progressDetail === 'string' && job.progressDetail) ||
+          null;
         const updatedAtValue = job.updated_at ?? job.updatedAt;
         const updatedAt =
           typeof updatedAtValue === 'string' ? new Date(updatedAtValue).getTime() : Date.now();
@@ -1744,6 +1775,7 @@ export default function ParsePage() {
           phase,
           done,
           total,
+          detail: progressDetail,
           cacheHits: cacheHitsValue,
           googleCallsUsed: googleCallsValue,
           eta,
@@ -1893,10 +1925,12 @@ export default function ParsePage() {
     setReviewError(null);
     setReviewSaving(false);
     setReviewDrafts({});
+    setSelectedNeedsReviewRowIds(new Set());
     setProgressInfo({
       phase: null,
       done: null,
       total: null,
+      detail: null,
       cacheHits: null,
       googleCallsUsed: null,
       eta: null,
@@ -2268,6 +2302,7 @@ export default function ParsePage() {
       phase: null,
       done: null,
       total: null,
+      detail: null,
       cacheHits: null,
       googleCallsUsed: null,
       eta: null,
@@ -2342,10 +2377,18 @@ export default function ParsePage() {
         return next;
       });
       closeReviewDrawer();
+      const hasDuplicate = updates.some((row) => normalizeStatus(row.status).includes('DUPLICATE'));
+      const movedToValid = updates.some((row) => isValidRow(row));
       const stillNeedsReview = updates.some((row) => isNeedsReviewRow(row));
       showToast({
-        title: stillNeedsReview ? 'Retry complete — still needs review' : 'Retry complete — moved to Valid',
-        variant: stillNeedsReview ? 'info' : 'success',
+        title: hasDuplicate
+          ? 'Marked duplicate (check Duplicates tab)'
+          : movedToValid
+            ? 'Moved to Valid'
+            : stillNeedsReview
+              ? 'Still needs review'
+              : 'Retry complete',
+        variant: hasDuplicate || stillNeedsReview ? 'info' : 'success',
       });
     } catch (err) {
       const message = (err as Error).message ?? 'Retry failed.';
@@ -2387,7 +2430,7 @@ export default function ParsePage() {
     try {
       const response = await approveMatchedJobRow(jobId, {
         rowId: row.source_row_id,
-        applyToSameNormalizedInput: applyApproveToDuplicates,
+        applyToSameNormalizedInput: false,
         allowScopeOverride,
       });
       const updates = response.updated_row_results ?? response.updated_rows ?? [];
@@ -2396,12 +2439,20 @@ export default function ParsePage() {
         updatedRows: updates,
         updatedJob,
       });
+      const hasDuplicate = updates.some((updatedRow) =>
+        normalizeStatus(updatedRow.status).includes('DUPLICATE'),
+      );
+      const movedToValid = updates.some((updatedRow) => isValidRow(updatedRow));
       const stillNeedsReview = updates.some((updatedRow) => isNeedsReviewRow(updatedRow));
       showToast({
-        title: stillNeedsReview
-          ? 'Approve complete — still needs review'
-          : 'Approve complete — moved to Valid',
-        variant: stillNeedsReview ? 'info' : 'success',
+        title: hasDuplicate
+          ? 'Marked duplicate (check Duplicates tab)'
+          : movedToValid
+            ? 'Moved to Valid'
+            : stillNeedsReview
+              ? 'Still needs review'
+              : 'Approve complete',
+        variant: hasDuplicate || stillNeedsReview ? 'info' : 'success',
       });
       if (reviewRow?.source_row_id === row.source_row_id) {
         closeReviewDrawer();
@@ -2413,6 +2464,50 @@ export default function ParsePage() {
       setApprovingRowIds((prev) => {
         const next = new Set(prev);
         memberRows.forEach((memberRow) => next.delete(memberRow.source_row_id));
+        return next;
+      });
+    }
+  };
+
+  const handleApproveSelectedNeedsReview = async () => {
+    if (!jobId) {
+      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+      return;
+    }
+    const rowIds = Array.from(selectedNeedsReviewRowIds);
+    if (!rowIds.length) return;
+    setApprovingRowIds((prev) => {
+      const next = new Set(prev);
+      rowIds.forEach((rowId) => next.add(rowId));
+      return next;
+    });
+    try {
+      const response = await approveMatchedJobRowsBatch(jobId, rowIds, false);
+      const updates = response.updated_row_results ?? response.updated_rows ?? [];
+      const updatedJob = response.updated_job as Record<string, unknown> | undefined;
+      await handleRetryUpdates({
+        updatedRows: updates,
+        updatedJob,
+      });
+      const duplicateCount = updates.filter((row) => normalizeStatus(row.status).includes('DUPLICATE')).length;
+      showToast({
+        title: `Approved ${rowIds.length} rows`,
+        description:
+          duplicateCount > 0
+            ? 'Some were marked duplicate (see Duplicates tab)'
+            : undefined,
+        variant: duplicateCount > 0 ? 'info' : 'success',
+      });
+      setSelectedNeedsReviewRowIds(new Set());
+    } catch (err) {
+      showToast({
+        title: (err as Error).message ?? 'Bulk approve failed.',
+        variant: 'error',
+      });
+    } finally {
+      setApprovingRowIds((prev) => {
+        const next = new Set(prev);
+        rowIds.forEach((rowId) => next.delete(rowId));
         return next;
       });
     }
@@ -2513,6 +2608,42 @@ export default function ParsePage() {
       const upgradedCount = response.upgraded_count ?? response.upgraded_to_valid ?? 0;
       const rewrittenCount = response.rewritten_count ?? response.rewritten ?? 0;
 
+      const updates = response.updated_row_results ?? response.updated_rows ?? [];
+      if (updates.length > 0 || response.updated_job) {
+        await handleRetryUpdates({
+          updatedRows: updates,
+          updatedJob: response.updated_job as Record<string, unknown> | undefined,
+        });
+      }
+
+      const acceptedAsync = attemptedCount === 0 && upgradedCount === 0 && rewrittenCount === 0;
+      if (acceptedAsync) {
+        setBusy(true);
+        startPolling(jobId, {
+          onFinished: async () => {
+            await loadJobResults(
+              jobId,
+              {
+                version: LAST_JOB_STORAGE_VERSION,
+                jobId,
+                stateValue,
+                countyValue,
+                cityValue,
+                campaignName,
+              },
+              { fresh: true },
+            );
+            setBusy(false);
+          },
+        });
+        showToast({
+          title: 'AI auto-fix started',
+          description: 'Progress and ETA will update while fixes run.',
+          variant: 'info',
+        });
+        return;
+      }
+
       if (attemptedCount === 0) {
         showToast({
           title: 'No eligible flagged rows to fix',
@@ -2535,6 +2666,7 @@ export default function ParsePage() {
         campaignName,
       }, { fresh: true });
     } catch (err) {
+      setBusy(false);
       showToast({
         title: 'AI auto-fix failed',
         description: (err as Error).message ?? 'Unable to run AI auto-fix for flagged rows.',
@@ -2544,6 +2676,9 @@ export default function ParsePage() {
       setRunningAiFixFlaggedRows(false);
     }
   };
+
+  const aiFixInProgress =
+    runningAiFixFlaggedRows || (busy && progressInfo.phase === 'AI_FIXING');
 
   const downloadLabels: Record<JobExportType, string> = {
     unique_valid: 'Unique Valid',
@@ -2950,10 +3085,10 @@ export default function ParsePage() {
                   <button
                     type="button"
                     onClick={() => void handleAutoFixFlaggedRows()}
-                    disabled={!jobId || runningAiFixFlaggedRows}
+                    disabled={!jobId || aiFixInProgress}
                     className="rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-500/10"
                   >
-                    {runningAiFixFlaggedRows ? (
+                    {aiFixInProgress ? (
                       <span className="inline-flex items-center gap-2">
                         <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-300 border-t-indigo-700 dark:border-indigo-300/40 dark:border-t-indigo-100" aria-hidden="true" />
                         Auto-fixing flagged rows…
@@ -3392,20 +3527,34 @@ export default function ParsePage() {
                 ) : null}
                 {activeTab === 'needs_review' ? (
                   <>
-                    <label className="mb-3 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        checked={applyApproveToDuplicates}
-                        onChange={(event) => setApplyApproveToDuplicates(event.target.checked)}
-                      />
-                      Apply to all duplicates of this address
-                    </label>
+                  <div className="mb-3 flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleApproveSelectedNeedsReview()}
+                      disabled={selectedNeedsReviewCount === 0}
+                      className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/40 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
+                    >
+                      Approve Selected
+                    </button>
+                  </div>
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                     <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
                         <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
+                            <th className="px-4 py-3">
+                              <input
+                                type="checkbox"
+                                aria-label="Select all needs review rows"
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                checked={allNeedsReviewSelected}
+                                onChange={(event) => {
+                                  setSelectedNeedsReviewRowIds(
+                                    event.target.checked ? new Set(allNeedsReviewRowIds) : new Set(),
+                                  );
+                                }}
+                              />
+                            </th>
                             <th className="px-4 py-3">Record ID / Row</th>
                             <th className="px-4 py-3">Original Address</th>
                             <th className="px-4 py-3">Matched Address</th>
@@ -3420,7 +3569,7 @@ export default function ParsePage() {
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                colSpan={showDebugMode ? 7 : 6}
+                                colSpan={showDebugMode ? 8 : 7}
                               >
                                 No rows need review.
                               </td>
@@ -3431,6 +3580,9 @@ export default function ParsePage() {
                               const isRowBusy =
                                 approvingRowIds.has(row.source_row_id) ||
                                 retryingRowIds.has(row.source_row_id);
+                              const groupSelected = group.memberRowIds.every((rowId) =>
+                                selectedNeedsReviewRowIds.has(rowId),
+                              );
                               return (
                                 <Fragment key={group.groupKey}>
                                   <tr
@@ -3438,6 +3590,25 @@ export default function ParsePage() {
                                     className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
                                     onClick={() => openReviewDrawer(row)}
                                   >
+                                    <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                                      <input
+                                        type="checkbox"
+                                        aria-label={`Select row group ${getRowDisplayId(row)}`}
+                                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                        checked={groupSelected}
+                                        onChange={(event) => {
+                                          setSelectedNeedsReviewRowIds((prev) => {
+                                            const next = new Set(prev);
+                                            if (event.target.checked) {
+                                              group.memberRowIds.forEach((rowId) => next.add(rowId));
+                                            } else {
+                                              group.memberRowIds.forEach((rowId) => next.delete(rowId));
+                                            }
+                                            return next;
+                                          });
+                                        }}
+                                      />
+                                    </td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getRowDisplayId(row)}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row) || '--'}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedAddress(row) || '--'}</td>
@@ -3618,15 +3789,6 @@ export default function ParsePage() {
                 ) : null}
                 {activeTab === 'out_of_scope' ? (
                   <>
-                    <label className="mb-3 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                        checked={applyApproveToDuplicates}
-                        onChange={(event) => setApplyApproveToDuplicates(event.target.checked)}
-                      />
-                      Apply to all duplicates of this address
-                    </label>
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                     <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">

@@ -59,7 +59,7 @@ describe('API error handling', () => {
       const info = getApiErrorInfo(error);
       expect(info?.message).toBe('HTTP 500: [AI_FIX_PARSE_FAILED] Could not parse one or more flagged rows');
       expect(info?.status).toBe(500);
-      expect(info?.endpoint).toBe('/jobs/job-123/ai-fix-flagged');
+      expect(info?.endpoint).toBe('/jobs/job-123/ai-fix-flagged?async_mode=true');
       return;
     }
 
