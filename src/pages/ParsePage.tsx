@@ -661,6 +661,7 @@ export default function ParsePage() {
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
+  const [retryingRowIds, setRetryingRowIds] = useState<Set<string>>(new Set());
   const [approvingRowIds, setApprovingRowIds] = useState<Set<string>>(new Set());
   const [applyApproveToDuplicates, setApplyApproveToDuplicates] = useState(true);
   const [runningAiFixFlaggedRows, setRunningAiFixFlaggedRows] = useState(false);
@@ -764,7 +765,11 @@ export default function ParsePage() {
   }, [location.pathname, location.search, navigate]);
 
   const loadJobResults = useCallback(
-    async (jobIdToLoad: string, storedState: PersistedLastJobState | null) => {
+    async (
+      jobIdToLoad: string,
+      storedState: PersistedLastJobState | null,
+      options?: { fresh?: boolean },
+    ) => {
       setRehydrating(true);
       setError(null);
       setPollError(null);
@@ -772,7 +777,7 @@ export default function ParsePage() {
       try {
         const [jobDetail, resultsResponse] = await Promise.all([
           getJobDetail(jobIdToLoad),
-          getJobResults(jobIdToLoad).catch(() => null),
+          getJobResults(jobIdToLoad, { fresh: options?.fresh }).catch(() => null),
         ]);
         const combinedJob: JobRecord = {
           ...(jobDetail.summary ?? {}),
@@ -857,6 +862,11 @@ export default function ParsePage() {
     },
     [],
   );
+
+  useEffect(() => {
+    setCanonicalAddresses(buildCanonicalAddressesFromRows(rowResults));
+    setDuplicateGroups(buildDuplicateGroupsFromRows(rowResults));
+  }, [rowResults]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -2135,11 +2145,12 @@ export default function ParsePage() {
     }
   };
 
-  const handleRetryUpdates = (payload: {
+  const handleRetryUpdates = async (payload: {
     updatedRows: RowResult[];
     updatedJob?: Record<string, unknown>;
+    freshReload?: boolean;
   }) => {
-    const { updatedRows, updatedJob } = payload;
+    const { updatedRows, updatedJob, freshReload } = payload;
     if (updatedRows?.length) {
       setRowResults((prev) => {
         const updates = new Map<string, RowResult>();
@@ -2150,12 +2161,18 @@ export default function ParsePage() {
           }
         });
         if (!updates.size) return prev;
-        return prev.map((row) => {
+        const nextRows = prev.map((row) => {
           const id = getRowIdentifier(row as Record<string, unknown>);
           if (!id || !updates.has(id)) return row;
           const updatedRow = updates.get(id) as RowResult;
           return { ...row, ...updatedRow };
         });
+        const existingIds = new Set(nextRows.map((row) => getRowIdentifier(row as Record<string, unknown>)));
+        const appendedRows = updatedRows.filter((row) => {
+          const id = getRowIdentifier(row as Record<string, unknown>);
+          return Boolean(id && !existingIds.has(id));
+        });
+        return appendedRows.length ? [...nextRows, ...appendedRows] : nextRows;
       });
     }
 
@@ -2206,17 +2223,29 @@ export default function ParsePage() {
         if (typeof googleCallsValue === 'number') next.google_calls_used = googleCallsValue;
         return next;
       });
-      setParseSummary((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          rows_received: typeof totalRows === 'number' ? totalRows : prev.rows_received,
-          valid_total: typeof matchedCount === 'number' ? matchedCount : prev.valid_total,
-          valid_unique:
-            typeof dedupedCountValue === 'number' ? dedupedCountValue : prev.valid_unique,
-          unmatched: typeof unmatchedCount === 'number' ? unmatchedCount : prev.unmatched,
-        };
-      });
+      setParseSummary((prev) =>
+        prev
+          ? {
+              ...prev,
+              rows_received: typeof totalRows === 'number' ? totalRows : prev.rows_received,
+            }
+          : prev,
+      );
+    }
+
+    if (freshReload && jobId) {
+      await loadJobResults(
+        jobId,
+        {
+          version: LAST_JOB_STORAGE_VERSION,
+          jobId,
+          stateValue,
+          countyValue,
+          cityValue,
+          campaignName,
+        },
+        { fresh: true },
+      );
     }
   };
 
@@ -2292,9 +2321,14 @@ export default function ParsePage() {
       return;
     }
     setReviewSaving(true);
+    const memberRows = getGroupMemberRows(reviewRow);
+    setRetryingRowIds((prev) => {
+      const next = new Set(prev);
+      memberRows.forEach((memberRow) => next.add(memberRow.source_row_id));
+      return next;
+    });
     setReviewError(null);
     try {
-      const memberRows = getGroupMemberRows(reviewRow);
       const updates: RowResult[] = [];
       let updatedJob: Record<string, unknown> | undefined;
       for (const memberRow of memberRows) {
@@ -2302,7 +2336,7 @@ export default function ParsePage() {
         updates.push(...(response.updated_row_results ?? response.updated_rows ?? []));
         if (response.updated_job) updatedJob = response.updated_job as Record<string, unknown>;
       }
-      handleRetryUpdates({
+      await handleRetryUpdates({
         updatedRows: updates,
         updatedJob,
       });
@@ -2312,13 +2346,22 @@ export default function ParsePage() {
         return next;
       });
       closeReviewDrawer();
-      showToast({ title: 'Row retried', variant: 'success' });
+      const stillNeedsReview = updates.some((row) => isNeedsReviewRow(row));
+      showToast({
+        title: stillNeedsReview ? 'Retry complete — still needs review' : 'Retry complete — moved to Valid',
+        variant: stillNeedsReview ? 'info' : 'success',
+      });
     } catch (err) {
       const message = (err as Error).message ?? 'Retry failed.';
       setReviewError(message);
       showToast({ title: message, variant: 'error' });
     } finally {
       setReviewSaving(false);
+      setRetryingRowIds((prev) => {
+        const next = new Set(prev);
+        memberRows.forEach((memberRow) => next.delete(memberRow.source_row_id));
+        return next;
+      });
     }
   };
 
@@ -2357,11 +2400,17 @@ export default function ParsePage() {
         updates.push(...(response.updated_row_results ?? response.updated_rows ?? []));
         if (response.updated_job) updatedJob = response.updated_job as Record<string, unknown>;
       }
-      handleRetryUpdates({
+      await handleRetryUpdates({
         updatedRows: updates,
         updatedJob,
       });
-      showToast({ title: 'Matched address approved', variant: 'success' });
+      const stillNeedsReview = updates.some((updatedRow) => isNeedsReviewRow(updatedRow));
+      showToast({
+        title: stillNeedsReview
+          ? 'Approve complete — still needs review'
+          : 'Approve complete — moved to Valid',
+        variant: stillNeedsReview ? 'info' : 'success',
+      });
       if (reviewRow?.source_row_id === row.source_row_id) {
         closeReviewDrawer();
       }
@@ -2492,7 +2541,7 @@ export default function ParsePage() {
         countyValue,
         cityValue,
         campaignName,
-      });
+      }, { fresh: true });
     } catch (err) {
       showToast({
         title: 'AI auto-fix failed',
@@ -3389,6 +3438,9 @@ export default function ParsePage() {
                             paginatedNeedsReviewGroups.map((group) => {
                               const row = group.displayRow;
                               const expanded = expandedGroupedRows.has(group.groupKey);
+                              const isRowBusy =
+                                approvingRowIds.has(row.source_row_id) ||
+                                retryingRowIds.has(row.source_row_id);
                               return (
                                 <Fragment key={group.groupKey}>
                                   <tr
@@ -3410,9 +3462,9 @@ export default function ParsePage() {
                                     <td className="px-4 py-3 text-right">
                                       <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
                                         {group.count > 1 ? <button type="button" onClick={() => toggleGroupedRows(group.groupKey)}>{expanded ? 'Hide rows' : 'Show rows'}</button> : null}
-                                        <button type="button" onClick={() => openReviewDrawer(row)}>Review</button>
-                                        <button type="button" onClick={() => void handleApproveMatched(row)} disabled={approvingRowIds.has(row.source_row_id)}>
-                                          {approvingRowIds.has(row.source_row_id) ? 'Approving…' : 'Approve matched'}
+                                        <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy}>Review</button>
+                                        <button type="button" onClick={() => void handleApproveMatched(row)} disabled={isRowBusy}>
+                                          {approvingRowIds.has(row.source_row_id) ? '⏳ Approving…' : 'Approve matched'}
                                         </button>
                                       </div>
                                     </td>
@@ -3631,6 +3683,9 @@ export default function ParsePage() {
                             paginatedOutOfScopeGroups.map((group) => {
                               const row = group.displayRow;
                               const expanded = expandedGroupedRows.has(group.groupKey);
+                              const isRowBusy =
+                                approvingRowIds.has(row.source_row_id) ||
+                                retryingRowIds.has(row.source_row_id);
                               return (
                                 <Fragment key={group.groupKey}>
                                   <tr className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => openReviewDrawer(row)}>
@@ -3647,8 +3702,8 @@ export default function ParsePage() {
                                     <td className="px-4 py-3 text-right">
                                       <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
                                         {group.count > 1 ? <button type="button" onClick={() => toggleGroupedRows(group.groupKey)}>{expanded ? 'Hide rows' : 'Show rows'}</button> : null}
-                                        <button type="button" onClick={() => openReviewDrawer(row)}>Review</button>
-                                        <button type="button" onClick={() => void handleApproveMatched(row)} disabled={approvingRowIds.has(row.source_row_id)}>{approvingRowIds.has(row.source_row_id) ? 'Approving…' : 'Approve matched'}</button>
+                                        <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy}>Review</button>
+                                        <button type="button" onClick={() => void handleApproveMatched(row)} disabled={isRowBusy}>{approvingRowIds.has(row.source_row_id) ? '⏳ Approving…' : 'Approve matched'}</button>
                                       </div>
                                     </td>
                                   </tr>

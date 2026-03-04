@@ -30,7 +30,8 @@ type ProcessingReportModalProps = {
   onApplyUpdates: (payload: {
     updatedRows: RowResult[];
     updatedJob?: Record<string, unknown>;
-  }) => void;
+    freshReload?: boolean;
+  }) => Promise<void> | void;
   forceReverify?: boolean;
   showDebugMode?: boolean;
 };
@@ -123,6 +124,7 @@ export default function ProcessingReportModal({
   const [retryError, setRetryError] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [savingRow, setSavingRow] = useState(false);
+  const [activeRowActionId, setActiveRowActionId] = useState<string | null>(null);
   const [runningAiFix, setRunningAiFix] = useState(false);
   const [aiFixRowsProcessed, setAiFixRowsProcessed] = useState<number | null>(null);
   const [aiFixEstimatedCost, setAiFixEstimatedCost] = useState<number | null>(null);
@@ -205,9 +207,10 @@ export default function ProcessingReportModal({
     setRetryError(null);
     try {
       const response = await retryJobBatch(jobId, selectedRowsWithEdits, forceReverify);
-      onApplyUpdates({
+      await onApplyUpdates({
         updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
         updatedJob: response.updated_job as Record<string, unknown> | undefined,
+        freshReload: true,
       });
       setPendingEditsByRowId((prev) => {
         const next = { ...prev };
@@ -240,9 +243,10 @@ export default function ProcessingReportModal({
     setRetryError(null);
     try {
       const response = await runNeedsReviewAiFix(jobId);
-      onApplyUpdates({
+      await onApplyUpdates({
         updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
         updatedJob: response.updated_job as Record<string, unknown> | undefined,
+        freshReload: true,
       });
       const processed = response.rows_processed ?? response.ai_rows_processed ?? response.attempted ?? 0;
       setAiFixRowsProcessed(processed);
@@ -270,10 +274,11 @@ export default function ProcessingReportModal({
       return;
     }
     setSavingRow(true);
+    setActiveRowActionId(rowId);
     setRetryError(null);
     try {
       const response = await retryJobRow(jobId, rowId, trimmedAddress, forceReverify);
-      onApplyUpdates({
+      await onApplyUpdates({
         updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
         updatedJob: response.updated_job as Record<string, unknown> | undefined,
       });
@@ -292,6 +297,7 @@ export default function ProcessingReportModal({
       setRetryError((err as Error).message ?? 'Retry failed.');
     } finally {
       setSavingRow(false);
+      setActiveRowActionId(null);
     }
   };
 
@@ -401,6 +407,7 @@ export default function ProcessingReportModal({
                   ) : (
                     filteredRows.map((row) => {
                       const needsReview = isNeedsReviewRow(row);
+                      const isRowBusy = activeRowActionId === row.source_row_id;
                       return (
                         <tr
                           key={row.source_row_id}
@@ -449,9 +456,10 @@ export default function ProcessingReportModal({
                                     setRetryError(null);
                                     setEditingRow(row);
                                   }}
+                                  disabled={isRowBusy}
                                   className="rounded-md border border-indigo-200 px-2 py-1 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-500/10"
                                 >
-                                  Edit + Retry
+                                  {isRowBusy ? '⏳ Retrying…' : 'Edit + Retry'}
                                 </button>
                               ) : null}
                               {showDebugMode ? (

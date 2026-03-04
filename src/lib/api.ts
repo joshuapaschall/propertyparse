@@ -583,8 +583,12 @@ export async function getJobWithStatus(jobId: string) {
   };
 }
 
-export async function getJobResults(jobId: string) {
-  return requestJson<ParseResponse>(`/jobs/${jobId}/results`, {
+export async function getJobResults(jobId: string, options?: { fresh?: boolean }) {
+  const params = new URLSearchParams();
+  if (options?.fresh) params.set('fresh', '1');
+  const query = params.toString();
+  const path = query ? `/jobs/${jobId}/results?${query}` : `/jobs/${jobId}/results`;
+  return requestJson<ParseResponse>(path, {
     method: 'GET',
     headers: getAuthHeaders(),
   });
