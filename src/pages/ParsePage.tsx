@@ -78,7 +78,9 @@ const LAST_JOB_STORAGE_VERSION = 1;
 
 type CanonicalAddressComponents = {
   street_address?: string;
+  street1?: string;
   address2?: string;
+  street2?: string;
   city?: string;
   state?: string;
   zip?: string;
@@ -153,8 +155,8 @@ const normalizeCanonicalAddress = (row: CanonicalAddress): NormalizedCanonicalAd
   const components = row.components as CanonicalAddressComponents | undefined;
   const fullAddress =
     (row as { full_address?: string }).full_address || row.formatted_address || '';
-  const street1 = row.street1 || components?.street_address || '';
-  const street2 = row.street2 || components?.address2 || '';
+  const street1 = row.street1 || components?.street_address || components?.street1 || '';
+  const street2 = row.street2 || components?.address2 || components?.street2 || '';
   const city = row.city || components?.city || '';
   const state = row.state || components?.state || '';
   const zip = row.zip || components?.zip || (components as any)?.zip_code || '';
@@ -349,6 +351,61 @@ const pickStringValue = (row: JobRecord, keys: string[]) => {
   return undefined;
 };
 
+const normalizeComponentText = (value: unknown) => {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined;
+  const normalized = String(value)
+    .replace(/\s*,\s*/g, ', ')
+    .replace(/^,+|,+$/g, '')
+    .trim();
+  return normalized.length > 0 ? normalized : undefined;
+};
+
+const extractCanonicalComponents = (row: JobRecord): CanonicalAddressComponents | undefined => {
+  const fromComponents = toRecord(row.components);
+  const fromStandardized =
+    toRecord(row.standardized_address_components) ??
+    toRecord(row.standardizedAddressComponents) ??
+    toRecord(row.standardized_components) ??
+    toRecord(row.standardizedComponents);
+  const merged = {
+    ...(fromComponents ?? {}),
+    ...(fromStandardized ?? {}),
+    street_address:
+      normalizeComponentText((fromComponents ?? {}).street_address) ??
+      normalizeComponentText((fromStandardized ?? {}).street_address) ??
+      normalizeComponentText((fromStandardized ?? {}).street1) ??
+      normalizeComponentText(row.street_address) ??
+      normalizeComponentText(row.street1),
+    address2:
+      normalizeComponentText((fromComponents ?? {}).address2) ??
+      normalizeComponentText((fromStandardized ?? {}).address2) ??
+      normalizeComponentText((fromStandardized ?? {}).street2) ??
+      normalizeComponentText(row.address2) ??
+      normalizeComponentText(row.street2),
+    city:
+      normalizeComponentText((fromComponents ?? {}).city) ??
+      normalizeComponentText((fromStandardized ?? {}).city) ??
+      normalizeComponentText(row.city),
+    state:
+      normalizeComponentText((fromComponents ?? {}).state) ??
+      normalizeComponentText((fromStandardized ?? {}).state) ??
+      normalizeComponentText(row.state),
+    zip:
+      normalizeComponentText((fromComponents ?? {}).zip) ??
+      normalizeComponentText((fromComponents ?? {}).zip_code) ??
+      normalizeComponentText((fromStandardized ?? {}).zip) ??
+      normalizeComponentText((fromStandardized ?? {}).zip_code) ??
+      normalizeComponentText(row.zip) ??
+      normalizeComponentText(row.zip_code),
+  } as CanonicalAddressComponents;
+
+  if (!Object.values(merged).some((value) => typeof value === 'string' && value.trim().length > 0)) {
+    return undefined;
+  }
+
+  return merged;
+};
+
 const isRowResultDtoShape = (row: JobRecord) =>
   (typeof row.source_row_id === 'string' || typeof row.sourceRowId === 'string') &&
   (typeof row.source_row_index === 'number' || typeof row.sourceRowIndex === 'number');
@@ -384,7 +441,7 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
       ]),
       matched_address: pickStringValue(row, ['matched_address', 'matchedAddress']) || undefined,
       place_id: pickStringValue(row, ['place_id', 'placeId']),
-      components: row.components ?? undefined,
+      components: extractCanonicalComponents(row),
       canonical_id: pickStringValue(row, ['canonical_id', 'canonicalId']),
       is_duplicate:
         typeof row.is_duplicate === 'boolean'
@@ -451,7 +508,7 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
     matched_address: pickStringValue(row, ['matched_address', 'matchedAddress']) || undefined,
     address_raw: pickStringValue(row, ['address_raw', 'addressRaw']) || undefined,
     place_id: pickStringValue(row, ['place_id', 'placeId']) || undefined,
-    components: (row.components as unknown) || undefined,
+    components: extractCanonicalComponents(row),
     canonical_id: pickStringValue(row, ['canonical_id', 'canonicalId']) || undefined,
     is_duplicate:
       typeof row.is_duplicate === 'boolean'
