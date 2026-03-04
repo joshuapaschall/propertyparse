@@ -24,6 +24,7 @@ const defaultGroupKey = (row: RowResult) => {
     getNormalizedInput(row) ||
     normalizeAddressValue(row.detected_address) ||
     normalizeAddressValue(row.matched_address) ||
+    normalizeAddressValue(row.address_raw) ||
     row.source_row_id
   );
 };
