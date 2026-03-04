@@ -333,7 +333,7 @@ export async function retryJobRow(
     `/jobs/${jobId}/retry-row`,
     {
       row_id: rowId,
-      overrides: { address: fullAddress },
+      edited: { full_address: fullAddress },
       force_reverify: forceReverify ?? false,
     },
   );
@@ -374,8 +374,23 @@ export async function approveMatchedJobRow(
     updated_job?: JobRecord;
   }>(`/jobs/${jobId}/approve-matched`, {
     row_id: payload.rowId,
-    apply_to_same_normalized_input: payload.applyToSameNormalizedInput ?? true,
+    apply_to_same_normalized_input: payload.applyToSameNormalizedInput ?? false,
     allow_scope_override: payload.allowScopeOverride ?? false,
+  });
+}
+
+export async function approveMatchedJobRowsBatch(
+  jobId: string,
+  rowIds: string[],
+  allowScopeOverride = false,
+) {
+  return postJson<{
+    updated_row_results?: RowResult[];
+    updated_rows?: RowResult[];
+    updated_job?: JobRecord;
+  }>(`/jobs/${jobId}/approve-matched-batch`, {
+    row_ids: rowIds,
+    allow_scope_override: allowScopeOverride,
   });
 }
 
@@ -413,7 +428,7 @@ export type AiFixFlaggedResponse = {
 };
 
 export async function runAiFixFlaggedRows(jobId: string, includeOutOfScopeCounty = true) {
-  return postJson<AiFixFlaggedResponse>(`/jobs/${jobId}/ai-fix-flagged`, {
+  return postJson<AiFixFlaggedResponse>(`/jobs/${jobId}/ai-fix-flagged?async_mode=true`, {
     include_out_of_scope_county: includeOutOfScopeCounty,
   });
 }
