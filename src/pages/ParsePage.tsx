@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import AccountedRowsIndicator from '../components/AccountedRowsIndicator';
@@ -28,6 +28,7 @@ import {
   computeParseSummaryFromRowResults,
 } from '../lib/parseUtils';
 import { canStartParse, hasValidLocation } from '../lib/parseValidation';
+import { groupRows, type GroupedRow } from '../lib/groupRows';
 import {
   downloadJobExport,
   getJobDetail,
@@ -664,6 +665,7 @@ export default function ParsePage() {
   const [applyApproveToDuplicates, setApplyApproveToDuplicates] = useState(true);
   const [runningAiFixFlaggedRows, setRunningAiFixFlaggedRows] = useState(false);
   const [reviewAutoFocus, setReviewAutoFocus] = useState(false);
+  const [expandedGroupedRows, setExpandedGroupedRows] = useState<Set<string>>(() => new Set());
   const [activeDownloadType, setActiveDownloadType] = useState<JobExportType | null>(null);
   const [downloadSuccessLabel, setDownloadSuccessLabel] = useState<string | null>(null);
   const [progressInfo, setProgressInfo] = useState<{
@@ -985,6 +987,8 @@ export default function ParsePage() {
     () => rowResults.filter((row) => normalizeStatus(row.status).startsWith('OUT_OF_SCOPE')),
     [rowResults],
   );
+  const needsReviewGroups = useMemo(() => groupRows(needsReviewRows), [needsReviewRows]);
+  const outOfScopeGroups = useMemo(() => groupRows(outOfScopeRows), [outOfScopeRows]);
   const outOfScopeCityRowsCount = useMemo(
     () =>
       outOfScopeRows.filter((row) =>
@@ -1015,11 +1019,11 @@ export default function ParsePage() {
       case 'valid':
         return canonicalAddresses.length;
       case 'needs_review':
-        return needsReviewRows.length;
+        return needsReviewGroups.length;
       case 'skipped':
         return skippedRows.length;
       case 'out_of_scope':
-        return outOfScopeRows.length;
+        return outOfScopeGroups.length;
       case 'duplicates':
         return duplicateGroups.filter((group) => (group.source_row_ids?.length || 0) > 1).length;
       default:
@@ -1028,8 +1032,8 @@ export default function ParsePage() {
   }, [
     activeTab,
     canonicalAddresses.length,
-    needsReviewRows.length,
-    outOfScopeRows.length,
+    needsReviewGroups.length,
+    outOfScopeGroups.length,
     duplicateGroups,
     parseSummary,
     skippedRows.length,
@@ -1055,17 +1059,17 @@ export default function ParsePage() {
     () => paginateRows(canonicalAddresses),
     [canonicalAddresses, paginateRows],
   );
-  const paginatedNeedsReviewRows = useMemo(
-    () => paginateRows(needsReviewRows),
-    [needsReviewRows, paginateRows],
+  const paginatedNeedsReviewGroups = useMemo(
+    () => paginateRows(needsReviewGroups),
+    [needsReviewGroups, paginateRows],
   );
   const paginatedSkippedRows = useMemo(
     () => paginateRows(skippedRows),
     [paginateRows, skippedRows],
   );
-  const paginatedOutOfScopeRows = useMemo(
-    () => paginateRows(outOfScopeRows),
-    [outOfScopeRows, paginateRows],
+  const paginatedOutOfScopeGroups = useMemo(
+    () => paginateRows(outOfScopeGroups),
+    [outOfScopeGroups, paginateRows],
   );
   const rowResultsById = useMemo(() => {
     const map = new Map<string, RowResult>();
@@ -1329,21 +1333,6 @@ export default function ParsePage() {
     return [] as string[];
   };
 
-  const getPrecisionTags = (row: RowResult) => {
-    const types = getGoogleTypes(row);
-    const tags: string[] = [];
-    if (types.includes('street_address')) tags.push('street_address');
-    if (types.includes('route')) tags.push('route');
-    const countyOnly =
-      types.includes('administrative_area_level_2') &&
-      !types.includes('street_address') &&
-      !types.includes('premise') &&
-      !types.includes('subpremise') &&
-      !types.includes('route');
-    if (countyOnly) tags.push('county-only');
-    return tags;
-  };
-
   const getReasonSummary = (row: RowResult) => {
     const reasonCode = row.reason_code?.toLowerCase() ?? '';
     const summaryByReason: Record<string, string> = {
@@ -1386,6 +1375,49 @@ export default function ParsePage() {
     ];
   };
 
+
+  const tokenize = (value: string) =>
+    value
+      .split(/(\s+)/)
+      .filter((token) => token.length > 0);
+
+  const renderTokenDiff = (original: string, matched: string) => {
+    const originalTokens = tokenize(original);
+    const matchedTokens = tokenize(matched);
+    const matchedSet = new Set(matchedTokens.map((token) => token.toLowerCase().trim()));
+    const originalSet = new Set(originalTokens.map((token) => token.toLowerCase().trim()));
+
+    return (
+      <div className="space-y-2">
+        <div className="text-xs uppercase text-slate-500 dark:text-slate-400">Original</div>
+        <p className="text-sm">
+          {originalTokens.map((token, index) => {
+            const key = `orig-${index}-${token}`;
+            const trimmed = token.trim().toLowerCase();
+            const changed = trimmed.length > 0 && !matchedSet.has(trimmed);
+            return (
+              <span key={key} className={changed ? 'rounded bg-rose-100 px-0.5 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200' : ''}>
+                {token}
+              </span>
+            );
+          })}
+        </p>
+        <div className="text-xs uppercase text-slate-500 dark:text-slate-400">Matched</div>
+        <p className="text-sm">
+          {matchedTokens.map((token, index) => {
+            const key = `match-${index}-${token}`;
+            const trimmed = token.trim().toLowerCase();
+            const changed = trimmed.length > 0 && !originalSet.has(trimmed);
+            return (
+              <span key={key} className={changed ? 'rounded bg-emerald-100 px-0.5 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200' : ''}>
+                {token}
+              </span>
+            );
+          })}
+        </p>
+      </div>
+    );
+  };
   const getStatusLabel = (row: RowResult) => {
     if (isValidRow(row)) return 'Valid';
     if (isNeedsReviewRow(row)) return 'Needs Review';
@@ -1525,10 +1557,31 @@ export default function ParsePage() {
     );
   };
 
+
+  const toggleGroupedRows = (groupKey: string) => {
+    setExpandedGroupedRows((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
+  };
+
+  const findGroupForRow = (groups: GroupedRow[], row: RowResult) =>
+    groups.find((group) => group.memberRowIds.includes(row.source_row_id)) ?? null;
+
+  const activeReviewGroups = activeTab === 'out_of_scope' ? outOfScopeGroups : needsReviewGroups;
+  const activeReviewGroup = reviewRow ? findGroupForRow(activeReviewGroups, reviewRow) : null;
+
   const openReviewDrawer = (row: RowResult, focusEdit = false) => {
-    const draft = reviewDrafts[row.source_row_id];
-    setReviewRow(row);
-    setReviewAddress(draft ?? getInputAddress(row));
+    const group = findGroupForRow(activeReviewGroups, row);
+    const displayRow = group?.displayRow ?? row;
+    const draft = reviewDrafts[displayRow.source_row_id];
+    setReviewRow(displayRow);
+    setReviewAddress(draft ?? getInputAddress(displayRow));
     setReviewError(null);
     setReviewAutoFocus(focusEdit);
   };
@@ -1537,6 +1590,15 @@ export default function ParsePage() {
     setReviewRow(null);
     setReviewError(null);
     setReviewSaving(false);
+  };
+
+  const getGroupMemberRows = (row: RowResult) => {
+    const group = findGroupForRow(activeReviewGroups, row);
+    if (!group) return [row];
+    const members = group.memberRowIds
+      .map((rowId) => rowResultsById.get(rowId))
+      .filter((member): member is RowResult => Boolean(member));
+    return members.length ? members : [row];
   };
 
   useEffect(() => {
@@ -1552,11 +1614,14 @@ export default function ParsePage() {
   }, [showDebugMode]);
 
   const activeReviewIndex = useMemo(
-    () => (reviewRow ? needsReviewRows.findIndex((row) => row.source_row_id === reviewRow.source_row_id) : -1),
-    [needsReviewRows, reviewRow],
+    () =>
+      reviewRow && activeReviewGroup
+        ? activeReviewGroups.findIndex((group) => group.groupKey === activeReviewGroup.groupKey)
+        : -1,
+    [activeReviewGroup, activeReviewGroups, reviewRow],
   );
   const canReviewPrev = activeReviewIndex > 0;
-  const canReviewNext = activeReviewIndex > -1 && activeReviewIndex < needsReviewRows.length - 1;
+  const canReviewNext = activeReviewIndex > -1 && activeReviewIndex < activeReviewGroups.length - 1;
 
   const navigateReviewRow = useCallback(
     (direction: 'prev' | 'next') => {
@@ -1564,12 +1629,12 @@ export default function ParsePage() {
       if (direction === 'prev' && !canReviewPrev) return;
       if (direction === 'next' && !canReviewNext) return;
       const delta = direction === 'next' ? 1 : -1;
-      const target = needsReviewRows[activeReviewIndex + delta];
+      const target = activeReviewGroups[activeReviewIndex + delta];
       if (target) {
-        openReviewDrawer(target);
+        openReviewDrawer(target.displayRow);
       }
     },
-    [activeReviewIndex, canReviewNext, canReviewPrev, needsReviewRows, reviewRow],
+    [activeReviewGroups, activeReviewIndex, canReviewNext, canReviewPrev, reviewRow],
   );
 
   useEffect(() => {
@@ -2194,6 +2259,7 @@ export default function ParsePage() {
     setProcessingReportOpen(false);
     setProcessingReportFilter('all');
     setExpandedDuplicateGroups(new Set());
+    setExpandedGroupedRows(new Set());
     setReviewRow(null);
     setReviewAddress('');
     setReviewError(null);
@@ -2228,10 +2294,17 @@ export default function ParsePage() {
     setReviewSaving(true);
     setReviewError(null);
     try {
-      const response = await retryJobRow(jobId, reviewRow.source_row_id, trimmedAddress, forceRefresh);
+      const memberRows = getGroupMemberRows(reviewRow);
+      const updates: RowResult[] = [];
+      let updatedJob: Record<string, unknown> | undefined;
+      for (const memberRow of memberRows) {
+        const response = await retryJobRow(jobId, memberRow.source_row_id, trimmedAddress, forceRefresh);
+        updates.push(...(response.updated_row_results ?? response.updated_rows ?? []));
+        if (response.updated_job) updatedJob = response.updated_job as Record<string, unknown>;
+      }
       handleRetryUpdates({
-        updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
-        updatedJob: response.updated_job as Record<string, unknown> | undefined,
+        updatedRows: updates,
+        updatedJob,
       });
       setReviewDrafts((prev) => {
         const next = { ...prev };
@@ -2265,21 +2338,28 @@ export default function ParsePage() {
       return;
     }
 
+    const memberRows = getGroupMemberRows(row);
     setApprovingRowIds((prev) => {
       const next = new Set(prev);
-      next.add(row.source_row_id);
+      memberRows.forEach((memberRow) => next.add(memberRow.source_row_id));
       return next;
     });
 
     try {
-      const response = await approveMatchedJobRow(jobId, {
-        rowId: row.source_row_id,
-        applyToSameNormalizedInput: applyApproveToDuplicates,
-        allowScopeOverride,
-      });
+      const updates: RowResult[] = [];
+      let updatedJob: Record<string, unknown> | undefined;
+      for (const memberRow of memberRows) {
+        const response = await approveMatchedJobRow(jobId, {
+          rowId: memberRow.source_row_id,
+          applyToSameNormalizedInput: applyApproveToDuplicates,
+          allowScopeOverride,
+        });
+        updates.push(...(response.updated_row_results ?? response.updated_rows ?? []));
+        if (response.updated_job) updatedJob = response.updated_job as Record<string, unknown>;
+      }
       handleRetryUpdates({
-        updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
-        updatedJob: response.updated_job as Record<string, unknown> | undefined,
+        updatedRows: updates,
+        updatedJob,
       });
       showToast({ title: 'Matched address approved', variant: 'success' });
       if (reviewRow?.source_row_id === row.source_row_id) {
@@ -2291,7 +2371,7 @@ export default function ParsePage() {
     } finally {
       setApprovingRowIds((prev) => {
         const next = new Set(prev);
-        next.delete(row.source_row_id);
+        memberRows.forEach((memberRow) => next.delete(memberRow.source_row_id));
         return next;
       });
     }
@@ -2557,6 +2637,8 @@ export default function ParsePage() {
     (reviewRow as Record<string, unknown> | null)?.mismatch_field || '';
   const reviewNeedsReview = reviewRow ? isNeedsReviewRow(reviewRow) : false;
   const reviewOutOfScope = reviewRow ? isOutOfScopeRow(reviewRow) : false;
+  const reviewScopePass = !reviewOutOfScope;
+  const reviewGroupCount = activeReviewGroup?.count ?? 1;
   const canEditReview = reviewNeedsReview;
 
   const handleCopyRowJson = async (payload: unknown) => {
@@ -3294,7 +3376,7 @@ export default function ParsePage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {needsReviewRows.length === 0 ? (
+                          {needsReviewGroups.length === 0 ? (
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
@@ -3304,80 +3386,63 @@ export default function ParsePage() {
                               </td>
                             </tr>
                           ) : (
-                            paginatedNeedsReviewRows.map((row) => (
-                              <tr
-                                key={row.source_row_id}
-                                className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
-                                onClick={() => openReviewDrawer(row)}
-                              >
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getRowDisplayId(row)}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getInputAddress(row) || '--'}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span>{getMatchedAddress(row) || '--'}</span>
-                                    {getPrecisionTags(row).map((type) => (
-                                      <span
-                                        key={`${row.source_row_id}-${type}`}
-                                        className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                                      >
-                                        {type.replace(/_/g, ' ')}
-                                      </span>
-                                    ))}
-                                  </div>
-                                </td>
-                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                  {getStatusLabel(row)}
-                                </td>
-                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                  {renderReasonCell(row)}
-                                </td>
-                                {showDebugMode ? (
-                                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                                    {stringifyPreview(row.raw_row)}
-                                  </td>
-                                ) : null}
-                                <td className="px-4 py-3 text-right">
-                                  <div
-                                    className="flex flex-wrap justify-end gap-2"
-                                    onClick={(event) => event.stopPropagation()}
-                                    role="presentation"
+                            paginatedNeedsReviewGroups.map((group) => {
+                              const row = group.displayRow;
+                              const expanded = expandedGroupedRows.has(group.groupKey);
+                              return (
+                                <Fragment key={group.groupKey}>
+                                  <tr
+                                    key={group.groupKey}
+                                    className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
+                                    onClick={() => openReviewDrawer(row)}
                                   >
-                                    <button
-                                      type="button"
-                                      onClick={() => openReviewDrawer(row)}
-                                    >
-                                      Review
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleApproveMatched(row)}
-                                      disabled={approvingRowIds.has(row.source_row_id)}
-                                    >
-                                      {approvingRowIds.has(row.source_row_id) ? 'Approving…' : 'Approve matched'}
-                                    </button>
-                                    {showDebugMode ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => void handleCopyRowJson(row)}
-                                       
-                                      >
-                                        Copy Row JSON
-                                      </button>
-                                    ) : null}
-                                  </div>
-                                </td>
-                              </tr>
-                            ))
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getRowDisplayId(row)}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row) || '--'}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                                      <div className="flex flex-wrap items-center gap-2">
+                                        <span>{getMatchedAddress(row) || '--'}</span>
+                                        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200">×{group.count}</span>
+                                      </div>
+                                    </td>
+                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
+                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{renderReasonCell(row)}</td>
+                                    {showDebugMode ? <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{stringifyPreview(row.raw_row)}</td> : null}
+                                    <td className="px-4 py-3 text-right">
+                                      <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
+                                        {group.count > 1 ? <button type="button" onClick={() => toggleGroupedRows(group.groupKey)}>{expanded ? 'Hide rows' : 'Show rows'}</button> : null}
+                                        <button type="button" onClick={() => openReviewDrawer(row)}>Review</button>
+                                        <button type="button" onClick={() => void handleApproveMatched(row)} disabled={approvingRowIds.has(row.source_row_id)}>
+                                          {approvingRowIds.has(row.source_row_id) ? 'Approving…' : 'Approve matched'}
+                                        </button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  {expanded
+                                    ? group.memberRowIds.map((memberId) => {
+                                        const memberRow = rowResultsById.get(memberId);
+                                        if (!memberRow || memberRow.source_row_id === row.source_row_id) return null;
+                                        return (
+                                          <tr key={`${group.groupKey}-${memberId}`} className="bg-slate-50/70 dark:bg-slate-900/40">
+                                            <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">↳ {getRowDisplayId(memberRow)}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300">{getInputAddress(memberRow) || '--'}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300">{getMatchedAddress(memberRow) || '--'}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">{getStatusLabel(memberRow)}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">{getReasonMetadata(memberRow).label}</td>
+                                            {showDebugMode ? <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">{stringifyPreview(memberRow.raw_row)}</td> : null}
+                                            <td className="px-4 py-2" />
+                                          </tr>
+                                        );
+                                      })
+                                    : null}
+                                </Fragment>
+                              );
+                            })
                           )}
                         </tbody>
                       </table>
                     </div>
                     <TablePagination
-                      totalCount={needsReviewRows.length}
+                      totalCount={needsReviewGroups.length}
                       page={resultsPage}
                       pageSize={resultsPageSize}
                       onPageChange={setResultsPage}
@@ -3553,7 +3618,7 @@ export default function ParsePage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {outOfScopeRows.length === 0 ? (
+                          {outOfScopeGroups.length === 0 ? (
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
@@ -3563,89 +3628,58 @@ export default function ParsePage() {
                               </td>
                             </tr>
                           ) : (
-                            paginatedOutOfScopeRows.map((row) => (
-                              <tr
-                                key={row.source_row_id}
-                                className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900"
-                                onClick={() => openReviewDrawer(row)}
-                              >
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getRowDisplayId(row)}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getInputAddress(row) || '--'}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words">
-                                  {getMatchedAddress(row) || '—'}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getMatchedCounty(row) || '—'}
-                                </td>
-                                <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                                  {getMatchedCity(row) || '—'}
-                                </td>
-                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                  {getStatusLabel(row)}
-                                </td>
-                                <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                  {renderReasonCell(row)}
-                                </td>
-                                {showDebugMode ? (
-                                  <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                                    {stringifyPreview(row.raw_row)}
-                                  </td>
-                                ) : null}
-                                <td className="px-4 py-3 text-right">
-                                  <div
-                                    className="flex flex-wrap justify-end gap-2"
-                                    onClick={(event) => event.stopPropagation()}
-                                    role="presentation"
-                                  >
-                                    <button
-                                      type="button"
-                                      onClick={() => openReviewDrawer(row)}
-                                    >
-                                      Review
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => void handleApproveMatched(row)}
-                                      disabled={approvingRowIds.has(row.source_row_id)}
-                                    >
-                                      {approvingRowIds.has(row.source_row_id) ? 'Approving…' : 'Approve matched'}
-                                    </button>
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const confirmed = window.confirm(
-                                          'This row is out of scope. Approve anyway and override scope filters?',
+                            paginatedOutOfScopeGroups.map((group) => {
+                              const row = group.displayRow;
+                              const expanded = expandedGroupedRows.has(group.groupKey);
+                              return (
+                                <Fragment key={group.groupKey}>
+                                  <tr className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => openReviewDrawer(row)}>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getRowDisplayId(row)}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row) || '--'}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words">
+                                      <div className="flex items-center gap-2"><span>{getMatchedAddress(row) || '—'}</span><span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200">×{group.count}</span></div>
+                                    </td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row) || '—'}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCity(row) || '—'}</td>
+                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
+                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{renderReasonCell(row)}</td>
+                                    {showDebugMode ? <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{stringifyPreview(row.raw_row)}</td> : null}
+                                    <td className="px-4 py-3 text-right">
+                                      <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
+                                        {group.count > 1 ? <button type="button" onClick={() => toggleGroupedRows(group.groupKey)}>{expanded ? 'Hide rows' : 'Show rows'}</button> : null}
+                                        <button type="button" onClick={() => openReviewDrawer(row)}>Review</button>
+                                        <button type="button" onClick={() => void handleApproveMatched(row)} disabled={approvingRowIds.has(row.source_row_id)}>{approvingRowIds.has(row.source_row_id) ? 'Approving…' : 'Approve matched'}</button>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                  {expanded
+                                    ? group.memberRowIds.map((memberId) => {
+                                        const memberRow = rowResultsById.get(memberId);
+                                        if (!memberRow || memberRow.source_row_id === row.source_row_id) return null;
+                                        return (
+                                          <tr key={`${group.groupKey}-${memberId}`} className="bg-slate-50/70 dark:bg-slate-900/40">
+                                            <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">↳ {getRowDisplayId(memberRow)}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300">{getInputAddress(memberRow) || '--'}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-600 dark:text-slate-300">{getMatchedAddress(memberRow) || '--'}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">{getMatchedCounty(memberRow) || '—'}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">{getMatchedCity(memberRow) || '—'}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">{getStatusLabel(memberRow)}</td>
+                                            <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">{getReasonMetadata(memberRow).label}</td>
+                                            {showDebugMode ? <td className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">{stringifyPreview(memberRow.raw_row)}</td> : null}
+                                            <td className="px-4 py-2" />
+                                          </tr>
                                         );
-                                        if (!confirmed) return;
-                                        void handleApproveMatched(row, true);
-                                      }}
-                                      disabled={approvingRowIds.has(row.source_row_id)}
-                                    >
-                                      Approve anyway (override scope)
-                                    </button>
-                                    {showDebugMode ? (
-                                      <button
-                                        type="button"
-                                        onClick={() => void handleCopyRowJson(row)}
-                                       
-                                      >
-                                        Copy Row JSON
-                                      </button>
-                                    ) : null}
-                                  </div>
-                                </td>
-                              </tr>
-                            ))
+                                      })
+                                    : null}
+                                </Fragment>
+                              );
+                            })
                           )}
                         </tbody>
                       </table>
                     </div>
                     <TablePagination
-                      totalCount={outOfScopeRows.length}
+                      totalCount={outOfScopeGroups.length}
                       page={resultsPage}
                       pageSize={resultsPageSize}
                       onPageChange={setResultsPage}
@@ -3765,7 +3799,7 @@ export default function ParsePage() {
             </div>
             <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Needs Review {activeReviewIndex >= 0 ? `${activeReviewIndex + 1} of ${needsReviewRows.length}` : 'row'}
+                Group {activeReviewIndex >= 0 ? `${activeReviewIndex + 1} of ${activeReviewGroups.length}` : 'row'}
               </p>
               <div className="flex items-center gap-2">
                 <button
@@ -3795,6 +3829,12 @@ export default function ParsePage() {
                     <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
                       {reviewStatusLabel}
                     </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
+                      Group Size
+                    </p>
+                    <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">×{reviewGroupCount}</p>
                   </div>
                   <div className="text-right">
                     <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
@@ -3858,6 +3898,10 @@ export default function ParsePage() {
                     Copy
                   </button>
                 </div>
+                <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+                  <p className="mb-2 text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">Address diff</p>
+                  {renderTokenDiff(reviewDetectedAddress || '', reviewVerifiedAddress || '')}
+                </div>
               </div>
 
               <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
@@ -3879,7 +3923,7 @@ export default function ParsePage() {
 
 
               <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
-                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Location check</p>
+                <div className="flex items-center justify-between gap-3"><p className="text-xs uppercase text-slate-500 dark:text-slate-400">Location check</p><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${reviewScopePass ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200' : 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200'}`}>{reviewScopePass ? 'In scope' : 'Out of scope'}</span></div>
                 <div className="mt-2 space-y-2 text-sm">
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-slate-500 dark:text-slate-400">Selected</span>
@@ -3964,16 +4008,11 @@ export default function ParsePage() {
                   >
                     Close
                   </button>
+                  <button type="button" onClick={() => navigateReviewRow('next')} disabled={!canReviewNext} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Skip & Next</button>
                   {reviewNeedsReview ? (
-                    <button
-                      type="button"
-                      onClick={handleReviewRetry}
-                      disabled={!canEditReview || reviewSaving}
-                      className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300"
-                    >
-                      {reviewSaving ? 'Retrying...' : 'Edit & Retry'}
-                    </button>
+                    <button type="button" onClick={async () => { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; await handleReviewRetry(); if (nextGroup) openReviewDrawer(nextGroup.displayRow); }} disabled={!canEditReview || reviewSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300">{reviewSaving ? 'Retrying...' : 'Retry & Next'}</button>
                   ) : null}
+                  <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; await handleApproveMatched(reviewRow, reviewOutOfScope); if (nextGroup) openReviewDrawer(nextGroup.displayRow); } }} disabled={!reviewRow || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
                 </div>
               </div>
             </div>
