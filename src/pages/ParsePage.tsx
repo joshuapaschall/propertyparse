@@ -38,6 +38,7 @@ import {
   JobRecord,
   parseFile,
   parseFileAsync,
+  approveMatchedJobRow,
   retryJobRow,
   retryParseBatch,
   retryParseRow,
@@ -659,6 +660,8 @@ export default function ParsePage() {
   const [reviewDrafts, setReviewDrafts] = useState<Record<string, string>>({});
   const [reviewError, setReviewError] = useState<string | null>(null);
   const [reviewSaving, setReviewSaving] = useState(false);
+  const [approvingRowIds, setApprovingRowIds] = useState<Set<string>>(new Set());
+  const [applyApproveToDuplicates, setApplyApproveToDuplicates] = useState(true);
   const [runningAiFixFlaggedRows, setRunningAiFixFlaggedRows] = useState(false);
   const [reviewAutoFocus, setReviewAutoFocus] = useState(false);
   const [activeDownloadType, setActiveDownloadType] = useState<JobExportType | null>(null);
@@ -2246,6 +2249,54 @@ export default function ParsePage() {
     }
   };
 
+
+  const handleApproveMatched = async (row: RowResult, allowScopeOverride = false) => {
+    if (!jobId) {
+      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+      return;
+    }
+    const matchedAddress = getMatchedAddress(row);
+    if (!matchedAddress) {
+      showToast({ title: 'Matched address missing', variant: 'error' });
+      return;
+    }
+    if (isOutOfScopeRow(row) && !allowScopeOverride) {
+      showToast({ title: 'Out-of-scope rows require explicit override', variant: 'error' });
+      return;
+    }
+
+    setApprovingRowIds((prev) => {
+      const next = new Set(prev);
+      next.add(row.source_row_id);
+      return next;
+    });
+
+    try {
+      const response = await approveMatchedJobRow(jobId, {
+        rowId: row.source_row_id,
+        applyToSameNormalizedInput: applyApproveToDuplicates,
+        allowScopeOverride,
+      });
+      handleRetryUpdates({
+        updatedRows: response.updated_row_results ?? response.updated_rows ?? [],
+        updatedJob: response.updated_job as Record<string, unknown> | undefined,
+      });
+      showToast({ title: 'Matched address approved', variant: 'success' });
+      if (reviewRow?.source_row_id === row.source_row_id) {
+        closeReviewDrawer();
+      }
+    } catch (err) {
+      const message = (err as Error).message ?? 'Approve matched failed.';
+      showToast({ title: message, variant: 'error' });
+    } finally {
+      setApprovingRowIds((prev) => {
+        const next = new Set(prev);
+        next.delete(row.source_row_id);
+        return next;
+      });
+    }
+  };
+
   const toggleDuplicateGroup = (canonicalId: string) => {
     setExpandedDuplicateGroups((prev) => {
       const next = new Set(prev);
@@ -3218,6 +3269,16 @@ export default function ParsePage() {
                   </div>
                 ) : null}
                 {activeTab === 'needs_review' ? (
+                  <>
+                    <label className="mb-3 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        checked={applyApproveToDuplicates}
+                        onChange={(event) => setApplyApproveToDuplicates(event.target.checked)}
+                      />
+                      Apply to all duplicates of this address
+                    </label>
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                     <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
@@ -3288,9 +3349,15 @@ export default function ParsePage() {
                                     <button
                                       type="button"
                                       onClick={() => openReviewDrawer(row)}
-                                     
                                     >
                                       Review
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleApproveMatched(row)}
+                                      disabled={approvingRowIds.has(row.source_row_id)}
+                                    >
+                                      {approvingRowIds.has(row.source_row_id) ? 'Approving…' : 'Approve matched'}
                                     </button>
                                     {showDebugMode ? (
                                       <button
@@ -3317,6 +3384,7 @@ export default function ParsePage() {
                       onPageSizeChange={setResultsPageSize}
                     />
                   </div>
+                  </>
                 ) : null}
                 {activeTab === 'skipped' ? (
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
@@ -3379,7 +3447,6 @@ export default function ParsePage() {
                                     <button
                                       type="button"
                                       onClick={() => openReviewDrawer(row)}
-                                     
                                     >
                                       Review
                                     </button>
@@ -3459,6 +3526,16 @@ export default function ParsePage() {
                   </div>
                 ) : null}
                 {activeTab === 'out_of_scope' ? (
+                  <>
+                    <label className="mb-3 flex items-center gap-2 text-sm text-slate-600 dark:text-slate-300">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                        checked={applyApproveToDuplicates}
+                        onChange={(event) => setApplyApproveToDuplicates(event.target.checked)}
+                      />
+                      Apply to all duplicates of this address
+                    </label>
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                     <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
@@ -3527,9 +3604,28 @@ export default function ParsePage() {
                                     <button
                                       type="button"
                                       onClick={() => openReviewDrawer(row)}
-                                     
                                     >
                                       Review
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => void handleApproveMatched(row)}
+                                      disabled={approvingRowIds.has(row.source_row_id)}
+                                    >
+                                      {approvingRowIds.has(row.source_row_id) ? 'Approving…' : 'Approve matched'}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        const confirmed = window.confirm(
+                                          'This row is out of scope. Approve anyway and override scope filters?',
+                                        );
+                                        if (!confirmed) return;
+                                        void handleApproveMatched(row, true);
+                                      }}
+                                      disabled={approvingRowIds.has(row.source_row_id)}
+                                    >
+                                      Approve anyway (override scope)
                                     </button>
                                     {showDebugMode ? (
                                       <button
@@ -3556,6 +3652,7 @@ export default function ParsePage() {
                       onPageSizeChange={setResultsPageSize}
                     />
                   </div>
+                  </>
                 ) : null}
               </>
             ) : busy ? null : (

@@ -360,6 +360,25 @@ export async function retryJobBatch(
   );
 }
 
+export async function approveMatchedJobRow(
+  jobId: string,
+  payload: {
+    rowId: string;
+    applyToSameNormalizedInput?: boolean;
+    allowScopeOverride?: boolean;
+  },
+) {
+  return postJson<{
+    updated_row_results?: RowResult[];
+    updated_rows?: RowResult[];
+    updated_job?: JobRecord;
+  }>(`/jobs/${jobId}/approve-matched`, {
+    row_id: payload.rowId,
+    apply_to_same_normalized_input: payload.applyToSameNormalizedInput ?? true,
+    allow_scope_override: payload.allowScopeOverride ?? false,
+  });
+}
+
 export type NeedsReviewAiFixResponse = {
   updated_row_results?: RowResult[];
   updated_rows?: RowResult[];
