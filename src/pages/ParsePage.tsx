@@ -2541,21 +2541,56 @@ export default function ParsePage() {
     try {
       const response = await approveMatchedJobRowsBatch(jobId, rowIds, false);
       const updates = response.updated_row_results ?? response.updated_rows ?? [];
+      const failedRows = response.failed_rows ?? [];
+      const metadata = response.metadata;
+      const approvedCount = metadata?.approved_count ?? updates.length;
+      const failedCount = metadata?.failed_count ?? failedRows.length;
+      const requestedCount = metadata?.requested_count ?? rowIds.length;
       const updatedJob = response.updated_job as Record<string, unknown> | undefined;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob,
       });
       const duplicateCount = updates.filter((row) => normalizeStatus(row.status).includes('DUPLICATE')).length;
+
+      const failedRowSummary = failedRows
+        .slice(0, 3)
+        .map((failure) => {
+          const rowId = failure.row_id ?? 'unknown row';
+          const message = failure.error ?? 'Unable to approve';
+          return `${rowId}: ${message}`;
+        })
+        .join(' · ');
+
+      const summaryParts = [
+        `${approvedCount} approved`,
+        `${failedCount} failed`,
+        `${requestedCount} selected`,
+      ];
+
       showToast({
-        title: `Approved ${rowIds.length} rows`,
+        title: failedCount > 0 ? 'Bulk approve completed with partial success' : `Approved ${approvedCount} rows`,
         description:
-          duplicateCount > 0
-            ? 'Some were marked duplicate (see Duplicates tab)'
-            : undefined,
-        variant: duplicateCount > 0 ? 'info' : 'success',
+          [
+            summaryParts.join(' · '),
+            duplicateCount > 0 ? 'Some were marked duplicate (see Duplicates tab).' : null,
+            failedRowSummary ? `Failed rows: ${failedRowSummary}` : null,
+          ]
+            .filter(Boolean)
+            .join(' '),
+        variant: failedCount > 0 || duplicateCount > 0 ? 'info' : 'success',
       });
-      setSelectedNeedsReviewRowIds(new Set());
+
+      if (failedCount === 0) {
+        setSelectedNeedsReviewRowIds(new Set());
+      } else {
+        const failedIdSet = new Set(
+          failedRows
+            .map((failure) => failure.row_id)
+            .filter((rowId): rowId is string => Boolean(rowId)),
+        );
+        setSelectedNeedsReviewRowIds(failedIdSet);
+      }
     } catch (err) {
       showToast({
         title: (err as Error).message ?? 'Bulk approve failed.',
