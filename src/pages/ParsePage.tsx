@@ -31,6 +31,7 @@ import { canStartParse, hasValidLocation } from '../lib/parseValidation';
 import { groupRows, type GroupedRow } from '../lib/groupRows';
 import {
   downloadJobExport,
+  getApiErrorInfo,
   getJobDetail,
   getJobRows,
   getJobResults,
@@ -748,6 +749,7 @@ export default function ParsePage() {
   });
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const pollingRef = useRef<number | null>(null);
+  const busyRef = useRef(busy);
   const progressSamplesRef = useRef<{ timestamp: number; done: number }[]>([]);
   const reviewInputRef = useRef<HTMLInputElement | null>(null);
   const downloadSuccessTimerRef = useRef<number | null>(null);
@@ -782,6 +784,10 @@ export default function ParsePage() {
     },
     [countyValue, stateValue],
   );
+
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
 
   useEffect(() => {
     return () => {
@@ -826,11 +832,88 @@ export default function ParsePage() {
     );
   }, [location.pathname, location.search, navigate]);
 
+  const resetParseUi = useCallback(
+    (options?: { showMissingJobToast?: boolean }) => {
+      stopPolling();
+      clearLastJobState();
+      clearJobQueryParam();
+      setFile(null);
+      setFileId(null);
+      setJobId(null);
+      setParseTimestamp(null);
+      setRowsReceived(null);
+      setParseSummary(null);
+      setCanonicalAddresses([]);
+      setRowResults([]);
+      setDuplicateGroups([]);
+      setDebugInfo(null);
+      setLegacyMatchedRows([]);
+      setLegacyUnmatchedRows([]);
+      setMetadata(null);
+      setLegacyMode(false);
+      setActiveTab('valid');
+      setLegacyTab('matched');
+      setShowRaw(false);
+      setShowDebugMode(false);
+      setProgressStep(0);
+      setProgressPercent(null);
+      setProgressInfo({
+        phase: null,
+        done: null,
+        total: null,
+        detail: null,
+        cacheHits: null,
+        googleCallsUsed: null,
+        eta: null,
+      });
+      setError(null);
+      setPollError(null);
+      setPollErrorCount(0);
+      setParsePayload(null);
+      setProcessingReportOpen(false);
+      setProcessingReportFilter('all');
+      setExpandedDuplicateGroups(new Set());
+      setReviewRow(null);
+      setReviewAddress('');
+      setReviewError(null);
+      setReviewSaving(false);
+      setReviewAutoFocus(false);
+      setReviewDrafts({});
+      setEditingRow(null);
+      setRetryAvailable('unknown');
+      setRetryingRowIds(new Set());
+      setApprovingRowIds(new Set());
+      setSelectedNeedsReviewRowIds(new Set());
+      setRunningAiFixFlaggedRows(false);
+      if (downloadSuccessTimerRef.current !== null) {
+        window.clearTimeout(downloadSuccessTimerRef.current);
+        downloadSuccessTimerRef.current = null;
+      }
+      setActiveDownloadType(null);
+      setDownloadSuccessLabel(null);
+      setStateValue('');
+      setCountyValue('');
+      setCityValue('');
+      setCampaignName('');
+      setForceRefresh(false);
+      setBusy(false);
+      setRehydrating(false);
+      progressSamplesRef.current = [];
+      if (options?.showMissingJobToast) {
+        showToast({
+          title: 'Previous job not found — starting fresh',
+          variant: 'info',
+        });
+      }
+    },
+    [clearJobQueryParam, showToast],
+  );
+
   const loadJobResults = useCallback(
     async (
       jobIdToLoad: string,
       storedState: PersistedLastJobState | null,
-      options?: { fresh?: boolean },
+      options?: { fresh?: boolean; syncUrlOnSuccess?: boolean },
     ) => {
       setRehydrating(true);
       setError(null);
@@ -917,13 +1000,21 @@ export default function ParsePage() {
           googleCallsUsed: googleCallsValue,
           eta: null,
         });
+        if (options?.syncUrlOnSuccess) {
+          updateJobQueryParam(jobIdToLoad);
+        }
       } catch (err) {
+        const errorInfo = getApiErrorInfo(err);
+        if (errorInfo?.status === 404) {
+          resetParseUi({ showMissingJobToast: true });
+          return;
+        }
         setError((err as Error).message ?? 'Unable to load job results.');
       } finally {
         setRehydrating(false);
       }
     },
-    [],
+    [resetParseUi, updateJobQueryParam],
   );
 
   useEffect(() => {
@@ -938,11 +1029,10 @@ export default function ParsePage() {
     const resolvedJobId = jobParam ?? stored?.jobId ?? null;
     if (!resolvedJobId || busy || rehydrating) return;
     if (jobId === resolvedJobId && parseSummary) return;
-    if (!jobParam && stored?.jobId) {
-      updateJobQueryParam(stored.jobId);
-    }
-    void loadJobResults(resolvedJobId, stored ?? null);
-  }, [busy, jobId, loadJobResults, location.search, parseSummary, rehydrating, updateJobQueryParam]);
+    void loadJobResults(resolvedJobId, stored ?? null, {
+      syncUrlOnSuccess: !jobParam && Boolean(stored?.jobId),
+    });
+  }, [busy, jobId, loadJobResults, location.search, parseSummary, rehydrating]);
 
   const apiCallsUsed = useMemo(() => {
     if (!metadata) return null;
@@ -1858,6 +1948,11 @@ export default function ParsePage() {
           }
         }
       } catch (err) {
+        const errorInfo = getApiErrorInfo(err);
+        if (errorInfo?.status === 404 && !busyRef.current) {
+          resetParseUi({ showMissingJobToast: true });
+          return;
+        }
         const message = (err as Error).message ?? 'Polling failed.';
         setPollErrorCount((prev) => prev + 1);
         setPollError(message);
@@ -2332,63 +2427,7 @@ export default function ParsePage() {
   };
 
   const handleClearResults = () => {
-    stopPolling();
-    clearLastJobState();
-    clearJobQueryParam();
-    setFile(null);
-    setFileId(null);
-    setJobId(null);
-    setParseTimestamp(null);
-    setRowsReceived(null);
-    setParseSummary(null);
-    setCanonicalAddresses([]);
-    setRowResults([]);
-    setDuplicateGroups([]);
-    setDebugInfo(null);
-    setLegacyMatchedRows([]);
-    setLegacyUnmatchedRows([]);
-    setMetadata(null);
-    setLegacyMode(false);
-    setActiveTab('valid');
-    setLegacyTab('matched');
-    setShowRaw(false);
-    setShowDebugMode(false);
-    setProgressStep(0);
-    setProgressPercent(null);
-    setProgressInfo({
-      phase: null,
-      done: null,
-      total: null,
-      detail: null,
-      cacheHits: null,
-      googleCallsUsed: null,
-      eta: null,
-    });
-    setError(null);
-    setPollError(null);
-    setPollErrorCount(0);
-    setParsePayload(null);
-    setProcessingReportOpen(false);
-    setProcessingReportFilter('all');
-    setExpandedDuplicateGroups(new Set());
-    setReviewRow(null);
-    setReviewAddress('');
-    setReviewError(null);
-    setReviewSaving(false);
-    setReviewAutoFocus(false);
-    setReviewDrafts({});
-    if (downloadSuccessTimerRef.current !== null) {
-      window.clearTimeout(downloadSuccessTimerRef.current);
-      downloadSuccessTimerRef.current = null;
-    }
-    setActiveDownloadType(null);
-    setDownloadSuccessLabel(null);
-    setStateValue('');
-    setCountyValue('');
-    setCityValue('');
-    setCampaignName('');
-    setForceRefresh(false);
-    setBusy(false);
+    resetParseUi();
   };
 
   const handleReviewRetry = async () => {
