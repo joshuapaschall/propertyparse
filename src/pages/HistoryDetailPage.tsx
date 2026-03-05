@@ -1,43 +1,35 @@
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
-import { downloadJobExport, getJobDetail, getJobRows, JobExportType, JobRecord } from '../lib/api';
+import TablePagination from '../components/TablePagination';
+import { downloadJobExport, getJobDetail, getJobResults, JobExportType, JobRecord } from '../lib/api';
+import { groupRows, GroupedRow } from '../lib/groupRows';
+import {
+  getReasonMetadata,
+  isNeedsReviewRow,
+  isOutOfScopeRow,
+  isSkippedRow,
+  stringifyPreview,
+} from '../lib/parseUtils';
 import { useToast } from '../components/ui/ToastProvider';
+import type { CanonicalAddress, ParseSummary, RowResult } from '../types/parse';
 
-type ParsedPreviewRow = {
-  id: string;
-  rowIndex: number | null;
-  addressRaw: string;
-  matchedAddress: string;
-  status: string;
-  source: string;
-};
+const EXPORT_OPTIONS: Array<{ label: string; type: JobExportType }> = [
+  { label: 'Original File Uploaded', type: 'original_file' },
+  { label: 'Processing Report', type: 'processing_report' },
+  { label: 'Unique Valid', type: 'unique_valid' },
+  { label: 'Needs Review', type: 'needs_review' },
+  { label: 'Out of Scope', type: 'out_of_scope' },
+  { label: 'Duplicates', type: 'duplicates' },
+  { label: 'Skipped', type: 'skipped' },
+];
 
-type PreviewTab = 'valid_unique' | 'needs_review' | 'out_of_scope' | 'skipped' | 'duplicates';
+type ResultsTab = 'valid' | 'needs_review' | 'out_of_scope' | 'skipped' | 'duplicates';
 
-type TabMeta = {
-  label: string;
-  statusAliases: string[];
-  countFromSummary: (summary: JobSummary | null) => number | null;
-};
-
-type JobSummary = {
+type JobSummaryMeta = {
   filename: string | null;
   createdAt: string | null;
-  rowsReceived: number | null;
-  matched: number | null;
-  unmatched: number | null;
-  deduped: number | null;
-  valid: number | null;
-  validUnique: number | null;
-  needsReview: number | null;
-  skipped: number | null;
-  outOfScope: number | null;
-  cacheHits: number | null;
-  googleCallsUsed: number | null;
 };
-
-const PREVIEW_LIMIT = 50;
 
 const pickValue = (job: JobRecord, keys: string[]) => {
   for (const key of keys) {
@@ -54,16 +46,6 @@ const pickString = (job: JobRecord, keys: string[]) => {
   return typeof value === 'string' ? value : value != null ? String(value) : null;
 };
 
-const pickNumber = (job: JobRecord, keys: string[]) => {
-  const value = pickValue(job, keys);
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    return Number.isNaN(parsed) ? null : parsed;
-  }
-  return null;
-};
-
 const formatDateTime = (value: string | null) => {
   if (!value) return '--';
   const date = new Date(value);
@@ -71,53 +53,10 @@ const formatDateTime = (value: string | null) => {
   return date.toLocaleString();
 };
 
-const createId = (row: Record<string, unknown>, index: number, rowIndex: number | null) =>
-  (row.id as string) || (row.uuid as string) || `${rowIndex ?? index}`;
-
-const stringifyValue = (value: unknown) => {
-  if (typeof value === 'string') return value;
-  if (typeof value === 'number') return value.toString();
-  if (value === null || value === undefined) return '';
-  return JSON.stringify(value);
+const formatCurrency = (value?: number) => {
+  if (typeof value !== 'number' || Number.isNaN(value)) return '--';
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(value);
 };
-
-const normalizeRow = (row: Record<string, unknown>, index: number): ParsedPreviewRow => {
-  const rowIndexValue = row.row_index ?? row.rowIndex ?? row.index ?? null;
-  const parsedRowIndex =
-    typeof rowIndexValue === 'number'
-      ? rowIndexValue
-      : typeof rowIndexValue === 'string'
-        ? Number(rowIndexValue)
-        : null;
-  const rowIndex = parsedRowIndex !== null && Number.isNaN(parsedRowIndex) ? null : parsedRowIndex;
-  const addressRaw =
-    (row.address_raw as string) || (row.addressRaw as string) || (row.address as string) || '';
-  const matchedAddress =
-    (row.matched_address as string) ||
-    (row.matchedAddress as string) ||
-    (row.address_matched as string) ||
-    '';
-  const status =
-    (row.status as string) || (row.match_status as string) || (row.matchStatus as string) || '';
-  const source =
-    (row.source as string) ||
-    (row.source_raw as string) ||
-    (row.raw as string) ||
-    (row.address_raw as string) ||
-    stringifyValue(row);
-
-  return {
-    id: createId(row, index, rowIndex),
-    rowIndex,
-    addressRaw,
-    matchedAddress,
-    status,
-    source,
-  };
-};
-
-const normalizeRows = (items: unknown[]) =>
-  items.map((item, index) => normalizeRow(item as Record<string, unknown>, index));
 
 const triggerDownload = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
@@ -128,96 +67,47 @@ const triggerDownload = (blob: Blob, filename: string) => {
   URL.revokeObjectURL(url);
 };
 
-async function getJobRowsForStatuses(jobId: string, statuses: string[]) {
-  for (const status of statuses) {
-    try {
-      const rows = await getJobRows(jobId, status, PREVIEW_LIMIT, 0);
-      return rows;
-    } catch {
-      // Try the next alias.
-    }
-  }
-  return [];
-}
-
-const PREVIEW_TAB_META: Record<PreviewTab, TabMeta> = {
-  valid_unique: {
-    label: 'Valid Unique',
-    statusAliases: ['valid_unique', 'unique_valid'],
-    countFromSummary: (summary) => summary?.validUnique ?? null,
-  },
-  needs_review: {
-    label: 'Needs Review',
-    statusAliases: ['needs_review'],
-    countFromSummary: (summary) => summary?.needsReview ?? null,
-  },
-  out_of_scope: {
-    label: 'Out of Scope',
-    statusAliases: ['out_of_scope'],
-    countFromSummary: (summary) => summary?.outOfScope ?? null,
-  },
-  skipped: {
-    label: 'Skipped',
-    statusAliases: ['skipped'],
-    countFromSummary: (summary) => summary?.skipped ?? null,
-  },
-  duplicates: {
-    label: 'Duplicates',
-    statusAliases: ['duplicates', 'deduped'],
-    countFromSummary: (summary) => summary?.deduped ?? null,
-  },
+const normalizeCanonicalAddress = (row: CanonicalAddress) => {
+  const components = (row.components ?? {}) as Record<string, unknown>;
+  return {
+    ...row,
+    fullAddress: (row as { full_address?: string }).full_address || row.formatted_address || '',
+    street1: row.street1 || (components.street_address as string) || (components.street1 as string) || '',
+    street2: row.street2 || (components.address2 as string) || (components.street2 as string) || '',
+    city: row.city || (components.city as string) || '',
+    state: row.state || (components.state as string) || '',
+    zip: row.zip || (components.zip as string) || (components.zip_code as string) || '',
+  };
 };
+
+const rowDisplayId = (row: RowResult) => row.source_row_id || row.source_row_index || '--';
+const getInputAddress = (row: RowResult) => row.address_raw || row.detected_address || '--';
+const getMatchedAddress = (row: RowResult) => row.matched_address || row.formatted_address || '—';
+const getMatchedCounty = (row: RowResult) => {
+  const components = (row.components ?? {}) as Record<string, unknown>;
+  return (components.county as string) || (components.matched_county as string) || '—';
+};
+const getMatchedCity = (row: RowResult) => {
+  const components = (row.components ?? {}) as Record<string, unknown>;
+  return row.formatted_address?.split(',')?.[1]?.trim() || row.detected_address?.split(',')?.[1]?.trim() || (components.city as string) || '—';
+};
+const getStatusLabel = (row: RowResult) => row.status || '--';
 
 export default function HistoryDetailPage() {
   const { showToast } = useToast();
   const { jobId } = useParams();
-  const [job, setJob] = useState<JobRecord | null>(null);
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<PreviewTab>('valid_unique');
-  const [showRaw, setShowRaw] = useState(false);
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
-  const [previewRows, setPreviewRows] = useState<Record<PreviewTab, ParsedPreviewRow[]>>({
-    valid_unique: [],
-    needs_review: [],
-    out_of_scope: [],
-    skipped: [],
-    duplicates: [],
-  });
+  const [activeTab, setActiveTab] = useState<ResultsTab>('valid');
+  const [showRaw, setShowRaw] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
+  const [resultsPage, setResultsPage] = useState(1);
+  const [resultsPageSize, setResultsPageSize] = useState(10);
 
-  const jobSummary = useMemo<JobSummary | null>(() => {
-    if (!job) return null;
-    const needsReview = pickNumber(job, ['needs_review', 'needsReview', 'needs_review_count']);
-    const skipped = pickNumber(job, ['skipped', 'skipped_count']);
-    const outOfScope = pickNumber(job, ['out_of_scope', 'outOfScope', 'out_of_scope_count']);
-
-    return {
-      filename: pickString(job, [
-        'display_name',
-        'displayName',
-        'filename',
-        'file_name',
-        'fileName',
-        'original_filename',
-        'originalFilename',
-        'file',
-      ]),
-      createdAt: pickString(job, ['created_at', 'createdAt', 'created', 'timestamp', 'date']),
-      rowsReceived: pickNumber(job, ['rowsReceived', 'rows_received', 'total_rows', 'rows', 'rowCount']),
-      matched: pickNumber(job, ['matched', 'matched_count', 'matchedCount']),
-      unmatched:
-        pickNumber(job, ['unmatched', 'unmatched_count', 'unmatchedCount']) ??
-        (needsReview ?? 0) + (skipped ?? 0) + (outOfScope ?? 0),
-      deduped: pickNumber(job, ['deduped', 'deduped_count', 'dedupedCount', 'duplicate_count', 'duplicates']),
-      valid: pickNumber(job, ['valid_total', 'valid', 'valid_count', 'validCount']),
-      validUnique: pickNumber(job, ['valid_unique', 'validUnique']),
-      needsReview,
-      skipped,
-      outOfScope,
-      cacheHits: pickNumber(job, ['cacheHits', 'cache_hits', 'cache_hit_count']),
-      googleCallsUsed: pickNumber(job, ['googleCallsUsed', 'google_calls_used', 'googleCalls', 'apiCallsUsed']),
-    };
-  }, [job]);
+  const [jobMeta, setJobMeta] = useState<JobSummaryMeta | null>(null);
+  const [results, setResults] = useState<Awaited<ReturnType<typeof getJobResults>> | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
@@ -227,30 +117,14 @@ export default function HistoryDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const jobResponse = await getJobDetail(jobId);
-        const combinedJob = {
-          ...(jobResponse.summary ?? {}),
-          ...(jobResponse.job ?? {}),
-        };
-
-        const previewEntries = await Promise.all(
-          (Object.entries(PREVIEW_TAB_META) as Array<[PreviewTab, TabMeta]>).map(async ([tab, meta]) => {
-            const rows = await getJobRowsForStatuses(jobId, meta.statusAliases);
-            return [tab, normalizeRows(rows ?? [])] as const;
-          }),
-        );
-
+        const [jobDetail, jobResults] = await Promise.all([getJobDetail(jobId), getJobResults(jobId)]);
         if (!active) return;
-
-        setJob(Object.keys(combinedJob).length ? combinedJob : null);
-        setPreviewRows({
-          valid_unique: [],
-          needs_review: [],
-          out_of_scope: [],
-          skipped: [],
-          duplicates: [],
-          ...Object.fromEntries(previewEntries),
+        const mergedJob = { ...(jobDetail.summary ?? {}), ...(jobDetail.job ?? {}) } as JobRecord;
+        setJobMeta({
+          filename: pickString(mergedJob, ['display_name', 'displayName', 'campaign_name', 'file_name', 'original_filename']),
+          createdAt: pickString(mergedJob, ['created_at', 'createdAt', 'created', 'timestamp']),
         });
+        setResults(jobResults);
       } catch (err) {
         if (!active) return;
         const message = (err as Error).message ?? 'Unable to load job details.';
@@ -266,6 +140,45 @@ export default function HistoryDetailPage() {
       active = false;
     };
   }, [jobId, showToast]);
+
+  useEffect(() => {
+    setResultsPage(1);
+  }, [activeTab, resultsPageSize]);
+
+  const parseSummary = (results?.summary ?? null) as ParseSummary | null;
+  const rowResults = useMemo(() => results?.row_results ?? [], [results]);
+  const canonicalAddresses = useMemo(
+    () => (results?.canonical_addresses ?? []).map(normalizeCanonicalAddress),
+    [results],
+  );
+
+  const needsReviewRows = useMemo(() => rowResults.filter(isNeedsReviewRow), [rowResults]);
+  const outOfScopeRows = useMemo(() => rowResults.filter(isOutOfScopeRow), [rowResults]);
+  const skippedRows = useMemo(() => rowResults.filter(isSkippedRow), [rowResults]);
+  const duplicateRows = useMemo(() => rowResults.filter((row) => row.is_duplicate || row.status === 'DUPLICATE'), [rowResults]);
+
+  const needsReviewGroups = useMemo(() => groupRows(needsReviewRows), [needsReviewRows]);
+  const outOfScopeGroups = useMemo(() => groupRows(outOfScopeRows), [outOfScopeRows]);
+  const skippedGroups = useMemo(() => groupRows(skippedRows), [skippedRows]);
+  const duplicateGroups = useMemo(() => groupRows(duplicateRows), [duplicateRows]);
+
+  const tabCounts: Record<ResultsTab, number> = {
+    valid: parseSummary?.valid_unique ?? 0,
+    needs_review: parseSummary?.unmatched ?? 0,
+    out_of_scope: parseSummary?.out_of_scope ?? 0,
+    skipped: parseSummary?.skipped ?? 0,
+    duplicates: parseSummary?.duplicates ?? 0,
+  };
+
+  const totalCountByTab: Record<ResultsTab, number> = {
+    valid: canonicalAddresses.length,
+    needs_review: needsReviewGroups.length,
+    out_of_scope: outOfScopeGroups.length,
+    skipped: skippedGroups.length,
+    duplicates: duplicateGroups.length,
+  };
+
+  const paginate = <T,>(rows: T[]) => rows.slice((resultsPage - 1) * resultsPageSize, resultsPage * resultsPageSize);
 
   const handleDownload = async (type: JobExportType) => {
     if (!jobId) return;
@@ -284,222 +197,190 @@ export default function HistoryDetailPage() {
     }
   };
 
-  const activePreviewRows = previewRows[activeTab] ?? [];
+  const renderGroupedRows = (groups: GroupedRow[]) => {
+    const pageGroups = paginate(groups);
+    return (
+      <>
+        {pageGroups.length === 0 ? (
+          <div className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">No rows in this bucket.</div>
+        ) : (
+          pageGroups.map((group) => {
+            const row = group.displayRow;
+            const expanded = expandedGroups[group.groupKey] ?? false;
+            return (
+              <Fragment key={group.groupKey}>
+                <tr>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{rowDisplayId(row)}</td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row)}</td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedAddress(row)}</td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row)}</td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCity(row)}</td>
+                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
+                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getReasonMetadata(row).label}</td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      className="rounded-md border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-200"
+                      onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.groupKey]: !expanded }))}
+                    >
+                      {expanded ? 'Hide Rows' : `Show Rows (${group.count})`}
+                    </button>
+                  </td>
+                </tr>
+                {expanded && showRaw ? (
+                  <tr>
+                    <td colSpan={8} className="px-4 py-2 text-xs text-slate-500 dark:text-slate-400">
+                      {stringifyPreview(row.raw_row)}
+                    </td>
+                  </tr>
+                ) : null}
+              </Fragment>
+            );
+          })
+        )}
+      </>
+    );
+  };
 
   return (
-    <AppShell title="Job Details" subtitle="Review full status previews with accurate summary counters.">
+    <AppShell title="Job Details" subtitle="Review full status datasets and export results.">
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
-          <Link
-            to="/history"
-            className="text-xs font-semibold text-indigo-600 transition hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200"
-          >
-            ← Back to history
-          </Link>
+          <Link to="/history" className="text-xs font-semibold text-indigo-600 transition hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">← Back to history</Link>
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => handleDownload('unique_valid')}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              disabled={!jobId || downloading[`${jobId}-unique_valid`]}
-            >
-              {downloading[`${jobId}-unique_valid`] ? 'Downloading...' : 'Download Unique Valid CSV'}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDownload('matched')}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              disabled={!jobId || downloading[`${jobId}-matched`]}
-            >
-              {downloading[`${jobId}-matched`] ? 'Downloading...' : 'Download Matched CSV'}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDownload('needs_review')}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              disabled={!jobId || downloading[`${jobId}-needs_review`]}
-            >
-              {downloading[`${jobId}-needs_review`] ? 'Downloading...' : 'Download Needs Review CSV'}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDownload('out_of_scope')}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              disabled={!jobId || downloading[`${jobId}-out_of_scope`]}
-            >
-              {downloading[`${jobId}-out_of_scope`] ? 'Downloading...' : 'Download Out of Scope CSV'}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDownload('duplicates')}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              disabled={!jobId || downloading[`${jobId}-duplicates`]}
-            >
-              {downloading[`${jobId}-duplicates`] ? 'Downloading...' : 'Download Duplicates CSV'}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDownload('skipped')}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              disabled={!jobId || downloading[`${jobId}-skipped`]}
-            >
-              {downloading[`${jobId}-skipped`] ? 'Downloading...' : 'Download Skipped CSV'}
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDownload('processing_report')}
-              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              disabled={!jobId || downloading[`${jobId}-processing_report`]}
-            >
-              {downloading[`${jobId}-processing_report`] ? 'Downloading...' : 'Download Processing Report (All rows)'}
-            </button>
+            {EXPORT_OPTIONS.map((option) => (
+              <button
+                key={option.type}
+                type="button"
+                onClick={() => handleDownload(option.type)}
+                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                disabled={!jobId || downloading[`${jobId}-${option.type}`]}
+              >
+                {downloading[`${jobId}-${option.type}`] ? 'Downloading...' : `Download ${option.label} CSV`}
+              </button>
+            ))}
           </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           {loading ? (
-            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-              Loading job details...
-            </div>
-          ) : jobSummary ? (
-            <div className="grid gap-4 md:grid-cols-[2fr_1fr]">
-              <div>
-                <h2 className="text-lg font-semibold">Summary</h2>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  {jobSummary.filename ?? 'Untitled file'} • {formatDateTime(jobSummary.createdAt)}
-                </p>
-              </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Rows Received</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.rowsReceived ?? '--'}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Matched</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.matched ?? '--'}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Unmatched</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.unmatched ?? '--'}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Valid</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.valid ?? '--'}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Valid Unique</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.validUnique ?? '--'}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Needs Review</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.needsReview ?? '--'}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Deduped</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.deduped ?? '--'}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Skipped</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.skipped ?? '--'}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Out of Scope</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.outOfScope ?? '--'}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Cache Hits</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.cacheHits ?? '--'}</p>
-                </div>
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Google Calls</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.googleCallsUsed ?? '--'}</p>
-                </div>
-              </div>
-            </div>
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">Loading job details...</div>
           ) : (
-            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
-              Job details not found.
-            </div>
+            <>
+              <h2 className="text-lg font-semibold">Summary</h2>
+              <p className="text-sm text-slate-500 dark:text-slate-400">{jobMeta?.filename ?? 'Untitled file'} • {formatDateTime(jobMeta?.createdAt ?? null)}</p>
+              <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+                {[
+                  ['Rows Received', parseSummary?.rows_received],
+                  ['Valid Unique', parseSummary?.valid_unique],
+                  ['Needs Review', parseSummary?.unmatched],
+                  ['Out Of Scope', parseSummary?.out_of_scope],
+                  ['Skipped', parseSummary?.skipped],
+                  ['Duplicates', parseSummary?.duplicates],
+                  ['Total Cost/Spend', formatCurrency((results?.metadata as Record<string, unknown> | undefined)?.spend_usd as number | undefined)],
+                ].map(([label, value]) => (
+                  <div key={String(label)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                    <p className="text-xs uppercase text-slate-500 dark:text-slate-400">{label}</p>
+                    <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{value ?? '--'}</p>
+                  </div>
+                ))}
+              </div>
+            </>
           )}
-          {error ? (
-            <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
-              {error}
-            </div>
-          ) : null}
+          {error ? <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">{error}</div> : null}
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap gap-3">
-              {(Object.entries(PREVIEW_TAB_META) as Array<[PreviewTab, TabMeta]>).map(([tab, meta]) => {
-                const counter = meta.countFromSummary(jobSummary);
-                const counterLabel = counter ?? previewRows[tab]?.length ?? 0;
-                return (
-                  <button
-                    key={tab}
-                    type="button"
-                    onClick={() => setActiveTab(tab)}
-                    className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                      activeTab === tab
-                        ? 'bg-indigo-600 text-white'
-                        : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                    }`}
-                  >
-                    {meta.label} ({counterLabel})
-                  </button>
-                );
-              })}
+              {([
+                ['valid', 'Valid Unique'],
+                ['needs_review', 'Needs Review'],
+                ['out_of_scope', 'Out Of Scope'],
+                ['skipped', 'Skipped'],
+                ['duplicates', 'Duplicates'],
+              ] as Array<[ResultsTab, string]>).map(([tab, label]) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setActiveTab(tab)}
+                  className={`rounded-full px-4 py-2 text-xs font-semibold ${activeTab === tab ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'}`}
+                >
+                  {label} ({tabCounts[tab]})
+                </button>
+              ))}
             </div>
             <button
               type="button"
               onClick={() => setShowRaw((prev) => !prev)}
               className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
             >
-              {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
+              {showRaw ? 'Hide Raw Preview' : 'Show Raw Preview'}
             </button>
           </div>
+
           <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="overflow-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                  <tr>
-                    <th className="px-4 py-3">Row</th>
-                    <th className="px-4 py-3">Address Raw</th>
-                    <th className="px-4 py-3">Matched Address</th>
-                    <th className="px-4 py-3">Status</th>
-                    {showRaw ? <th className="px-4 py-3">Source / Raw</th> : null}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {activePreviewRows.length === 0 ? (
+              {activeTab === 'valid' ? (
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                     <tr>
-                      <td
-                        className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                        colSpan={showRaw ? 5 : 4}
-                      >
-                        No preview rows available for this status. Download the CSV for the full dataset.
-                      </td>
+                      <th className="px-4 py-3">Full Address</th>
+                      <th className="px-4 py-3">Street</th>
+                      <th className="px-4 py-3">Address 2</th>
+                      <th className="px-4 py-3">City</th>
+                      <th className="px-4 py-3">State</th>
+                      <th className="px-4 py-3">Zip</th>
                     </tr>
-                  ) : (
-                    activePreviewRows.map((row) => (
-                      <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
-                        <td className="px-4 py-3 text-slate-800 dark:text-slate-100">{row.rowIndex ?? '--'}</td>
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.addressRaw}</td>
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.matchedAddress}</td>
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.status}</td>
-                        {showRaw ? (
-                          <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{row.source}</td>
-                        ) : null}
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {paginate(canonicalAddresses).length === 0 ? (
+                      <tr><td className="px-4 py-6 text-center text-slate-500 dark:text-slate-400" colSpan={6}>No unique valid addresses yet.</td></tr>
+                    ) : (
+                      paginate(canonicalAddresses).map((row) => (
+                        <tr key={row.canonical_id}>
+                          <td className="px-4 py-3">{row.fullAddress || row.formatted_address || '--'}</td>
+                          <td className="px-4 py-3">{row.street1 || '--'}</td>
+                          <td className="px-4 py-3">{row.street2 || '--'}</td>
+                          <td className="px-4 py-3">{row.city || '--'}</td>
+                          <td className="px-4 py-3">{row.state || '--'}</td>
+                          <td className="px-4 py-3">{row.zip || '--'}</td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="min-w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                    <tr>
+                      <th className="px-4 py-3">Record ID/Row</th>
+                      <th className="px-4 py-3">Original Address</th>
+                      <th className="px-4 py-3">Matched Address</th>
+                      <th className="px-4 py-3">Matched County</th>
+                      <th className="px-4 py-3">Matched City</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3">Reason</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {activeTab === 'needs_review' ? renderGroupedRows(needsReviewGroups) : null}
+                    {activeTab === 'out_of_scope' ? renderGroupedRows(outOfScopeGroups) : null}
+                    {activeTab === 'skipped' ? renderGroupedRows(skippedGroups) : null}
+                    {activeTab === 'duplicates' ? renderGroupedRows(duplicateGroups) : null}
+                  </tbody>
+                </table>
+              )}
             </div>
+            <TablePagination
+              totalCount={totalCountByTab[activeTab]}
+              page={resultsPage}
+              pageSize={resultsPageSize}
+              onPageChange={setResultsPage}
+              onPageSizeChange={setResultsPageSize}
+            />
           </div>
-          <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            Showing up to {PREVIEW_LIMIT} rows per status. Download CSV exports for full results.
-          </p>
         </div>
       </div>
     </AppShell>
