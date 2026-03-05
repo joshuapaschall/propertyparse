@@ -2815,8 +2815,7 @@ export default function ParsePage() {
     unique_valid: 'Unique Valid',
     needs_review: 'Needs Review',
     processing_report: 'Processing Report',
-    matched: 'Matched',
-    unmatched: 'Unmatched',
+    original_file: 'Original File Uploaded',
     out_of_scope: 'Out of Scope',
     duplicates: 'Duplicates',
     skipped: 'Skipped',
@@ -2824,7 +2823,7 @@ export default function ParsePage() {
 
   const exportOptions = useMemo(
     () =>
-      (['unique_valid', 'needs_review', 'processing_report', 'matched', 'unmatched', 'out_of_scope', 'duplicates', 'skipped'] as JobExportType[]).map(
+      (['original_file', 'processing_report', 'unique_valid', 'needs_review', 'out_of_scope', 'duplicates', 'skipped'] as JobExportType[]).map(
         (type) => ({
           key: type,
           label: downloadLabels[type],

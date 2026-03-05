@@ -9,11 +9,13 @@ import { downloadJobExport, JobExportType, JobRecord, getJobs } from '../lib/api
 import { useToast } from '../components/ui/ToastProvider';
 
 const EXPORT_OPTIONS: Array<{ label: string; type: JobExportType }> = [
+  { label: 'Original File Uploaded', type: 'original_file' },
   { label: 'Unique Valid', type: 'unique_valid' },
   { label: 'Needs Review', type: 'needs_review' },
   { label: 'Processing Report', type: 'processing_report' },
-  { label: 'Matched', type: 'matched' },
-  { label: 'Unmatched', type: 'unmatched' },
+  { label: 'Out of Scope', type: 'out_of_scope' },
+  { label: 'Duplicates', type: 'duplicates' },
+  { label: 'Skipped', type: 'skipped' },
 ];
 
 const pickValue = (job: JobRecord, keys: string[]) => {
@@ -130,25 +132,24 @@ export default function HistoryPage() {
           jobId,
           hasId: Boolean(jobId),
           timestamp: pickString(job, ['created_at', 'createdAt', 'created', 'timestamp', 'date']),
+          name: pickString(job, ['display_name', 'displayName', 'campaign_name']) ?? 'Untitled job',
           filename: pickString(job, [
-            'display_name',
-            'displayName',
-            'filename',
             'file_name',
             'fileName',
             'original_filename',
             'originalFilename',
+            'filename',
             'file',
           ]),
-          name: pickString(job, ['jobName', 'campaign_name']) ?? 'Untitled job',
           location: location || '--',
           rowsReceived: pickNumber(job, ['rowsReceived', 'rows_received', 'total_rows', 'rows', 'rowCount']),
           validUnique,
           needsReview,
+          outOfScope: pickNumber(job, ['out_of_scope', 'outOfScope', 'out_of_scope_count']),
+          skipped: pickNumber(job, ['skipped', 'skipped_count']),
+          duplicates: pickNumber(job, ['duplicates', 'duplicates_count']),
           spendUsd: pickNumber(job, ['spend_usd', 'spendUsd']),
           calls: pickNumber(job, ['google_calls_used', 'googleCallsUsed', 'googleCalls', 'apiCallsUsed']),
-          cacheHits: pickNumber(job, ['cache_hits', 'cacheHits', 'cache_hit_count']),
-          ocrCalls: pickNumber(job, ['openai_ocr_calls_used', 'ocr_calls_used', 'ocrCallsUsed']),
           status: normalizeStatus(pickString(job, ['status', 'job_status', 'state'])),
         };
       }),
@@ -235,7 +236,7 @@ export default function HistoryPage() {
           ) : (
             <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
               <div className="max-h-[68vh] overflow-auto">
-                <table className="w-full min-w-[1080px] text-left text-sm">
+                <table className="w-full min-w-[1320px] text-left text-sm">
                   <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                     <tr>
                       <th className="px-4 py-3">Date/Time</th>
@@ -244,6 +245,9 @@ export default function HistoryPage() {
                       <th className="px-4 py-3 text-right">Rows</th>
                       <th className="px-4 py-3 text-right">Valid Unique</th>
                       <th className="px-4 py-3 text-right">Needs Review</th>
+                      <th className="px-4 py-3 text-right">Out Of Scope</th>
+                      <th className="px-4 py-3 text-right">Skipped</th>
+                      <th className="px-4 py-3 text-right">Duplicates</th>
                       <th className="px-4 py-3 text-right">Spend</th>
                       <th className="px-4 py-3">Calls</th>
                       <th className="px-4 py-3">Status</th>
@@ -273,14 +277,11 @@ export default function HistoryPage() {
                         <td className="px-4 py-2.5 align-top text-right text-slate-700 dark:text-slate-200">{row.rowsReceived ?? '--'}</td>
                         <td className="px-4 py-2.5 align-top text-right text-slate-700 dark:text-slate-200">{row.validUnique ?? '--'}</td>
                         <td className="px-4 py-2.5 align-top text-right text-slate-700 dark:text-slate-200">{row.needsReview ?? '--'}</td>
+                        <td className="px-4 py-2.5 align-top text-right text-slate-700 dark:text-slate-200">{row.outOfScope ?? '--'}</td>
+                        <td className="px-4 py-2.5 align-top text-right text-slate-700 dark:text-slate-200">{row.skipped ?? '--'}</td>
+                        <td className="px-4 py-2.5 align-top text-right text-slate-700 dark:text-slate-200">{row.duplicates ?? '--'}</td>
                         <td className="px-4 py-2.5 align-top text-right text-slate-700 dark:text-slate-200">{formatCurrency(row.spendUsd)}</td>
-                        <td className="px-4 py-2.5 align-top text-slate-700 dark:text-slate-200">
-                          <div className="space-y-0.5 text-xs">
-                            <div>Google: {row.calls ?? '--'}</div>
-                            <div>Cache: {row.cacheHits ?? '--'}</div>
-                            <div>OCR: {row.ocrCalls ?? '--'}</div>
-                          </div>
-                        </td>
+                        <td className="px-4 py-2.5 align-top text-slate-700 dark:text-slate-200">{row.calls ?? '--'}</td>
                         <td className="px-4 py-2.5 align-top text-slate-700 dark:text-slate-200">
                           <Badge variant={getBadgeVariant(row.status)}>
                             {row.status}

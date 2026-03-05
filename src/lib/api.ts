@@ -25,8 +25,7 @@ type ApiResponse<T> = {
 
 export type JobRecord = Record<string, JsonValue>;
 export type JobExportType =
-  | 'matched'
-  | 'unmatched'
+  | 'original_file'
   | 'unique_valid'
   | 'needs_review'
   | 'processing_report'
@@ -35,11 +34,10 @@ export type JobExportType =
   | 'skipped';
 
 export const JOB_EXPORT_TYPES: JobExportType[] = [
+  'original_file',
   'unique_valid',
   'needs_review',
   'processing_report',
-  'matched',
-  'unmatched',
   'out_of_scope',
   'duplicates',
   'skipped',
