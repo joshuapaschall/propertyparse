@@ -388,6 +388,16 @@ export async function approveMatchedJobRowsBatch(
     updated_row_results?: RowResult[];
     updated_rows?: RowResult[];
     updated_job?: JobRecord;
+    failed_rows?: Array<{
+      row_id?: string;
+      error?: string;
+      status_code?: number;
+    }>;
+    metadata?: {
+      requested_count?: number;
+      approved_count?: number;
+      failed_count?: number;
+    };
   }>(`/jobs/${jobId}/approve-matched-batch`, {
     row_ids: rowIds,
     allow_scope_override: allowScopeOverride,
