@@ -86,7 +86,7 @@ export default function HistoryPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'ALL' | 'RUNNING' | 'DONE' | 'FAILED'>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'DONE' | 'RUNNING' | 'FAILED'>('DONE');
 
   useEffect(() => {
     let active = true;
@@ -120,15 +120,8 @@ export default function HistoryPage() {
         const jobId = pickString(job, ['job_id', 'jobId', 'id']) ?? '';
         const validUnique = pickNumber(job, ['valid_unique', 'validUnique']);
         const needsReview =
-          pickNumber(job, ['needs_review', 'needsReview']) ??
-          [
-            pickNumber(job, ['duplicates']),
-            pickNumber(job, ['unmatched', 'unmatched_count', 'unmatchedCount']),
-            pickNumber(job, ['skipped']),
-            pickNumber(job, ['out_of_scope', 'outOfScope']),
-          ]
-            .filter((value): value is number => value !== null)
-            .reduce((sum, value) => sum + value, 0);
+          pickNumber(job, ['needs_review', 'needsReview', 'needs_review_count']) ??
+          pickNumber(job, ['unmatched', 'unmatched_count', 'unmatchedCount']);
         const state = pickString(job, ['state']);
         const county = pickString(job, ['county']);
         const city = pickString(job, ['city']);
@@ -165,7 +158,7 @@ export default function HistoryPage() {
   const filteredRows = useMemo(() => {
     const term = search.trim().toLowerCase();
     return rows.filter((row) => {
-      const matchesStatus = statusFilter === 'ALL' ? true : row.status === statusFilter;
+      const matchesStatus = row.status === statusFilter;
       const matchesSearch =
         term.length === 0
           ? true
@@ -215,7 +208,7 @@ export default function HistoryPage() {
           />
 
           <div className="mt-4 flex flex-wrap gap-2">
-            {(['ALL', 'RUNNING', 'DONE', 'FAILED'] as const).map((status) => (
+            {(['DONE', 'RUNNING', 'FAILED'] as const).map((status) => (
               <Button
                 key={status}
                 type="button"
