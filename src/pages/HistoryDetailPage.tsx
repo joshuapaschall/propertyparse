@@ -13,6 +13,30 @@ type ParsedPreviewRow = {
   source: string;
 };
 
+type PreviewTab = 'valid_unique' | 'needs_review' | 'out_of_scope' | 'skipped' | 'duplicates';
+
+type TabMeta = {
+  label: string;
+  statusAliases: string[];
+  countFromSummary: (summary: JobSummary | null) => number | null;
+};
+
+type JobSummary = {
+  filename: string | null;
+  createdAt: string | null;
+  rowsReceived: number | null;
+  matched: number | null;
+  unmatched: number | null;
+  deduped: number | null;
+  valid: number | null;
+  validUnique: number | null;
+  needsReview: number | null;
+  skipped: number | null;
+  outOfScope: number | null;
+  cacheHits: number | null;
+  googleCallsUsed: number | null;
+};
+
 const PREVIEW_LIMIT = 50;
 
 const pickValue = (job: JobRecord, keys: string[]) => {
@@ -48,9 +72,7 @@ const formatDateTime = (value: string | null) => {
 };
 
 const createId = (row: Record<string, unknown>, index: number, rowIndex: number | null) =>
-  (row.id as string) ||
-  (row.uuid as string) ||
-  `${rowIndex ?? index}-${crypto.randomUUID?.() ?? `row-${index}`}`;
+  (row.id as string) || (row.uuid as string) || `${rowIndex ?? index}`;
 
 const stringifyValue = (value: unknown) => {
   if (typeof value === 'string') return value;
@@ -61,12 +83,13 @@ const stringifyValue = (value: unknown) => {
 
 const normalizeRow = (row: Record<string, unknown>, index: number): ParsedPreviewRow => {
   const rowIndexValue = row.row_index ?? row.rowIndex ?? row.index ?? null;
-  const rowIndex =
+  const parsedRowIndex =
     typeof rowIndexValue === 'number'
       ? rowIndexValue
       : typeof rowIndexValue === 'string'
         ? Number(rowIndexValue)
         : null;
+  const rowIndex = parsedRowIndex !== null && Number.isNaN(parsedRowIndex) ? null : parsedRowIndex;
   const addressRaw =
     (row.address_raw as string) || (row.addressRaw as string) || (row.address as string) || '';
   const matchedAddress =
@@ -84,8 +107,8 @@ const normalizeRow = (row: Record<string, unknown>, index: number): ParsedPrevie
     stringifyValue(row);
 
   return {
-    id: createId(row, index, Number.isNaN(rowIndex as number) ? null : rowIndex),
-    rowIndex: Number.isNaN(rowIndex as number) ? null : rowIndex,
+    id: createId(row, index, rowIndex),
+    rowIndex,
     addressRaw,
     matchedAddress,
     status,
@@ -105,57 +128,69 @@ const triggerDownload = (blob: Blob, filename: string) => {
   URL.revokeObjectURL(url);
 };
 
+async function getJobRowsForStatuses(jobId: string, statuses: string[]) {
+  for (const status of statuses) {
+    try {
+      const rows = await getJobRows(jobId, status, PREVIEW_LIMIT, 0);
+      return rows;
+    } catch {
+      // Try the next alias.
+    }
+  }
+  return [];
+}
+
+const PREVIEW_TAB_META: Record<PreviewTab, TabMeta> = {
+  valid_unique: {
+    label: 'Valid Unique',
+    statusAliases: ['valid_unique', 'unique_valid'],
+    countFromSummary: (summary) => summary?.validUnique ?? null,
+  },
+  needs_review: {
+    label: 'Needs Review',
+    statusAliases: ['needs_review'],
+    countFromSummary: (summary) => summary?.needsReview ?? null,
+  },
+  out_of_scope: {
+    label: 'Out of Scope',
+    statusAliases: ['out_of_scope'],
+    countFromSummary: (summary) => summary?.outOfScope ?? null,
+  },
+  skipped: {
+    label: 'Skipped',
+    statusAliases: ['skipped'],
+    countFromSummary: (summary) => summary?.skipped ?? null,
+  },
+  duplicates: {
+    label: 'Duplicates',
+    statusAliases: ['duplicates', 'deduped'],
+    countFromSummary: (summary) => summary?.deduped ?? null,
+  },
+};
+
 export default function HistoryDetailPage() {
   const { showToast } = useToast();
   const { jobId } = useParams();
   const [job, setJob] = useState<JobRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'valid' | 'needs_review'>('valid');
+  const [activeTab, setActiveTab] = useState<PreviewTab>('valid_unique');
   const [showRaw, setShowRaw] = useState(false);
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
-  const [validRows, setValidRows] = useState<ParsedPreviewRow[]>([]);
-  const [needsReviewRows, setNeedsReviewRows] = useState<ParsedPreviewRow[]>([]);
+  const [previewRows, setPreviewRows] = useState<Record<PreviewTab, ParsedPreviewRow[]>>({
+    valid_unique: [],
+    needs_review: [],
+    out_of_scope: [],
+    skipped: [],
+    duplicates: [],
+  });
 
-  useEffect(() => {
-    if (!jobId) return;
-    let active = true;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [jobResponse, validResponse, needsReviewResponse] = await Promise.all([
-          getJobDetail(jobId),
-          getJobRows(jobId, 'valid', PREVIEW_LIMIT, 0),
-          getJobRows(jobId, 'needs_review', PREVIEW_LIMIT, 0),
-        ]);
-        if (active) {
-          const combinedJob = {
-            ...(jobResponse.summary ?? {}),
-            ...(jobResponse.job ?? {}),
-          };
-          setJob(Object.keys(combinedJob).length ? combinedJob : null);
-          setValidRows(normalizeRows(validResponse ?? []));
-          setNeedsReviewRows(normalizeRows(needsReviewResponse ?? []));
-        }
-      } catch (err) {
-        if (active) {
-          const message = (err as Error).message ?? 'Unable to load job details.';
-          setError(message);
-          showToast({ title: message, variant: 'error' });
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      active = false;
-    };
-  }, [jobId]);
-
-  const jobSummary = useMemo(() => {
+  const jobSummary = useMemo<JobSummary | null>(() => {
     if (!job) return null;
+    const needsReview = pickNumber(job, ['needs_review', 'needsReview', 'needs_review_count']);
+    const skipped = pickNumber(job, ['skipped', 'skipped_count']);
+    const outOfScope = pickNumber(job, ['out_of_scope', 'outOfScope', 'out_of_scope_count']);
+
     return {
       filename: pickString(job, [
         'display_name',
@@ -170,21 +205,67 @@ export default function HistoryDetailPage() {
       createdAt: pickString(job, ['created_at', 'createdAt', 'created', 'timestamp', 'date']),
       rowsReceived: pickNumber(job, ['rowsReceived', 'rows_received', 'total_rows', 'rows', 'rowCount']),
       matched: pickNumber(job, ['matched', 'matched_count', 'matchedCount']),
-      unmatched: pickNumber(job, ['unmatched', 'unmatched_count', 'unmatchedCount']),
-      deduped: pickNumber(job, ['deduped', 'deduped_count', 'duplicate_count', 'duplicates']),
-      valid: pickNumber(job, ['valid', 'valid_count', 'validCount']),
-      needsReview: pickNumber(job, ['needs_review', 'needsReview', 'needs_review_count']),
-      skipped: pickNumber(job, ['skipped', 'skipped_count']),
-      outOfScope: pickNumber(job, ['out_of_scope', 'outOfScope', 'out_of_scope_count']),
+      unmatched:
+        pickNumber(job, ['unmatched', 'unmatched_count', 'unmatchedCount']) ??
+        (needsReview ?? 0) + (skipped ?? 0) + (outOfScope ?? 0),
+      deduped: pickNumber(job, ['deduped', 'deduped_count', 'dedupedCount', 'duplicate_count', 'duplicates']),
+      valid: pickNumber(job, ['valid_total', 'valid', 'valid_count', 'validCount']),
+      validUnique: pickNumber(job, ['valid_unique', 'validUnique']),
+      needsReview,
+      skipped,
+      outOfScope,
       cacheHits: pickNumber(job, ['cacheHits', 'cache_hits', 'cache_hit_count']),
-      googleCallsUsed: pickNumber(job, [
-        'googleCallsUsed',
-        'google_calls_used',
-        'googleCalls',
-        'apiCallsUsed',
-      ]),
+      googleCallsUsed: pickNumber(job, ['googleCallsUsed', 'google_calls_used', 'googleCalls', 'apiCallsUsed']),
     };
   }, [job]);
+
+  useEffect(() => {
+    if (!jobId) return;
+    let active = true;
+
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const jobResponse = await getJobDetail(jobId);
+        const combinedJob = {
+          ...(jobResponse.summary ?? {}),
+          ...(jobResponse.job ?? {}),
+        };
+
+        const previewEntries = await Promise.all(
+          (Object.entries(PREVIEW_TAB_META) as Array<[PreviewTab, TabMeta]>).map(async ([tab, meta]) => {
+            const rows = await getJobRowsForStatuses(jobId, meta.statusAliases);
+            return [tab, normalizeRows(rows ?? [])] as const;
+          }),
+        );
+
+        if (!active) return;
+
+        setJob(Object.keys(combinedJob).length ? combinedJob : null);
+        setPreviewRows({
+          valid_unique: [],
+          needs_review: [],
+          out_of_scope: [],
+          skipped: [],
+          duplicates: [],
+          ...Object.fromEntries(previewEntries),
+        });
+      } catch (err) {
+        if (!active) return;
+        const message = (err as Error).message ?? 'Unable to load job details.';
+        setError(message);
+        showToast({ title: message, variant: 'error' });
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [jobId, showToast]);
 
   const handleDownload = async (type: JobExportType) => {
     if (!jobId) return;
@@ -203,8 +284,10 @@ export default function HistoryDetailPage() {
     }
   };
 
+  const activePreviewRows = previewRows[activeTab] ?? [];
+
   return (
-    <AppShell title="Job Details" subtitle="Review valid and needs-review previews.">
+    <AppShell title="Job Details" subtitle="Review full status previews with accurate summary counters.">
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link
@@ -230,7 +313,6 @@ export default function HistoryDetailPage() {
             >
               {downloading[`${jobId}-matched`] ? 'Downloading...' : 'Download Matched CSV'}
             </button>
-
             <button
               type="button"
               onClick={() => handleDownload('needs_review')}
@@ -241,11 +323,27 @@ export default function HistoryDetailPage() {
             </button>
             <button
               type="button"
-              onClick={() => handleDownload('unmatched')}
+              onClick={() => handleDownload('out_of_scope')}
               className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-              disabled={!jobId || downloading[`${jobId}-unmatched`]}
+              disabled={!jobId || downloading[`${jobId}-out_of_scope`]}
             >
-              {downloading[`${jobId}-unmatched`] ? 'Downloading...' : 'Download Unmatched CSV'}
+              {downloading[`${jobId}-out_of_scope`] ? 'Downloading...' : 'Download Out of Scope CSV'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDownload('duplicates')}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              disabled={!jobId || downloading[`${jobId}-duplicates`]}
+            >
+              {downloading[`${jobId}-duplicates`] ? 'Downloading...' : 'Download Duplicates CSV'}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleDownload('skipped')}
+              className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+              disabled={!jobId || downloading[`${jobId}-skipped`]}
+            >
+              {downloading[`${jobId}-skipped`] ? 'Downloading...' : 'Download Skipped CSV'}
             </button>
             <button
               type="button"
@@ -260,7 +358,7 @@ export default function HistoryDetailPage() {
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           {loading ? (
-            <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-6 py-10 text-center text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
               Loading job details...
             </div>
           ) : jobSummary ? (
@@ -274,63 +372,47 @@ export default function HistoryDetailPage() {
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Rows Received</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {jobSummary.rowsReceived ?? '--'}
-                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.rowsReceived ?? '--'}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Matched</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {jobSummary.matched ?? '--'}
-                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.matched ?? '--'}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Unmatched</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {jobSummary.unmatched ?? '--'}
-                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.unmatched ?? '--'}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Valid</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {jobSummary.valid ?? '--'}
-                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.valid ?? '--'}</p>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Valid Unique</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.validUnique ?? '--'}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Needs Review</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {jobSummary.needsReview ?? '--'}
-                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.needsReview ?? '--'}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Deduped</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {jobSummary.deduped ?? '--'}
-                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.deduped ?? '--'}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Skipped</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {jobSummary.skipped ?? '--'}
-                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.skipped ?? '--'}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Out of Scope</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {jobSummary.outOfScope ?? '--'}
-                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.outOfScope ?? '--'}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Cache Hits</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {jobSummary.cacheHits ?? '--'}
-                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.cacheHits ?? '--'}</p>
                 </div>
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Google Calls</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {jobSummary.googleCallsUsed ?? '--'}
-                  </p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{jobSummary.googleCallsUsed ?? '--'}</p>
                 </div>
               </div>
             </div>
@@ -348,29 +430,25 @@ export default function HistoryDetailPage() {
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex gap-3">
-              <button
-                type="button"
-                onClick={() => setActiveTab('valid')}
-                className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  activeTab === 'valid'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                }`}
-              >
-                Valid (Unique + Duplicates) Preview
-              </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('needs_review')}
-                className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                  activeTab === 'needs_review'
-                    ? 'bg-indigo-600 text-white'
-                    : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                }`}
-              >
-                Needs Review Preview
-              </button>
+            <div className="flex flex-wrap gap-3">
+              {(Object.entries(PREVIEW_TAB_META) as Array<[PreviewTab, TabMeta]>).map(([tab, meta]) => {
+                const counter = meta.countFromSummary(jobSummary);
+                const counterLabel = counter ?? previewRows[tab]?.length ?? 0;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                      activeTab === tab
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    {meta.label} ({counterLabel})
+                  </button>
+                );
+              })}
             </div>
             <button
               type="button"
@@ -393,34 +471,24 @@ export default function HistoryDetailPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {(activeTab === 'valid' ? validRows : needsReviewRows).length === 0 ? (
+                  {activePreviewRows.length === 0 ? (
                     <tr>
                       <td
                         className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
                         colSpan={showRaw ? 5 : 4}
                       >
-                        No preview rows available. Download the CSV for the full dataset.
+                        No preview rows available for this status. Download the CSV for the full dataset.
                       </td>
                     </tr>
                   ) : (
-                    (activeTab === 'valid' ? validRows : needsReviewRows).map((row) => (
+                    activePreviewRows.map((row) => (
                       <tr key={row.id} className="hover:bg-slate-50 dark:hover:bg-slate-900">
-                        <td className="px-4 py-3 text-slate-800 dark:text-slate-100">
-                          {row.rowIndex ?? '--'}
-                        </td>
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                          {row.addressRaw}
-                        </td>
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                          {row.matchedAddress}
-                        </td>
-                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                          {row.status}
-                        </td>
+                        <td className="px-4 py-3 text-slate-800 dark:text-slate-100">{row.rowIndex ?? '--'}</td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.addressRaw}</td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.matchedAddress}</td>
+                        <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{row.status}</td>
                         {showRaw ? (
-                          <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                            {row.source}
-                          </td>
+                          <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{row.source}</td>
                         ) : null}
                       </tr>
                     ))
@@ -430,7 +498,7 @@ export default function HistoryDetailPage() {
             </div>
           </div>
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            Showing up to {PREVIEW_LIMIT} rows. Download the CSV for full results.
+            Showing up to {PREVIEW_LIMIT} rows per status. Download CSV exports for full results.
           </p>
         </div>
       </div>
