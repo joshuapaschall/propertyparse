@@ -15,6 +15,28 @@ type ParsedPreviewRow = {
 
 type PreviewTab = 'valid_unique' | 'needs_review' | 'out_of_scope' | 'skipped' | 'duplicates';
 
+type TabMeta = {
+  label: string;
+  statusAliases: string[];
+  countFromSummary: (summary: JobSummary | null) => number | null;
+};
+
+type JobSummary = {
+  filename: string | null;
+  createdAt: string | null;
+  rowsReceived: number | null;
+  matched: number | null;
+  unmatched: number | null;
+  deduped: number | null;
+  valid: number | null;
+  validUnique: number | null;
+  needsReview: number | null;
+  skipped: number | null;
+  outOfScope: number | null;
+  cacheHits: number | null;
+  googleCallsUsed: number | null;
+};
+
 const PREVIEW_LIMIT = 50;
 
 const pickValue = (job: JobRecord, keys: string[]) => {
@@ -50,9 +72,7 @@ const formatDateTime = (value: string | null) => {
 };
 
 const createId = (row: Record<string, unknown>, index: number, rowIndex: number | null) =>
-  (row.id as string) ||
-  (row.uuid as string) ||
-  `${rowIndex ?? index}-${crypto.randomUUID?.() ?? `row-${index}`}`;
+  (row.id as string) || (row.uuid as string) || `${rowIndex ?? index}`;
 
 const stringifyValue = (value: unknown) => {
   if (typeof value === 'string') return value;
@@ -63,12 +83,13 @@ const stringifyValue = (value: unknown) => {
 
 const normalizeRow = (row: Record<string, unknown>, index: number): ParsedPreviewRow => {
   const rowIndexValue = row.row_index ?? row.rowIndex ?? row.index ?? null;
-  const rowIndex =
+  const parsedRowIndex =
     typeof rowIndexValue === 'number'
       ? rowIndexValue
       : typeof rowIndexValue === 'string'
         ? Number(rowIndexValue)
         : null;
+  const rowIndex = parsedRowIndex !== null && Number.isNaN(parsedRowIndex) ? null : parsedRowIndex;
   const addressRaw =
     (row.address_raw as string) || (row.addressRaw as string) || (row.address as string) || '';
   const matchedAddress =
@@ -86,8 +107,8 @@ const normalizeRow = (row: Record<string, unknown>, index: number): ParsedPrevie
     stringifyValue(row);
 
   return {
-    id: createId(row, index, Number.isNaN(rowIndex as number) ? null : rowIndex),
-    rowIndex: Number.isNaN(rowIndex as number) ? null : rowIndex,
+    id: createId(row, index, rowIndex),
+    rowIndex,
     addressRaw,
     matchedAddress,
     status,
@@ -113,18 +134,38 @@ async function getJobRowsForStatuses(jobId: string, statuses: string[]) {
       const rows = await getJobRows(jobId, status, PREVIEW_LIMIT, 0);
       return rows;
     } catch {
-      // Try next compatible status alias.
+      // Try the next alias.
     }
   }
   return [];
 }
 
-const PREVIEW_TAB_META: Record<PreviewTab, { label: string; statusAliases: string[] }> = {
-  valid_unique: { label: 'Valid Unique', statusAliases: ['valid_unique', 'unique_valid', 'valid'] },
-  needs_review: { label: 'Needs Review', statusAliases: ['needs_review'] },
-  out_of_scope: { label: 'Out of Scope', statusAliases: ['out_of_scope'] },
-  skipped: { label: 'Skipped', statusAliases: ['skipped'] },
-  duplicates: { label: 'Duplicates', statusAliases: ['duplicates', 'deduped'] },
+const PREVIEW_TAB_META: Record<PreviewTab, TabMeta> = {
+  valid_unique: {
+    label: 'Valid Unique',
+    statusAliases: ['valid_unique', 'unique_valid'],
+    countFromSummary: (summary) => summary?.validUnique ?? null,
+  },
+  needs_review: {
+    label: 'Needs Review',
+    statusAliases: ['needs_review'],
+    countFromSummary: (summary) => summary?.needsReview ?? null,
+  },
+  out_of_scope: {
+    label: 'Out of Scope',
+    statusAliases: ['out_of_scope'],
+    countFromSummary: (summary) => summary?.outOfScope ?? null,
+  },
+  skipped: {
+    label: 'Skipped',
+    statusAliases: ['skipped'],
+    countFromSummary: (summary) => summary?.skipped ?? null,
+  },
+  duplicates: {
+    label: 'Duplicates',
+    statusAliases: ['duplicates', 'deduped'],
+    countFromSummary: (summary) => summary?.deduped ?? null,
+  },
 };
 
 export default function HistoryDetailPage() {
@@ -144,56 +185,12 @@ export default function HistoryDetailPage() {
     duplicates: [],
   });
 
-  useEffect(() => {
-    if (!jobId) return;
-    let active = true;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const jobResponse = await getJobDetail(jobId);
-        const previewEntries = await Promise.all(
-          (Object.entries(PREVIEW_TAB_META) as Array<[PreviewTab, { label: string; statusAliases: string[] }]>).map(
-            async ([tab, meta]) => {
-              const rows = await getJobRowsForStatuses(jobId, meta.statusAliases);
-              return [tab, normalizeRows(rows ?? [])] as const;
-            },
-          ),
-        );
-
-        if (active) {
-          const combinedJob = {
-            ...(jobResponse.summary ?? {}),
-            ...(jobResponse.job ?? {}),
-          };
-          setJob(Object.keys(combinedJob).length ? combinedJob : null);
-          setPreviewRows({
-            valid_unique: [],
-            needs_review: [],
-            out_of_scope: [],
-            skipped: [],
-            duplicates: [],
-            ...Object.fromEntries(previewEntries),
-          });
-        }
-      } catch (err) {
-        if (active) {
-          const message = (err as Error).message ?? 'Unable to load job details.';
-          setError(message);
-          showToast({ title: message, variant: 'error' });
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    };
-    load();
-    return () => {
-      active = false;
-    };
-  }, [jobId]);
-
-  const jobSummary = useMemo(() => {
+  const jobSummary = useMemo<JobSummary | null>(() => {
     if (!job) return null;
+    const needsReview = pickNumber(job, ['needs_review', 'needsReview', 'needs_review_count']);
+    const skipped = pickNumber(job, ['skipped', 'skipped_count']);
+    const outOfScope = pickNumber(job, ['out_of_scope', 'outOfScope', 'out_of_scope_count']);
+
     return {
       filename: pickString(job, [
         'display_name',
@@ -208,22 +205,67 @@ export default function HistoryDetailPage() {
       createdAt: pickString(job, ['created_at', 'createdAt', 'created', 'timestamp', 'date']),
       rowsReceived: pickNumber(job, ['rowsReceived', 'rows_received', 'total_rows', 'rows', 'rowCount']),
       matched: pickNumber(job, ['matched', 'matched_count', 'matchedCount']),
-      unmatched: pickNumber(job, ['unmatched', 'unmatched_count', 'unmatchedCount']),
-      deduped: pickNumber(job, ['deduped', 'deduped_count', 'duplicate_count', 'duplicates']),
+      unmatched:
+        pickNumber(job, ['unmatched', 'unmatched_count', 'unmatchedCount']) ??
+        (needsReview ?? 0) + (skipped ?? 0) + (outOfScope ?? 0),
+      deduped: pickNumber(job, ['deduped', 'deduped_count', 'dedupedCount', 'duplicate_count', 'duplicates']),
       valid: pickNumber(job, ['valid_total', 'valid', 'valid_count', 'validCount']),
       validUnique: pickNumber(job, ['valid_unique', 'validUnique']),
-      needsReview: pickNumber(job, ['needs_review', 'needsReview', 'needs_review_count']),
-      skipped: pickNumber(job, ['skipped', 'skipped_count']),
-      outOfScope: pickNumber(job, ['out_of_scope', 'outOfScope', 'out_of_scope_count']),
+      needsReview,
+      skipped,
+      outOfScope,
       cacheHits: pickNumber(job, ['cacheHits', 'cache_hits', 'cache_hit_count']),
-      googleCallsUsed: pickNumber(job, [
-        'googleCallsUsed',
-        'google_calls_used',
-        'googleCalls',
-        'apiCallsUsed',
-      ]),
+      googleCallsUsed: pickNumber(job, ['googleCallsUsed', 'google_calls_used', 'googleCalls', 'apiCallsUsed']),
     };
   }, [job]);
+
+  useEffect(() => {
+    if (!jobId) return;
+    let active = true;
+
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const jobResponse = await getJobDetail(jobId);
+        const combinedJob = {
+          ...(jobResponse.summary ?? {}),
+          ...(jobResponse.job ?? {}),
+        };
+
+        const previewEntries = await Promise.all(
+          (Object.entries(PREVIEW_TAB_META) as Array<[PreviewTab, TabMeta]>).map(async ([tab, meta]) => {
+            const rows = await getJobRowsForStatuses(jobId, meta.statusAliases);
+            return [tab, normalizeRows(rows ?? [])] as const;
+          }),
+        );
+
+        if (!active) return;
+
+        setJob(Object.keys(combinedJob).length ? combinedJob : null);
+        setPreviewRows({
+          valid_unique: [],
+          needs_review: [],
+          out_of_scope: [],
+          skipped: [],
+          duplicates: [],
+          ...Object.fromEntries(previewEntries),
+        });
+      } catch (err) {
+        if (!active) return;
+        const message = (err as Error).message ?? 'Unable to load job details.';
+        setError(message);
+        showToast({ title: message, variant: 'error' });
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    load();
+    return () => {
+      active = false;
+    };
+  }, [jobId, showToast]);
 
   const handleDownload = async (type: JobExportType) => {
     if (!jobId) return;
@@ -271,7 +313,6 @@ export default function HistoryDetailPage() {
             >
               {downloading[`${jobId}-matched`] ? 'Downloading...' : 'Download Matched CSV'}
             </button>
-
             <button
               type="button"
               onClick={() => handleDownload('needs_review')}
@@ -390,20 +431,24 @@ export default function HistoryDetailPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap gap-3">
-              {(Object.entries(PREVIEW_TAB_META) as Array<[PreviewTab, { label: string }]>).map(([tab, meta]) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setActiveTab(tab)}
-                  className={`rounded-full px-4 py-2 text-xs font-semibold ${
-                    activeTab === tab
-                      ? 'bg-indigo-600 text-white'
-                      : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
-                  }`}
-                >
-                  {meta.label} ({previewRows[tab]?.length ?? 0})
-                </button>
-              ))}
+              {(Object.entries(PREVIEW_TAB_META) as Array<[PreviewTab, TabMeta]>).map(([tab, meta]) => {
+                const counter = meta.countFromSummary(jobSummary);
+                const counterLabel = counter ?? previewRows[tab]?.length ?? 0;
+                return (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setActiveTab(tab)}
+                    className={`rounded-full px-4 py-2 text-xs font-semibold ${
+                      activeTab === tab
+                        ? 'bg-indigo-600 text-white'
+                        : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    {meta.label} ({counterLabel})
+                  </button>
+                );
+              })}
             </div>
             <button
               type="button"
