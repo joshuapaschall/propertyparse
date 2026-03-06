@@ -33,7 +33,7 @@ import {
   downloadJobExport,
   getApiErrorInfo,
   getJobDetail,
-  getJobRows,
+  getAllJobRows,
   getJobResults,
   getJobWithStatus,
   JobExportType,
@@ -710,6 +710,7 @@ export default function ParsePage() {
   );
   const [forceRefresh, setForceRefresh] = useState(false);
   const [legacyMode, setLegacyMode] = useState(false);
+  const [isJobReload, setIsJobReload] = useState(false);
   const [processingReportOpen, setProcessingReportOpen] = useState(false);
   const [processingReportFilter, setProcessingReportFilter] = useState<ProcessingReportFilter>(
     'all',
@@ -851,6 +852,7 @@ export default function ParsePage() {
       setLegacyUnmatchedRows([]);
       setMetadata(null);
       setLegacyMode(false);
+      setIsJobReload(false);
       setActiveTab('valid');
       setLegacyTab('matched');
       setShowRaw(false);
@@ -934,7 +936,7 @@ export default function ParsePage() {
             normalizeJobRowResult(row as unknown as JobRecord, index),
           );
         } else {
-          const jobRows = await getJobRows(jobIdToLoad);
+          const jobRows = await getAllJobRows(jobIdToLoad);
           normalizedRows = (jobRows ?? []).map((row, index) =>
             normalizeJobRowResult(row as JobRecord, index),
           );
@@ -961,6 +963,7 @@ export default function ParsePage() {
           'apiCallsUsed',
         ]);
         setJobId(jobIdToLoad);
+        setIsJobReload(true);
         setFile(null);
         setFileId(pickString(combinedJob, ['file_id', 'fileId', 'fileID', 'file']));
         if (storedState) {
@@ -1963,6 +1966,7 @@ export default function ParsePage() {
   const applyParsedResponse = useCallback(
     (parsed: Record<string, unknown>, fallbackRowsReceived: number | null) => {
       setParseTimestamp(new Date().toISOString());
+      setIsJobReload(false);
       setParsePayload(parsed);
       setProgressStep(3);
       setProgressStep(4);
@@ -2066,6 +2070,7 @@ export default function ParsePage() {
     setLegacyUnmatchedRows([]);
     setMetadata(null);
     setLegacyMode(false);
+    setIsJobReload(false);
     setProgressStep(0);
     setProgressPercent(5);
     setPollError(null);
@@ -2107,6 +2112,7 @@ export default function ParsePage() {
         pickString((parsedRecord.metadata as JobRecord) ?? {}, ['job_id', 'jobId', 'id']) ??
         crypto.randomUUID();
       setJobId(createdJobId);
+      setIsJobReload(false);
       setFileId(uploadFileId);
       setParseTimestamp(new Date().toISOString());
       setParsePayload(parsedRecord);
@@ -3342,7 +3348,7 @@ export default function ParsePage() {
               experience.
             </div>
           ) : null}
-          {parseSummary && rowAccountingMismatch ? (
+          {parseSummary && rowAccountingMismatch && !isJobReload ? (
             <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p>
