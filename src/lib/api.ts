@@ -626,21 +626,53 @@ export async function getJobDetail(jobId: string) {
 
 export async function getJobRows(
   jobId: string,
-  status?: string,
-  limit?: number,
-  offset?: number,
+  options?: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+  },
 ) {
   const params = new URLSearchParams();
-  if (status) params.set('status', status);
-  if (typeof limit === 'number') params.set('limit', String(limit));
-  if (typeof offset === 'number') params.set('offset', String(offset));
+  if (options?.status) params.set('status', options.status);
+  if (typeof options?.limit === 'number') params.set('limit', String(options.limit));
+  if (typeof options?.offset === 'number') params.set('offset', String(options.offset));
   const query = params.toString();
   const path = query ? `/jobs/${jobId}/rows?${query}` : `/jobs/${jobId}/rows`;
-  const res = await requestJson<ApiResponse<JobRecord[]>>(path, {
+  const res = await requestJson<
+    ApiResponse<JobRecord[]> & {
+      total?: number;
+      limit?: number;
+      offset?: number;
+    }
+  >(path, {
     method: 'GET',
     headers: getAuthHeaders(),
   });
-  return (res.items ?? res.data ?? res) as JobRecord[];
+  const items = (res.items ?? res.data ?? []) as JobRecord[];
+  return {
+    items,
+    total: typeof res.total === 'number' ? res.total : items.length,
+    limit: typeof res.limit === 'number' ? res.limit : options?.limit ?? items.length,
+    offset: typeof res.offset === 'number' ? res.offset : options?.offset ?? 0,
+  };
+}
+
+export async function getAllJobRows(jobId: string) {
+  const firstPage = await getJobRows(jobId, { offset: 0 });
+  const rows = [...firstPage.items];
+  const pageSize = Math.max(firstPage.limit || firstPage.items.length || 200, 1);
+  let nextOffset = firstPage.offset + firstPage.items.length;
+
+  while (rows.length < firstPage.total) {
+    const page = await getJobRows(jobId, { limit: pageSize, offset: nextOffset });
+    if (!page.items.length) {
+      break;
+    }
+    rows.push(...page.items);
+    nextOffset += page.items.length;
+  }
+
+  return rows;
 }
 
 export async function downloadJobExport(jobId: string, type: JobExportType) {
