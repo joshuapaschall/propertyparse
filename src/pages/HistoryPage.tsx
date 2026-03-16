@@ -5,18 +5,11 @@ import Badge, { getBadgeVariant } from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
-import { downloadJobExport, JobExportType, JobRecord, getJobs } from '../lib/api';
+import { downloadJobExport, getJobExportCatalog, JobExportType, JobRecord, getJobs } from '../lib/api';
 import { useToast } from '../components/ui/ToastProvider';
-
-const EXPORT_OPTIONS: Array<{ label: string; type: JobExportType }> = [
-  { label: 'Original File Uploaded', type: 'original_file' },
-  { label: 'Unique Valid', type: 'unique_valid' },
-  { label: 'Needs Review', type: 'needs_review' },
-  { label: 'Processing Report', type: 'processing_report' },
-  { label: 'Out of Scope', type: 'out_of_scope' },
-  { label: 'Duplicates', type: 'duplicates' },
-  { label: 'Skipped', type: 'skipped' },
-];
+import ExportPanel from '../components/exports/ExportPanel';
+import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
+import type { ExportCatalogItem } from '../types/exports';
 
 const pickValue = (job: JobRecord, keys: string[]) => {
   for (const key of keys) {
@@ -89,6 +82,7 @@ export default function HistoryPage() {
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'DONE' | 'RUNNING' | 'FAILED'>('DONE');
+  const [catalogByJobId, setCatalogByJobId] = useState<Record<string, ExportCatalogItem[]>>({});
 
   useEffect(() => {
     let active = true;
@@ -114,7 +108,7 @@ export default function HistoryPage() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [showToast]);
 
   const rows = useMemo(
     () =>
@@ -171,20 +165,38 @@ export default function HistoryPage() {
     });
   }, [rows, search, statusFilter]);
 
-  const handleDownload = async (jobId: string, type: JobExportType, filename?: string | null) => {
+  const handleDownload = async (jobId: string, type: JobExportType, label: string) => {
     if (!jobId) return;
     const key = `${jobId}-${type}`;
     setDownloading((prev) => ({ ...prev, [key]: true }));
     try {
       const result = await downloadJobExport(jobId, type);
-      triggerDownload(result.blob, filename ?? result.filename);
-      showToast({ title: 'Export downloaded', variant: 'success' });
+      triggerDownload(result.blob, result.filename);
+      showToast({ title: `${label} downloaded`, variant: 'success' });
     } catch (err) {
       const message = (err as Error).message ?? 'Export failed.';
       setError(message);
       showToast({ title: message, variant: 'error' });
     } finally {
       setDownloading((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
+
+
+  const getRowActiveDownloadType = (jobId: string): JobExportType | null => {
+    const activeKey = Object.keys(downloading).find((key) => key.startsWith(`${jobId}-`) && downloading[key]);
+    if (!activeKey) return null;
+    return (activeKey.slice(jobId.length + 1) as JobExportType) ?? null;
+  };
+
+  const ensureExportCatalog = async (jobId: string) => {
+    if (!jobId || catalogByJobId[jobId]) return;
+    try {
+      const catalog = await getJobExportCatalog(jobId);
+      setCatalogByJobId((prev) => ({ ...prev, [jobId]: normalizeExportCatalog(catalog) }));
+    } catch {
+      setCatalogByJobId((prev) => ({ ...prev, [jobId]: FALLBACK_EXPORT_CATALOG }));
     }
   };
 
@@ -287,32 +299,18 @@ export default function HistoryPage() {
                             {row.status}
                           </Badge>
                         </td>
-                        <td className="px-4 py-2.5 text-right align-top" onClick={(event) => event.stopPropagation()}>
-                          <details className="relative inline-block text-left">
-                            <summary className="list-none rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">
-                              Export
-                            </summary>
-                            <div className="absolute right-0 z-10 mt-2 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900">
-                              {EXPORT_OPTIONS.map((option) => {
-                                const key = `${row.jobId}-${option.type}`;
-                                return (
-                                  <Button
-                                    key={option.type}
-                                    type="button"
-                                    onClick={() => {
-                                      handleDownload(row.jobId, option.type, `${row.jobId}-${option.type}.csv`);
-                                    }}
-                                    className="block w-full rounded-none border-0 border-b border-slate-100 px-3 py-2 text-left text-xs text-slate-700 last:border-b-0 dark:border-slate-800 dark:text-slate-200"
-                                    disabled={!row.hasId || downloading[key]}
-                                    variant="ghost"
-                                    size="sm"
-                                  >
-                                    {downloading[key] ? 'Downloading...' : option.label}
-                                  </Button>
-                                );
-                              })}
-                            </div>
-                          </details>
+                        <td className="px-4 py-2.5 text-right align-top" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.jobId); }}>
+                          <ExportPanel
+                            mode="popover"
+                            triggerLabel="Export"
+                            className="relative inline-block text-left"
+                            catalog={catalogByJobId[row.jobId] ?? FALLBACK_EXPORT_CATALOG}
+                            onDownload={(type, label) => {
+                              void handleDownload(row.jobId, type, label);
+                            }}
+                            activeDownloadType={getRowActiveDownloadType(row.jobId)}
+                            disabled={!row.hasId}
+                          />
                         </td>
                         <td className="px-2 py-2.5 align-top text-right text-slate-500 dark:text-slate-400">
                           <span className="inline-flex items-center gap-1 text-xs font-semibold opacity-0 transition-opacity group-hover:opacity-100">

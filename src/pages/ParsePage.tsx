@@ -14,9 +14,8 @@ import EditRowModal, { ParsedRow } from '../components/EditRowModal';
 import Card from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import Skeleton from '../components/ui/Skeleton';
-import ExportMenu from '../components/ui/ExportMenu';
+import ExportPanel from '../components/exports/ExportPanel';
 import { useToast } from '../components/ui/ToastProvider';
-import { downloadCsv } from '../lib/csv';
 import {
   getReasonMetadata,
   isErrorRow,
@@ -32,6 +31,7 @@ import { groupRows, type GroupedRow } from '../lib/groupRows';
 import {
   downloadJobExport,
   getApiErrorInfo,
+  getJobExportCatalog,
   getJobDetail,
   getAllJobRows,
   getJobResults,
@@ -57,6 +57,8 @@ import type {
   ParseSummary,
   RowResult,
 } from '../types/parse';
+import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
+import type { ExportCatalogItem } from '../types/exports';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Finalizing'];
 const ASYNC_PARSE_FILE_SIZE_THRESHOLD = 5 * 1024 * 1024;
@@ -204,35 +206,6 @@ const copyTextToClipboard = async (text: string) => {
   document.execCommand('copy');
   document.body.removeChild(textarea);
 };
-
-const buildProcessingReportRows = (rows: RowResult[]) =>
-  rows.map((row) => ({
-    source_row_index: row.source_row_index,
-    source_row_id: row.source_row_id,
-    status: row.status,
-    reason_code: row.reason_code ?? '',
-    reason_detail: row.reason_detail ?? '',
-    detected_address: row.detected_address ?? '',
-    formatted_address: row.formatted_address ?? '',
-    place_id: row.place_id ?? '',
-    canonical_id: row.canonical_id ?? '',
-    is_duplicate: row.is_duplicate ?? false,
-    duplicate_of_source_row_id: row.duplicate_of_source_row_id ?? '',
-    raw_row_json: row.raw_row ? JSON.stringify(row.raw_row) : '',
-  }));
-
-const buildCanonicalCsvRows = (rows: NormalizedCanonicalAddress[]) =>
-  rows.map((row) => ({
-    canonical_id: row.canonical_id,
-    formatted_address: row.formatted_address,
-    street1: row.street1 ?? '',
-    street2: row.street2 ?? '',
-    city: row.city ?? '',
-    state: row.state ?? '',
-    zip: row.zip ?? '',
-    place_id: row.place_id ?? '',
-    components_json: row.components ? JSON.stringify(row.components) : '',
-  }));
 
 const normalizeNumber = (value: unknown) => {
   if (typeof value === 'number') return value;
@@ -730,6 +703,7 @@ export default function ParsePage() {
   const [runningAiFixFlaggedRows, setRunningAiFixFlaggedRows] = useState(false);
   const [reviewAutoFocus, setReviewAutoFocus] = useState(false);
   const [activeDownloadType, setActiveDownloadType] = useState<JobExportType | null>(null);
+  const [exportCatalog, setExportCatalog] = useState<ExportCatalogItem[]>(FALLBACK_EXPORT_CATALOG);
   const [downloadSuccessLabel, setDownloadSuccessLabel] = useState<string | null>(null);
   const [progressInfo, setProgressInfo] = useState<{
     phase: string | null;
@@ -2662,40 +2636,7 @@ export default function ParsePage() {
     });
   };
 
-  const handleDownloadUnique = () => {
-    downloadCsv('unique-valid-addresses.csv', buildCanonicalCsvRows(canonicalAddresses), {
-      columns: [
-        'canonical_id',
-        'formatted_address',
-        'street1',
-        'street2',
-        'city',
-        'state',
-        'zip',
-        'place_id',
-        'components_json',
-      ],
-    });
-  };
 
-  const handleDownloadProcessingReport = (rows: RowResult[], filename: string) => {
-    downloadCsv(filename, buildProcessingReportRows(rows), {
-      columns: [
-        'source_row_index',
-        'source_row_id',
-        'status',
-        'reason_code',
-        'reason_detail',
-        'detected_address',
-        'formatted_address',
-        'place_id',
-        'canonical_id',
-        'is_duplicate',
-        'duplicate_of_source_row_id',
-        'raw_row_json',
-      ],
-    });
-  };
 
   const handleDownloadJobExport = async (type: JobExportType, label: string) => {
     if (!jobId) {
@@ -2817,31 +2758,30 @@ export default function ParsePage() {
   const aiFixInProgress =
     runningAiFixFlaggedRows || (busy && progressInfo.phase === 'AI_FIXING');
 
-  const downloadLabels: Record<JobExportType, string> = {
-    unique_valid: 'Unique Valid',
-    needs_review: 'Needs Review',
-    processing_report: 'Processing Report',
-    original_file: 'Original File Uploaded',
-    out_of_scope: 'Out of Scope',
-    duplicates: 'Duplicates',
-    skipped: 'Skipped',
-  };
 
-  const exportOptions = useMemo(
-    () =>
-      (['original_file', 'processing_report', 'unique_valid', 'needs_review', 'out_of_scope', 'duplicates', 'skipped'] as JobExportType[]).map(
-        (type) => ({
-          key: type,
-          label: downloadLabels[type],
-          onSelect: () => {
-            void handleDownloadJobExport(type, downloadLabels[type]);
-          },
-          disabled: !jobId || activeDownloadType !== null,
-          loading: activeDownloadType === type,
-        }),
-      ),
-    [activeDownloadType, jobId],
-  );
+  useEffect(() => {
+    if (!jobId) {
+      setExportCatalog(FALLBACK_EXPORT_CATALOG);
+      return;
+    }
+    let active = true;
+    const loadCatalog = async () => {
+      try {
+        const catalog = await getJobExportCatalog(jobId);
+        if (active) {
+          setExportCatalog(normalizeExportCatalog(catalog));
+        }
+      } catch {
+        if (active) {
+          setExportCatalog(FALLBACK_EXPORT_CATALOG);
+        }
+      }
+    };
+    void loadCatalog();
+    return () => {
+      active = false;
+    };
+  }, [jobId]);
 
   const openProcessingReport = (filter: ProcessingReportFilter) => {
     setProcessingReportFilter(filter);
@@ -3233,7 +3173,35 @@ export default function ParsePage() {
                   </button>
                 ) : null}
                 {parseSummary ? (
-                  <ExportMenu options={exportOptions} disabled={!jobId} />
+                  <div className="flex items-center gap-2"> 
+                    <button
+                      type="button"
+                      onClick={() => void handleDownloadJobExport('propstream_import', 'PropStream Import')}
+                      disabled={!jobId || activeDownloadType !== null}
+                      className="rounded-lg border border-indigo-600 bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-500 dark:bg-indigo-500 dark:hover:bg-indigo-400"
+                    >
+                      {activeDownloadType === 'propstream_import' ? 'Downloading…' : 'PropStream Import'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleDownloadJobExport('unique_valid', 'Unique Valid')}
+                      disabled={!jobId || activeDownloadType !== null}
+                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                    >
+                      {activeDownloadType === 'unique_valid' ? 'Downloading…' : 'Unique Valid'}
+                    </button>
+                    <ExportPanel
+                      mode="popover"
+                      triggerLabel="More Exports"
+                      catalog={exportCatalog}
+                      onDownload={(type, label) => {
+                        void handleDownloadJobExport(type, label);
+                      }}
+                      activeDownloadType={activeDownloadType}
+                      disabled={!jobId}
+                      excludeTypes={['propstream_import', 'unique_valid']}
+                    />
+                  </div>
                 ) : null}
                 {downloadSuccessLabel ? (
                   <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
