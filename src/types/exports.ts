@@ -22,7 +22,9 @@ export type ExportCatalogResponseItem = {
   filename?: string;
   file_type?: string;
   headers?: string[];
+  column_headers?: string[];
   intended_use?: string;
   row_count?: number;
+  row_count_estimate?: number;
   available?: boolean;
 };

@@ -57,7 +57,8 @@ describe('parseUtils filters', () => {
     expect(summary.valid_total).toBe(2);
     expect(summary.valid_unique).toBe(1);
     expect(summary.duplicates).toBeGreaterThan(0);
-    expect(summary.unmatched).toBe(1);
+    expect(summary.needs_review).toBe(1);
+    expect(summary.attention_total).toBe(1);
   });
 
   it('flags out of scope rows by status or reason', () => {

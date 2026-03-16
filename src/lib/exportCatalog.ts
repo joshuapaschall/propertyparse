@@ -115,9 +115,18 @@ export const normalizeExportCatalog = (catalog: ExportCatalogResponseItem[] | nu
       description: item.description?.trim() || fallback.description,
       filename: item.filename || fallback.filename,
       fileType: item.file_type || fallback.fileType,
-      headers: Array.isArray(item.headers) ? item.headers : fallback.headers,
+      headers: Array.isArray(item.column_headers)
+        ? item.column_headers
+        : Array.isArray(item.headers)
+          ? item.headers
+          : fallback.headers,
       intendedUse: item.intended_use?.trim() || fallback.intendedUse,
-      rowCount: typeof item.row_count === 'number' ? item.row_count : fallback.rowCount,
+      rowCount:
+        typeof item.row_count_estimate === 'number'
+          ? item.row_count_estimate
+          : typeof item.row_count === 'number'
+            ? item.row_count
+            : fallback.rowCount,
       available: typeof item.available === 'boolean' ? item.available : true,
     });
   }

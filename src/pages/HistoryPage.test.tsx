@@ -42,6 +42,17 @@ describe('HistoryPage exports', () => {
     Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), writable: true });
   });
 
+
+  it('shows one compact Export trigger per row', async () => {
+    render(
+      <MemoryRouter>
+        <HistoryPage />
+      </MemoryRouter>,
+    );
+
+    const exportTriggers = await screen.findAllByText('Export');
+    expect(exportTriggers.filter((node) => node.tagName.toLowerCase() === 'summary')).toHaveLength(1);
+  });
   it('uses backend-provided filename for downloads', async () => {
     const user = userEvent.setup();
     let createdAnchor: HTMLAnchorElement | null = null;
