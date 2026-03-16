@@ -3,6 +3,7 @@ import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-route
 import type { Session } from '@supabase/supabase-js';
 import AuthPage from './pages/AuthPage';
 import AdminPage from './pages/AdminPage';
+import DashboardPage from './pages/DashboardPage';
 import HistoryDetailPage from './pages/HistoryDetailPage';
 import HistoryPage from './pages/HistoryPage';
 import ParsePage from './pages/ParsePage';
@@ -467,7 +468,7 @@ function LoginGate() {
       return;
     }
     if (isAuthenticated && isReady) {
-      navigate('/parse', { replace: true });
+      navigate('/dashboard', { replace: true });
     }
   }, [isAuthenticated, isReady, navigate, requiresPasswordSetup]);
 
@@ -543,11 +544,19 @@ function LoginGate() {
 function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<LoginGate />} />
+      <Route path="/" element={<Navigate to="/dashboard" replace />} />
       <Route path="/login" element={<LoginGate />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="/auth/callback" element={<AuthCallbackPage />} />
       <Route path="/welcome/set-password" element={<SetPasswordOnboardingPage />} />
+      <Route
+        path="/dashboard"
+        element={
+          <ProtectedRoute>
+            <DashboardPage />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/parse"
         element={

@@ -492,8 +492,10 @@ export async function getJobs() {
   return (res.items ?? res.data ?? res) as JobRecord[];
 }
 
-export async function getMetricsSummary(range: MetricsRange) {
+export async function getMetricsSummary(range: MetricsRange, options?: { startDate?: string; endDate?: string }) {
   const params = new URLSearchParams({ range });
+  if (options?.startDate) params.set('start_date', options.startDate);
+  if (options?.endDate) params.set('end_date', options.endDate);
   const res = await requestJson<ApiResponse<MetricsSummary>>(`/metrics/summary?${params.toString()}`, {
     method: 'GET',
     headers: getAuthHeaders(),

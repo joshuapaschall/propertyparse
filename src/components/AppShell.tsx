@@ -19,8 +19,8 @@ type NavItem = {
 
 const navItems: NavItem[] = [
   {
-    label: 'Upload File',
-    to: '/parse',
+    label: 'Dashboard',
+    to: '/dashboard',
     icon: (
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 16V4m0 0l-4 4m4-4l4 4" />
@@ -29,7 +29,17 @@ const navItems: NavItem[] = [
     ),
   },
   {
-    label: 'Files',
+    label: 'Parse',
+    to: '/parse',
+    icon: (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4 6a2 2 0 012-2h8l4 4v10a2 2 0 01-2 2H6a2 2 0 01-2-2V6z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M14 4v4h4" />
+      </svg>
+    ),
+  },
+  {
+    label: 'History',
     to: '/history',
     icon: (
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
@@ -39,15 +49,11 @@ const navItems: NavItem[] = [
     ),
   },
   {
-    label: 'Admin & Team',
+    label: 'Admin',
     to: '/admin',
     icon: (
       <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z"
-        />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
       </svg>
     ),
   },
