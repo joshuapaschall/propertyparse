@@ -81,4 +81,14 @@ describe('ParsePage export launcher', () => {
     expect(await screen.findByText('Most Used')).toBeInTheDocument();
     expect(screen.getByText('PropStream Import')).toBeInTheDocument();
   });
+
+  it('shows clear button when parse results exist', async () => {
+    render(
+      <MemoryRouter initialEntries={['/parse?job=job-1']}>
+        <ParsePage />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByRole('button', { name: 'Clear' })).toBeInTheDocument();
+  });
 });
