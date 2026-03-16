@@ -14,8 +14,9 @@ import {
 import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
+import { normalizeJobSummary, toParseSummary } from '../lib/jobSummary';
 import type { ExportCatalogItem } from '../types/exports';
-import type { CanonicalAddress, ParseSummary, RowResult } from '../types/parse';
+import type { CanonicalAddress, RowResult } from '../types/parse';
 
 type ResultsTab = 'valid' | 'needs_review' | 'out_of_scope' | 'skipped' | 'duplicates';
 
@@ -141,7 +142,10 @@ export default function HistoryDetailPage() {
     setResultsPage(1);
   }, [activeTab, resultsPageSize]);
 
-  const parseSummary = (results?.summary ?? null) as ParseSummary | null;
+  const parseSummary = useMemo(() => {
+    if (!results?.summary) return null;
+    return toParseSummary(normalizeJobSummary(results.summary));
+  }, [results?.summary]);
   const rowResults = useMemo(() => results?.row_results ?? [], [results]);
   const canonicalAddresses = useMemo(
     () => (results?.canonical_addresses ?? []).map(normalizeCanonicalAddress),
@@ -160,7 +164,7 @@ export default function HistoryDetailPage() {
 
   const tabCounts: Record<ResultsTab, number> = {
     valid: parseSummary?.valid_unique ?? 0,
-    needs_review: parseSummary?.unmatched ?? 0,
+    needs_review: parseSummary?.needs_review ?? 0,
     out_of_scope: parseSummary?.out_of_scope ?? 0,
     skipped: parseSummary?.skipped ?? 0,
     duplicates: parseSummary?.duplicates ?? 0,
@@ -243,9 +247,8 @@ export default function HistoryDetailPage() {
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link to="/history" className="text-xs font-semibold text-indigo-600 transition hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">← Back to history</Link>
-          <div className="w-full max-w-4xl">
+          <div>
             <ExportPanel
-              mode="inline"
               catalog={exportCatalog}
               onDownload={(type, label) => {
                 void handleDownload(type, label);
@@ -267,7 +270,7 @@ export default function HistoryDetailPage() {
                 {[
                   ['Rows Received', parseSummary?.rows_received],
                   ['Valid Unique', parseSummary?.valid_unique],
-                  ['Needs Review', parseSummary?.unmatched],
+                  ['Needs Review', parseSummary?.needs_review],
                   ['Out Of Scope', parseSummary?.out_of_scope],
                   ['Skipped', parseSummary?.skipped],
                   ['Duplicates', parseSummary?.duplicates],

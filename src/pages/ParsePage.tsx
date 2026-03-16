@@ -24,7 +24,6 @@ import {
   isSkippedRow,
   isValidRow,
   stringifyPreview,
-  computeParseSummaryFromRowResults,
 } from '../lib/parseUtils';
 import { canStartParse, hasValidLocation } from '../lib/parseValidation';
 import { groupRows, type GroupedRow } from '../lib/groupRows';
@@ -58,6 +57,8 @@ import type {
   RowResult,
 } from '../types/parse';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
+import JobWarnings from '../components/JobWarnings';
+import { normalizeJobSummary, toParseSummary } from '../lib/jobSummary';
 import type { ExportCatalogItem } from '../types/exports';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Finalizing'];
@@ -245,42 +246,7 @@ const pickNumber = (record: JobRecord, keys: string[]) => {
 
 const buildParseSummaryFromJob = (record: JobRecord | null) => {
   if (!record) return null;
-  const rowsReceived = pickNumber(record, [
-    'rows_received',
-    'rowsReceived',
-    'total_rows',
-    'rows',
-    'rowCount',
-  ]);
-  const validTotal = pickNumber(record, ['valid_total', 'validTotal', 'matched', 'matched_count', 'matchedCount']);
-  const validUnique = pickNumber(record, [
-    'valid_unique',
-    'validUnique',
-    'deduped_count',
-    'dedupedCount',
-    'unique_valid',
-  ]);
-  const unmatched = pickNumber(record, ['unmatched', 'unmatched_count', 'unmatchedCount']);
-  const skipped = pickNumber(record, ['skipped', 'skipped_count', 'skippedCount']) ?? 0;
-  const duplicates = pickNumber(record, ['duplicates', 'duplicates_count', 'duplicate_count']) ?? 0;
-  const outOfScope = pickNumber(record, ['out_of_scope', 'outOfScope']);
-  if (
-    typeof rowsReceived !== 'number' ||
-    typeof validTotal !== 'number' ||
-    typeof validUnique !== 'number' ||
-    typeof unmatched !== 'number'
-  ) {
-    return null;
-  }
-  return {
-    rows_received: rowsReceived,
-    valid_total: validTotal,
-    valid_unique: validUnique,
-    unmatched,
-    skipped,
-    duplicates,
-    out_of_scope: outOfScope ?? undefined,
-  };
+  return toParseSummary(normalizeJobSummary(record));
 };
 
 const getRowIdValue = (row: JobRecord, index: number) => {
@@ -1097,7 +1063,7 @@ export default function ParsePage() {
     if (!metadata) return [];
     const warnings = metadata.warnings;
     if (Array.isArray(warnings)) {
-      return warnings.map((warning) => stringifyValue(warning)).filter(Boolean);
+      return warnings as Array<string | { code?: string; message?: string; detail?: unknown }>;
     }
     if (typeof warnings === 'string' && warnings.trim()) {
       return [warnings.trim()];
@@ -1111,7 +1077,7 @@ export default function ParsePage() {
     return (
       parseSummary.rows_received > 0 &&
       parseSummary.valid_total === 0 &&
-      parseSummary.unmatched === 0
+      parseSummary.needs_review === 0
     );
   }, [debugInfo?.no_addresses_detected, parseSummary]);
 
@@ -1145,13 +1111,8 @@ export default function ParsePage() {
 
   const computedParseSummary = useMemo(() => {
     if (!parseSummary) return null;
-    const summaryFromRows = computeParseSummaryFromRowResults(rowResults);
-    return {
-      ...parseSummary,
-      ...summaryFromRows,
-      rows_received: rowResults.length || parseSummary.rows_received,
-    } satisfies ParseSummary;
-  }, [parseSummary, rowResults]);
+    return parseSummary;
+  }, [parseSummary]);
 
   useEffect(() => {
     setResultsPage(1);
@@ -1259,7 +1220,7 @@ export default function ParsePage() {
     if (!computedParseSummary) return null;
     return (
       computedParseSummary.valid_total +
-      computedParseSummary.unmatched +
+      computedParseSummary.needs_review +
       computedParseSummary.skipped +
       (computedParseSummary.out_of_scope ?? 0)
     );
@@ -1957,7 +1918,7 @@ export default function ParsePage() {
       };
       const hasRowAccounting = Boolean(parseResponse.summary && parseResponse.row_results);
       if (hasRowAccounting) {
-        const summary = parseResponse.summary as ParseSummary;
+        const summary = toParseSummary(normalizeJobSummary(parseResponse.summary));
         const rowAccountingMetadata: Record<string, unknown> = {
           ...((parsed.metadata as Record<string, unknown>) ?? {}),
         };
@@ -2094,7 +2055,7 @@ export default function ParsePage() {
       setProgressPercent(100);
       const hasRowAccounting = Boolean(parsed.summary && parsed.row_results);
       if (hasRowAccounting) {
-        const summary = parsed.summary as ParseSummary;
+        const summary = toParseSummary(normalizeJobSummary(parsed.summary));
         const rowAccountingMetadata: Record<string, unknown> = {
           ...((parsedRecord.metadata as Record<string, unknown>) ?? {}),
         };
@@ -3173,35 +3134,15 @@ export default function ParsePage() {
                   </button>
                 ) : null}
                 {parseSummary ? (
-                  <div className="flex items-center gap-2"> 
-                    <button
-                      type="button"
-                      onClick={() => void handleDownloadJobExport('propstream_import', 'PropStream Import')}
-                      disabled={!jobId || activeDownloadType !== null}
-                      className="rounded-lg border border-indigo-600 bg-indigo-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-500 dark:bg-indigo-500 dark:hover:bg-indigo-400"
-                    >
-                      {activeDownloadType === 'propstream_import' ? 'Downloading…' : 'PropStream Import'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void handleDownloadJobExport('unique_valid', 'Unique Valid')}
-                      disabled={!jobId || activeDownloadType !== null}
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
-                      {activeDownloadType === 'unique_valid' ? 'Downloading…' : 'Unique Valid'}
-                    </button>
-                    <ExportPanel
-                      mode="popover"
-                      triggerLabel="More Exports"
-                      catalog={exportCatalog}
-                      onDownload={(type, label) => {
-                        void handleDownloadJobExport(type, label);
-                      }}
-                      activeDownloadType={activeDownloadType}
-                      disabled={!jobId}
-                      excludeTypes={['propstream_import', 'unique_valid']}
-                    />
-                  </div>
+                  <ExportPanel
+                    triggerLabel="Export"
+                    catalog={exportCatalog}
+                    onDownload={(type, label) => {
+                      void handleDownloadJobExport(type, label);
+                    }}
+                    activeDownloadType={activeDownloadType}
+                    disabled={!jobId}
+                  />
                 ) : null}
                 {downloadSuccessLabel ? (
                   <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
@@ -3261,7 +3202,7 @@ export default function ParsePage() {
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  Needs Review ({computedParseSummary?.unmatched ?? 0})
+                  Needs Review ({computedParseSummary?.needs_review ?? 0})
                 </button>
                 <button
                   type="button"
@@ -3342,16 +3283,7 @@ export default function ParsePage() {
               headers or split columns.
             </div>
           ) : null}
-          {metadataWarnings.length ? (
-            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
-              <p className="font-semibold text-amber-800 dark:text-amber-100">Warnings</p>
-              <ul className="mt-2 list-disc space-y-1 pl-4">
-                {metadataWarnings.map((warning, index) => (
-                  <li key={`${warning}-${index}`}>{warning}</li>
-                ))}
-              </ul>
-            </div>
-          ) : null}
+          <JobWarnings warnings={metadataWarnings as Array<string | { code?: string; message?: string; detail?: unknown }>} />
           {cityValue && unmatchedCount > 0 ? (
             <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
               Some addresses failed because verification returned a different city. Leave City blank if
@@ -3408,7 +3340,7 @@ export default function ParsePage() {
               >
                 <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Needs Review</p>
                 <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                  {computedParseSummary?.unmatched ?? 0}
+                  {computedParseSummary?.needs_review ?? 0}
                 </p>
               </button>
               <button

@@ -167,7 +167,7 @@ export const computeParseSummaryFromRowResults = (rows: RowResult[]): ParseSumma
 
   const validUnique = validKeys.size;
   const duplicates = Math.max(validRows.length - validUnique, 0);
-  const unmatched = rows.filter(isNeedsReviewRow).length;
+  const needsReview = rows.filter(isNeedsReviewRow).length;
   const skipped = rows.filter(isSkippedRow).length;
   const outOfScope = rows.filter(isOutOfScopeRow).length;
 
@@ -175,10 +175,12 @@ export const computeParseSummaryFromRowResults = (rows: RowResult[]): ParseSumma
     rows_received: rows.length,
     valid_total: validRows.length,
     valid_unique: validUnique,
-    unmatched,
+    needs_review: needsReview,
     skipped,
     duplicates,
     out_of_scope: outOfScope,
+    matched: validRows.length,
+    attention_total: needsReview + outOfScope + skipped,
   };
 };
 

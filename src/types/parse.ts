@@ -1,11 +1,17 @@
 export type ParseSummary = {
   rows_received: number;
-  valid_unique: number;
   valid_total: number;
-  unmatched: number;
+  valid_unique: number;
+  needs_review: number;
+  out_of_scope: number;
   skipped: number;
   duplicates: number;
-  out_of_scope?: number;
+  matched: number;
+  attention_total: number;
+  google_calls_used?: number;
+  openai_ocr_calls_used?: number;
+  spend_usd?: number;
+  unmatched?: number;
 };
 
 export type CanonicalAddress = {

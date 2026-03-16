@@ -16,10 +16,15 @@ describe('export catalog utilities', () => {
         description: 'API description',
         intended_use: 'API intended use',
         file_type: 'CSV',
+        column_headers: ['a', 'b'],
+        row_count_estimate: 123,
       },
     ]);
 
-    expect(catalog.find((item) => item.type === 'unique_valid')?.description).toBe('API description');
+    const unique = catalog.find((item) => item.type === 'unique_valid');
+    expect(unique?.description).toBe('API description');
+    expect(unique?.headers).toEqual(['a', 'b']);
+    expect(unique?.rowCount).toBe(123);
     expect(catalog.some((item) => item.type === 'original_file')).toBe(true);
     expect(catalog.some((item) => item.type === 'propstream_import')).toBe(true);
   });

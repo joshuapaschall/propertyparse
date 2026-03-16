@@ -9,6 +9,7 @@ import { downloadJobExport, getJobExportCatalog, JobExportType, JobRecord, getJo
 import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
+import { normalizeJobSummary } from '../lib/jobSummary';
 import type { ExportCatalogItem } from '../types/exports';
 
 const pickValue = (job: JobRecord, keys: string[]) => {
@@ -114,10 +115,7 @@ export default function HistoryPage() {
     () =>
       jobs.map((job) => {
         const jobId = pickString(job, ['job_id', 'jobId', 'id']) ?? '';
-        const validUnique = pickNumber(job, ['valid_unique', 'validUnique']);
-        const needsReview =
-          pickNumber(job, ['needs_review', 'needsReview', 'needs_review_count']) ??
-          pickNumber(job, ['unmatched', 'unmatched_count', 'unmatchedCount']);
+        const summary = normalizeJobSummary(job);
         const state = pickString(job, ['state']);
         const county = pickString(job, ['county']);
         const city = pickString(job, ['city']);
@@ -136,14 +134,14 @@ export default function HistoryPage() {
             'file',
           ]),
           location: location || '--',
-          rowsReceived: pickNumber(job, ['rowsReceived', 'rows_received', 'total_rows', 'rows', 'rowCount']),
-          validUnique,
-          needsReview,
-          outOfScope: pickNumber(job, ['out_of_scope', 'outOfScope', 'out_of_scope_count']),
-          skipped: pickNumber(job, ['skipped', 'skipped_count']),
-          duplicates: pickNumber(job, ['duplicates', 'duplicates_count']),
-          spendUsd: pickNumber(job, ['spend_usd', 'spendUsd']),
-          calls: pickNumber(job, ['google_calls_used', 'googleCallsUsed', 'googleCalls', 'apiCallsUsed']),
+          rowsReceived: summary.rowsReceived,
+          validUnique: summary.validUnique,
+          needsReview: summary.needsReview,
+          outOfScope: summary.outOfScope,
+          skipped: summary.skipped,
+          duplicates: summary.duplicates,
+          spendUsd: summary.spendUsd || pickNumber(job, ['spend_usd', 'spendUsd']),
+          calls: summary.googleCallsUsed || pickNumber(job, ['google_calls_used', 'googleCallsUsed', 'googleCalls', 'apiCallsUsed']),
           status: normalizeStatus(pickString(job, ['status', 'job_status', 'state'])),
         };
       }),
@@ -301,8 +299,7 @@ export default function HistoryPage() {
                         </td>
                         <td className="px-4 py-2.5 text-right align-top" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.jobId); }}>
                           <ExportPanel
-                            mode="popover"
-                            triggerLabel="Export"
+                                                        triggerLabel="Export"
                             className="relative inline-block text-left"
                             catalog={catalogByJobId[row.jobId] ?? FALLBACK_EXPORT_CATALOG}
                             onDownload={(type, label) => {
