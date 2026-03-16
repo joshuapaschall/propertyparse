@@ -2894,6 +2894,7 @@ export default function ParsePage() {
     (reviewRow as Record<string, unknown> | null)?.mismatch_field || '';
   const reviewNeedsReview = reviewRow ? isNeedsReviewRow(reviewRow) : false;
   const reviewOutOfScope = reviewRow ? isOutOfScopeRow(reviewRow) : false;
+  const reviewSkipped = reviewRow ? isSkippedRow(reviewRow) : false;
   const reviewScopePass = !reviewOutOfScope;
   const canEditReview = reviewNeedsReview || reviewOutOfScope || reviewSkipped;
 
