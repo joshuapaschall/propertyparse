@@ -10,6 +10,7 @@ import {
   isOutOfScopeRow,
   isSkippedRow,
   stringifyPreview,
+  computeParseSummaryFromRowResults,
 } from '../lib/parseUtils';
 import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
@@ -142,11 +143,15 @@ export default function HistoryDetailPage() {
     setResultsPage(1);
   }, [activeTab, resultsPageSize]);
 
-  const parseSummary = useMemo(() => {
-    if (!results?.summary) return null;
-    return toParseSummary(normalizeJobSummary(results.summary));
-  }, [results?.summary]);
   const rowResults = useMemo(() => results?.row_results ?? [], [results]);
+
+  const parseSummary = useMemo(() => {
+    const backendSummary = results?.summary ? toParseSummary(normalizeJobSummary(results.summary)) : null;
+    if (!rowResults.length) return backendSummary;
+    const rowSummary = computeParseSummaryFromRowResults(rowResults);
+    if (!backendSummary) return rowSummary;
+    return { ...backendSummary, ...rowSummary };
+  }, [results?.summary, rowResults]);
   const canonicalAddresses = useMemo(
     () => (results?.canonical_addresses ?? []).map(normalizeCanonicalAddress),
     [results],
@@ -292,10 +297,10 @@ export default function HistoryDetailPage() {
             <div className="flex flex-wrap gap-3">
               {([
                 ['valid', 'Valid Unique'],
-                ['needs_review', 'Needs Review'],
-                ['out_of_scope', 'Out Of Scope'],
-                ['skipped', 'Skipped'],
-                ['duplicates', 'Duplicates'],
+                ['needs_review', 'Needs Review (rows)'],
+                ['out_of_scope', 'Out Of Scope (rows)'],
+                ['skipped', 'Skipped (rows)'],
+                ['duplicates', 'Duplicates (rows)'],
               ] as Array<[ResultsTab, string]>).map(([tab, label]) => (
                 <button
                   key={tab}
@@ -303,7 +308,7 @@ export default function HistoryDetailPage() {
                   onClick={() => setActiveTab(tab)}
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${activeTab === tab ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'}`}
                 >
-                  {label} ({tabCounts[tab]})
+                  {label} ({tabCounts[tab]}){tab !== 'valid' ? ` · ${totalCountByTab[tab]} groups` : ''}
                 </button>
               ))}
             </div>
