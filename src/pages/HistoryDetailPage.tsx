@@ -10,12 +10,11 @@ import {
   isOutOfScopeRow,
   isSkippedRow,
   stringifyPreview,
-  computeParseSummaryFromRowResults,
 } from '../lib/parseUtils';
 import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
-import { normalizeJobSummary, toParseSummary } from '../lib/jobSummary';
+import { deriveDisplayedParseSummary, normalizeJobSummary, toParseSummary } from '../lib/jobSummary';
 import type { ExportCatalogItem } from '../types/exports';
 import type { CanonicalAddress, RowResult } from '../types/parse';
 
@@ -147,10 +146,7 @@ export default function HistoryDetailPage() {
 
   const parseSummary = useMemo(() => {
     const backendSummary = results?.summary ? toParseSummary(normalizeJobSummary(results.summary)) : null;
-    if (!rowResults.length) return backendSummary;
-    const rowSummary = computeParseSummaryFromRowResults(rowResults);
-    if (!backendSummary) return rowSummary;
-    return { ...backendSummary, ...rowSummary };
+    return deriveDisplayedParseSummary(rowResults, backendSummary);
   }, [results?.summary, rowResults]);
   const canonicalAddresses = useMemo(
     () => (results?.canonical_addresses ?? []).map(normalizeCanonicalAddress),

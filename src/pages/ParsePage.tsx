@@ -24,7 +24,6 @@ import {
   isSkippedRow,
   isValidRow,
   stringifyPreview,
-  computeParseSummaryFromRowResults,
 } from '../lib/parseUtils';
 import { canStartParse, hasValidLocation } from '../lib/parseValidation';
 import { groupRows, type GroupedRow } from '../lib/groupRows';
@@ -59,7 +58,7 @@ import type {
 } from '../types/parse';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
 import JobWarnings from '../components/JobWarnings';
-import { normalizeJobSummary, normalizeUpdatedJobPayload, toParseSummary } from '../lib/jobSummary';
+import { deriveDisplayedParseSummary, deriveDisplayedRowsReceived, normalizeJobSummary, normalizeUpdatedJobPayload, toParseSummary } from '../lib/jobSummary';
 import type { ExportCatalogItem } from '../types/exports';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Verifying', 'AI fixing', 'Finalizing'];
@@ -207,6 +206,25 @@ const copyTextToClipboard = async (text: string) => {
   textarea.select();
   document.execCommand('copy');
   document.body.removeChild(textarea);
+};
+
+
+const downloadCsv = (filename: string, rows: Record<string, unknown>[]) => {
+  if (!rows.length) return;
+  const headers = Object.keys(rows[0]);
+  const body = rows
+    .map((row) => headers.map((header) => JSON.stringify(row[header] ?? '')).join(','))
+    .join('\n');
+  const csv = `${headers.join(',')}\n${body}`;
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 };
 
 const normalizeNumber = (value: unknown) => {
@@ -872,6 +890,7 @@ export default function ParsePage() {
         ]);
         const combinedJob: JobRecord = {
           ...(jobDetail.summary ?? {}),
+          ...(resultsResponse?.summary ?? {}),
           ...(jobDetail.job ?? {}),
         };
         let normalizedRows: RowResult[] = [];
@@ -917,12 +936,9 @@ export default function ParsePage() {
           setCampaignName(storedState.campaignName);
         }
         setParseTimestamp(createdAt);
-        setRowsReceived(
-          summary?.rows_received ??
-            pickNumber(combinedJob, ['rows_received', 'rowsReceived', 'total_rows', 'rows', 'rowCount']) ??
-            normalizedRows.length,
-        );
-        setParseSummary(summary);
+        const displayedSummary = deriveDisplayedParseSummary(normalizedRows, summary);
+        setRowsReceived(deriveDisplayedRowsReceived(normalizedRows, displayedSummary));
+        setParseSummary(displayedSummary);
         setCanonicalAddresses(buildCanonicalAddressesFromRows(normalizedRows));
         setRowResults(normalizedRows);
         setDuplicateGroups(buildDuplicateGroupsFromRows(normalizedRows));
@@ -940,8 +956,8 @@ export default function ParsePage() {
         setProgressPercent(100);
         setProgressInfo({
           phase: 'DONE',
-          done: summary?.rows_received ?? normalizedRows.length,
-          total: summary?.rows_received ?? normalizedRows.length,
+          done: deriveDisplayedRowsReceived(normalizedRows, displayedSummary),
+          total: deriveDisplayedRowsReceived(normalizedRows, displayedSummary),
           detail: null,
           cacheHits: cacheHitsValue,
           googleCallsUsed: googleCallsValue,
@@ -1113,18 +1129,10 @@ export default function ParsePage() {
   const canRerunWithoutCityFilter = Boolean(cityValue) && outOfScopeCityRowsCount > 0;
   const errorRows = useMemo(() => rowResults.filter(isErrorRow), [rowResults]);
 
-  const computedParseSummary = useMemo(() => {
-    if (!rowResults.length) return parseSummary;
-    const rowSummary = computeParseSummaryFromRowResults(rowResults);
-    if (!parseSummary) return rowSummary;
-    return {
-      ...parseSummary,
-      ...rowSummary,
-      google_calls_used: parseSummary.google_calls_used,
-      openai_ocr_calls_used: parseSummary.openai_ocr_calls_used,
-      spend_usd: parseSummary.spend_usd,
-    };
-  }, [parseSummary, rowResults]);
+  const computedParseSummary = useMemo(
+    () => deriveDisplayedParseSummary(rowResults, parseSummary),
+    [parseSummary, rowResults],
+  );
 
   useEffect(() => {
     setResultsPage(1);
@@ -1238,13 +1246,10 @@ export default function ParsePage() {
     );
   }, [computedParseSummary, metadata]);
 
-  const responseRowsReceived = useMemo(() => {
-    const metaRows =
-      (metadata?.rows_received as number) || (metadata?.rowsReceived as number) || null;
-    if (typeof metaRows === 'number') return metaRows;
-    if (parseSummary) return parseSummary.rows_received;
-    return rowsReceived;
-  }, [metadata, parseSummary, rowsReceived]);
+  const responseRowsReceived = useMemo(
+    () => deriveDisplayedRowsReceived(rowResults, computedParseSummary),
+    [computedParseSummary, rowResults],
+  );
 
   const isStartingParse = busy && progressInfo.phase === null;
 
@@ -1268,11 +1273,12 @@ export default function ParsePage() {
       return null;
     }
     const phaseLabel = progressInfo.phase === 'AI_FIXING' ? 'AI fixing' : progressInfo.phase === 'VERIFYING' || progressInfo.phase === 'VALIDATING' ? 'Verifying' : progressInfo.phase === 'EXTRACTING' ? 'Extracting' : progressInfo.phase === 'UPLOADING' ? 'Uploading' : progressInfo.phase === 'DONE' ? 'Finalizing' : 'Processing';
-    const detail = `${phaseLabel}: ${done ?? '--'}/${total ?? '--'} • Verification calls ${
+    const baseDetail = `${phaseLabel}: ${done ?? '--'}/${total ?? '--'} • Verification calls ${
       googleCallsValue ?? '--'
     } • Cache hits ${cacheHitsValue ?? '--'}`;
-    const detailWithBackend = backendDetail ? `${detail} • ${backendDetail}` : detail;
-    return progressInfo.eta ? `${detailWithBackend} • ETA ~ ${progressInfo.eta}` : detailWithBackend;
+    const detailText = backendDetail || baseDetail;
+    const hasReliableEta = Boolean(progressInfo.eta && progressInfo.eta !== '00:00' && progressInfo.phase !== 'DONE');
+    return hasReliableEta ? `${detailText} • ETA ~ ${progressInfo.eta}` : detailText;
   }, [isStartingParse, progressInfo]);
 
   const shouldShowProgress = useMemo(
@@ -1441,34 +1447,6 @@ export default function ParsePage() {
     }
 
     return '';
-  };
-
-  const getGoogleTypes = (row: RowResult) => {
-    const rowRecord = row as Record<string, unknown>;
-    const rawValue = rowRecord.google_types ?? rowRecord.types;
-    if (Array.isArray(rawValue)) {
-      return rawValue.filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
-    }
-    if (typeof rawValue === 'string' && rawValue.trim()) {
-      const trimmedValue = rawValue.trim();
-      if (trimmedValue.startsWith('[') && trimmedValue.endsWith(']')) {
-        try {
-          const parsed = JSON.parse(trimmedValue) as unknown;
-          if (Array.isArray(parsed)) {
-            return parsed.filter(
-              (value): value is string => typeof value === 'string' && value.trim().length > 0,
-            );
-          }
-        } catch {
-          // No-op: fall through to comma-split parsing.
-        }
-      }
-      return trimmedValue
-        .split(',')
-        .map((value) => value.trim())
-        .filter(Boolean);
-    }
-    return [] as string[];
   };
 
   const getReasonSummary = (row: RowResult) => {
@@ -1993,8 +1971,10 @@ export default function ParsePage() {
           rowAccountingMetadata.cache_hits = parsed.cache_hits;
         }
 
-        setParseSummary(summary);
-        setRowsReceived(responseRowsReceived);
+        const parsedRows = (parseResponse.row_results ?? []) as RowResult[];
+        const displayedSummary = deriveDisplayedParseSummary(parsedRows, summary);
+        setParseSummary(displayedSummary);
+        setRowsReceived(deriveDisplayedRowsReceived(parsedRows, displayedSummary));
         const canonicalRows = (parseResponse.canonical_addresses ?? []) as CanonicalAddress[];
         setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
         setRowResults((parseResponse.row_results ?? []) as RowResult[]);
@@ -2131,8 +2111,10 @@ export default function ParsePage() {
           rowAccountingMetadata.cache_hits = parsedRecord.cache_hits;
         }
 
-        setParseSummary(summary);
-        setRowsReceived(responseRowsReceived);
+        const parsedRows = (parsed.row_results ?? []) as RowResult[];
+        const displayedSummary = deriveDisplayedParseSummary(parsedRows, summary);
+        setParseSummary(displayedSummary);
+        setRowsReceived(deriveDisplayedRowsReceived(parsedRows, displayedSummary));
         const canonicalRows = (parsed.canonical_addresses ?? []) as CanonicalAddress[];
         setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
         setRowResults((parsed.row_results ?? []) as RowResult[]);
@@ -2380,9 +2362,7 @@ export default function ParsePage() {
         'apiCallsUsed',
       ]);
 
-      setRowsReceived((prev) =>
-        typeof totalRows === 'number' ? totalRows : prev,
-      );
+      setRowsReceived((prev) => Math.max(prev ?? 0, rowResults.length));
       setMetadata((prev) => {
         const next = { ...(prev ?? {}), ...((normalizedUpdatedJob ?? {}) as Record<string, unknown>) };
         if (typeof totalRows === 'number') next.rows_received = totalRows;
@@ -2393,7 +2373,7 @@ export default function ParsePage() {
         if (typeof googleCallsValue === 'number') next.google_calls_used = googleCallsValue;
         return next;
       });
-      setParseSummary((prev) => normalizedSummary ?? prev);
+      setParseSummary((prev) => deriveDisplayedParseSummary(rowResults, normalizedSummary ?? prev, prev));
     }
 
     if (freshReload && jobId) {
@@ -2455,7 +2435,7 @@ export default function ParsePage() {
       const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
       await handleRetryUpdates({
         updatedRows: updates,
-        updatedJob,
+        updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
       });
       setReviewDrafts((prev) => {
         const next = { ...prev };
@@ -2496,9 +2476,9 @@ export default function ParsePage() {
       showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
       return;
     }
-    const matchedAddress = getMatchedAddress(row);
-    if (!matchedAddress) {
-      showToast({ title: 'Matched address missing', variant: 'error' });
+    const approvalReady = Boolean(row.place_id);
+    if (!approvalReady) {
+      showToast({ title: 'Approval requires verified address', variant: 'error' });
       return;
     }
     if (isOutOfScopeRow(row) && !allowScopeOverride) {
@@ -2523,7 +2503,7 @@ export default function ParsePage() {
       const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
       await handleRetryUpdates({
         updatedRows: updates,
-        updatedJob,
+        updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
       });
       const hasDuplicate = updates.some((updatedRow) =>
         normalizeStatus(updatedRow.status).includes('DUPLICATE'),
@@ -2578,7 +2558,7 @@ export default function ParsePage() {
       const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
       await handleRetryUpdates({
         updatedRows: updates,
-        updatedJob,
+        updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
       });
       const duplicateCount = updates.filter((row) => normalizeStatus(row.status).includes('DUPLICATE')).length;
 
@@ -2882,7 +2862,7 @@ export default function ParsePage() {
   const reviewStatusLabel = reviewRow ? getStatusLabel(reviewRow) : '';
   const reviewDetectedAddress = reviewRow?.detected_address ?? reviewRow?.formatted_address ?? '';
   const reviewVerifiedAddress = reviewRow
-    ? reviewRow.formatted_address ?? getMatchedAddress(reviewRow)
+    ? getMatchedAddress(reviewRow)
     : '';
   const reviewSelectedState = reviewRow ? getScopeDebugValue(reviewRow, 'selected', 'state') : '';
   const reviewSelectedCounty = reviewRow ? getScopeDebugValue(reviewRow, 'selected', 'county') : '';
@@ -3647,7 +3627,7 @@ export default function ParsePage() {
                                     <td className="px-4 py-3 text-right">
                                       <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
                                         <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy}>Review</button>
-                                        <button type="button" onClick={() => void handleApproveMatched(row)} disabled={isRowBusy}>
+                                        <button type="button" onClick={() => void handleApproveMatched(row, true)} disabled={isRowBusy}>
                                           {approvingRowIds.has(row.source_row_id) ? '⏳ Approving…' : 'Approve matched'}
                                         </button>
                                       </div>
@@ -3864,7 +3844,7 @@ export default function ParsePage() {
                                     <td className="px-4 py-3 text-right">
                                       <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
                                         <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy}>Review</button>
-                                        <button type="button" onClick={() => void handleApproveMatched(row)} disabled={isRowBusy}>{approvingRowIds.has(row.source_row_id) ? '⏳ Approving…' : 'Approve matched'}</button>
+                                        <button type="button" onClick={() => void handleApproveMatched(row, isOutOfScopeRow(row))} disabled={isRowBusy}>{approvingRowIds.has(row.source_row_id) ? '⏳ Approving…' : 'Approve matched'}</button>
                                       </div>
                                     </td>
                                   </tr>
@@ -4203,7 +4183,7 @@ export default function ParsePage() {
                   {canEditReview ? (
                     <button type="button" onClick={async () => { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; await handleReviewRetry(); if (nextGroup) openReviewDrawer(nextGroup.displayRow); }} disabled={!canEditReview || reviewSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300">{reviewSaving ? 'Retrying...' : 'Retry & Next'}</button>
                   ) : null}
-                  <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; await handleApproveMatched(reviewRow, reviewOutOfScope); if (nextGroup) openReviewDrawer(nextGroup.displayRow); } }} disabled={!reviewRow || !getMatchedAddress(reviewRow) || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
+                  <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; await handleApproveMatched(reviewRow, reviewOutOfScope); if (nextGroup) openReviewDrawer(nextGroup.displayRow); } }} disabled={!reviewRow || !reviewRow.place_id || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
                 </div>
               </div>
             </div>

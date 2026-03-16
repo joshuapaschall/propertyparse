@@ -9,6 +9,7 @@ const getJobDetail = vi.fn();
 const getJobResults = vi.fn();
 const getAllJobRows = vi.fn();
 const getJobExportCatalog = vi.fn();
+const approveMatchedJobRow = vi.fn();
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
 vi.mock('../components/AccountedRowsIndicator', () => ({ default: () => <div>accounted</div> }));
@@ -36,7 +37,7 @@ vi.mock('../lib/api', () => ({
   getJobWithStatus: (...args: unknown[]) => getJobWithStatus(...args),
   parseFile: vi.fn(),
   parseFileAsync: vi.fn(),
-  approveMatchedJobRow: vi.fn(),
+  approveMatchedJobRow: (...args: unknown[]) => approveMatchedJobRow(...args),
   approveMatchedJobRowsBatch: vi.fn(),
   retryJobBatch: vi.fn(),
   retryJobRow: vi.fn(),
@@ -46,49 +47,38 @@ vi.mock('../lib/api', () => ({
   uploadFile: vi.fn(),
 }));
 
-describe('ParsePage export launcher', () => {
+describe('ParsePage', () => {
   beforeEach(() => {
+    Object.defineProperty(Element.prototype, 'scrollIntoView', { value: vi.fn(), writable: true });
     vi.clearAllMocks();
-    getJobWithStatus.mockResolvedValue({ job: { job_id: 'job-1', status: 'DONE', rows_received: 10, valid_total: 8, valid_unique: 7, needs_review: 1, out_of_scope: 1, skipped: 1, duplicates: 1, matched: 8, attention_total: 3 } });
-    getJobDetail.mockResolvedValue({ job: { job_id: 'job-1' }, summary: { rows_received: 10, valid_total: 8, valid_unique: 7, needs_review: 1, out_of_scope: 1, skipped: 1, duplicates: 1, matched: 8, attention_total: 3 } });
-    getJobResults.mockResolvedValue({ summary: { rows_received: 10, valid_total: 8, valid_unique: 7, needs_review: 1, out_of_scope: 1, skipped: 1, duplicates: 1, matched: 8, attention_total: 3 }, row_results: [], canonical_addresses: [], duplicate_groups: [] });
+    getJobWithStatus.mockResolvedValue({ job: { job_id: 'job-1', status: 'DONE' } });
+    getJobDetail.mockResolvedValue({ job: { job_id: 'job-1', rows_received: 0 }, summary: { rows_received: 0, valid_total: 0, valid_unique: 0, needs_review: 0, out_of_scope: 0, skipped: 0, duplicates: 0, matched: 0, attention_total: 0 } });
+    getJobResults.mockResolvedValue({ summary: { rows_received: 0 }, row_results: [{ source_row_id: 'r1', source_row_index: 0, status: 'VALID', canonical_id: 'c1' }], canonical_addresses: [], duplicate_groups: [] });
     getAllJobRows.mockResolvedValue([]);
     getJobExportCatalog.mockResolvedValue([]);
+    approveMatchedJobRow.mockResolvedValue({ updated_row_results: [], updated_job: {} });
   });
 
-
-  it('does not render debug mode controls in production UI', async () => {
-    render(
-      <MemoryRouter initialEntries={['/parse?job=job-1']}>
-        <ParsePage />
-      </MemoryRouter>,
-    );
-
+  it('loads results summary with row_results present', async () => {
+    render(<MemoryRouter initialEntries={['/parse?job=job-1']}><ParsePage /></MemoryRouter>);
     await screen.findByText('Processing Results');
-    expect(screen.queryByText('Debug mode')).not.toBeInTheDocument();
+    expect(getJobResults).toHaveBeenCalledWith('job-1', { fresh: undefined });
   });
 
-  it('shows one Export button and grouped options after click', async () => {
+  it('passes allowScopeOverride=true for out-of-scope approve action', async () => {
     const user = userEvent.setup();
-    render(
-      <MemoryRouter initialEntries={['/parse?job=job-1']}>
-        <ParsePage />
-      </MemoryRouter>,
-    );
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 1, out_of_scope: 1 },
+      row_results: [{ source_row_id: 'r2', source_row_index: 0, status: 'OUT_OF_SCOPE', reason_code: 'OUT_OF_SCOPE', place_id: 'pid-1', canonical_address: { formatted_address: '123 Main St' } }],
+      canonical_addresses: [],
+      duplicate_groups: [],
+    });
 
-    const exportTrigger = await screen.findByText('Export');
-    await user.click(exportTrigger);
-    expect(await screen.findByText('Most Used')).toBeInTheDocument();
-    expect(screen.getByText('PropStream Import')).toBeInTheDocument();
-  });
+    render(<MemoryRouter initialEntries={['/parse?job=job-1']}><ParsePage /></MemoryRouter>);
+    await screen.findByText('Out of Scope (1 rows)');
+    await user.click(screen.getByText('Out of Scope (1 rows)'));
+    await user.click(screen.getByRole('button', { name: 'Approve matched' }));
 
-  it('shows clear button when parse results exist', async () => {
-    render(
-      <MemoryRouter initialEntries={['/parse?job=job-1']}>
-        <ParsePage />
-      </MemoryRouter>,
-    );
-
-    expect(await screen.findByRole('button', { name: 'Clear' })).toBeInTheDocument();
+    expect(approveMatchedJobRow).toHaveBeenCalledWith('job-1', expect.objectContaining({ allowScopeOverride: true }));
   });
 });

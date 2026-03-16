@@ -1,4 +1,5 @@
-import type { ParseSummary } from '../types/parse';
+import type { ParseSummary, RowResult } from '../types/parse';
+import { computeParseSummaryFromRowResults } from './parseUtils';
 
 export type NormalizedJobSummary = {
   rowsReceived: number;
@@ -108,5 +109,43 @@ export const normalizeUpdatedJobPayload = (input: unknown) => {
   return {
     job: Object.keys(mergedJob).length > 0 ? mergedJob : null,
     parseSummary: Object.keys(mergedJob).length > 0 ? toParseSummary(normalizeJobSummary(mergedJob)) : null,
+  };
+};
+
+export const deriveDisplayedRowsReceived = (
+  rowResults: RowResult[],
+  summary: ParseSummary | null | undefined,
+) => {
+  const backendRows = summary?.rows_received ?? 0;
+  return Math.max(rowResults.length, backendRows);
+};
+
+export const deriveDisplayedParseSummary = (
+  rowResults: RowResult[],
+  ...summaryCandidates: Array<ParseSummary | null | undefined>
+): ParseSummary | null => {
+  const firstSummary = summaryCandidates.find(Boolean) ?? null;
+  if (!rowResults.length) {
+    return firstSummary;
+  }
+
+  const rowSummary = computeParseSummaryFromRowResults(rowResults);
+  const backendCounters = summaryCandidates.reduce(
+    (acc, summary) => ({
+      google_calls_used: summary?.google_calls_used ?? acc.google_calls_used,
+      openai_ocr_calls_used: summary?.openai_ocr_calls_used ?? acc.openai_ocr_calls_used,
+      spend_usd: summary?.spend_usd ?? acc.spend_usd,
+    }),
+    {
+      google_calls_used: 0,
+      openai_ocr_calls_used: 0,
+      spend_usd: 0,
+    },
+  );
+
+  return {
+    ...rowSummary,
+    ...backendCounters,
+    rows_received: Math.max(rowSummary.rows_received, firstSummary?.rows_received ?? 0),
   };
 };
