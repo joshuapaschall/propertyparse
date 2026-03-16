@@ -84,3 +84,29 @@ export const toParseSummary = (summary: NormalizedJobSummary): ParseSummary => (
   openai_ocr_calls_used: summary.openAIOcrCallsUsed,
   spend_usd: summary.spendUsd,
 });
+
+type JobSummaryEnvelope = {
+  job?: unknown;
+  summary?: unknown;
+};
+
+const toObjectRecord = (input: unknown): Record<string, unknown> | null =>
+  input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
+
+export const normalizeUpdatedJobPayload = (input: unknown) => {
+  const envelope = toObjectRecord(input) as JobSummaryEnvelope | null;
+  const nestedJob = toObjectRecord(envelope?.job);
+  const nestedSummary = toObjectRecord(envelope?.summary);
+  const flatRecord = toObjectRecord(input);
+
+  const mergedJob = {
+    ...(nestedSummary ?? {}),
+    ...(nestedJob ?? {}),
+    ...((nestedJob || nestedSummary) ? {} : (flatRecord ?? {})),
+  };
+
+  return {
+    job: Object.keys(mergedJob).length > 0 ? mergedJob : null,
+    parseSummary: Object.keys(mergedJob).length > 0 ? toParseSummary(normalizeJobSummary(mergedJob)) : null,
+  };
+};

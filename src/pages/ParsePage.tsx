@@ -24,6 +24,7 @@ import {
   isSkippedRow,
   isValidRow,
   stringifyPreview,
+  computeParseSummaryFromRowResults,
 } from '../lib/parseUtils';
 import { canStartParse, hasValidLocation } from '../lib/parseValidation';
 import { groupRows, type GroupedRow } from '../lib/groupRows';
@@ -58,10 +59,10 @@ import type {
 } from '../types/parse';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
 import JobWarnings from '../components/JobWarnings';
-import { normalizeJobSummary, toParseSummary } from '../lib/jobSummary';
+import { normalizeJobSummary, normalizeUpdatedJobPayload, toParseSummary } from '../lib/jobSummary';
 import type { ExportCatalogItem } from '../types/exports';
 
-const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Parsing', 'Validating', 'Finalizing'];
+const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Verifying', 'AI fixing', 'Finalizing'];
 const ASYNC_PARSE_FILE_SIZE_THRESHOLD = 5 * 1024 * 1024;
 const ASYNC_PARSE_MIME_PREFIXES = ['application/pdf', 'image/'];
 const ASYNC_PARSE_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'tiff', 'tif', 'bmp', 'heic', 'heif'];
@@ -691,7 +692,10 @@ export default function ParsePage() {
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const pollingRef = useRef<number | null>(null);
   const busyRef = useRef(busy);
-  const progressSamplesRef = useRef<{ timestamp: number; done: number }[]>([]);
+  const progressSamplesRef = useRef<{ timestamp: number; done: number; total: number }[]>([]);
+  const etaSecondsRef = useRef<number | null>(null);
+  const activeProgressJobIdRef = useRef<string | null>(null);
+  const resetInProgressRef = useRef(false);
   const reviewInputRef = useRef<HTMLInputElement | null>(null);
   const downloadSuccessTimerRef = useRef<number | null>(null);
 
@@ -970,7 +974,7 @@ export default function ParsePage() {
     const jobParam = params.get('job');
     const stored = readLastJobState();
     const resolvedJobId = jobParam ?? stored?.jobId ?? null;
-    if (!resolvedJobId || busy || rehydrating) return;
+    if (!resolvedJobId || busy || rehydrating || resetInProgressRef.current) return;
     if (jobId === resolvedJobId && parseSummary) return;
     void loadJobResults(resolvedJobId, stored ?? null, {
       syncUrlOnSuccess: !jobParam && Boolean(stored?.jobId),
@@ -1110,9 +1114,17 @@ export default function ParsePage() {
   const errorRows = useMemo(() => rowResults.filter(isErrorRow), [rowResults]);
 
   const computedParseSummary = useMemo(() => {
-    if (!parseSummary) return null;
-    return parseSummary;
-  }, [parseSummary]);
+    if (!rowResults.length) return parseSummary;
+    const rowSummary = computeParseSummaryFromRowResults(rowResults);
+    if (!parseSummary) return rowSummary;
+    return {
+      ...parseSummary,
+      ...rowSummary,
+      google_calls_used: parseSummary.google_calls_used,
+      openai_ocr_calls_used: parseSummary.openai_ocr_calls_used,
+      spend_usd: parseSummary.spend_usd,
+    };
+  }, [parseSummary, rowResults]);
 
   useEffect(() => {
     setResultsPage(1);
@@ -1255,7 +1267,8 @@ export default function ParsePage() {
     ) {
       return null;
     }
-    const detail = `Validating addresses: ${done ?? '--'}/${total ?? '--'} • Verification calls ${
+    const phaseLabel = progressInfo.phase === 'AI_FIXING' ? 'AI fixing' : progressInfo.phase === 'VERIFYING' || progressInfo.phase === 'VALIDATING' ? 'Verifying' : progressInfo.phase === 'EXTRACTING' ? 'Extracting' : progressInfo.phase === 'UPLOADING' ? 'Uploading' : progressInfo.phase === 'DONE' ? 'Finalizing' : 'Processing';
+    const detail = `${phaseLabel}: ${done ?? '--'}/${total ?? '--'} • Verification calls ${
       googleCallsValue ?? '--'
     } • Cache hits ${cacheHitsValue ?? '--'}`;
     const detailWithBackend = backendDetail ? `${detail} • ${backendDetail}` : detail;
@@ -1686,7 +1699,12 @@ export default function ParsePage() {
   const findGroupForRow = (groups: GroupedRow[], row: RowResult) =>
     groups.find((group) => group.memberRowIds.includes(row.source_row_id)) ?? null;
 
-  const activeReviewGroups = activeTab === 'out_of_scope' ? outOfScopeGroups : needsReviewGroups;
+  const activeReviewGroups =
+    activeTab === 'out_of_scope'
+      ? outOfScopeGroups
+      : activeTab === 'skipped'
+        ? groupRows(skippedRows)
+        : needsReviewGroups;
   const activeReviewGroup = reviewRow ? findGroupForRow(activeReviewGroups, reviewRow) : null;
 
   const openReviewDrawer = (row: RowResult, focusEdit = false) => {
@@ -1808,7 +1826,9 @@ export default function ParsePage() {
 
   const startPolling = (jobIdToWatch: string, options?: { onFinished?: () => Promise<void> | void }) => {
     stopPolling();
+    activeProgressJobIdRef.current = jobIdToWatch;
     progressSamplesRef.current = [];
+    etaSecondsRef.current = null;
     pollingRef.current = window.setInterval(async () => {
       try {
         const { job } = await getJobWithStatus(jobIdToWatch);
@@ -1818,6 +1838,14 @@ export default function ParsePage() {
           normalizeNumber(job.progress_done) ?? normalizeNumber(job.progressDone) ?? null;
         const total =
           normalizeNumber(job.progress_total) ?? normalizeNumber(job.progressTotal) ?? null;
+        const backendPercent =
+          normalizeNumber((job as Record<string, unknown>).progress_percent) ??
+          normalizeNumber((job as Record<string, unknown>).progressPercent) ??
+          null;
+        const backendEtaSeconds =
+          normalizeNumber((job as Record<string, unknown>).progress_eta_seconds) ??
+          normalizeNumber((job as Record<string, unknown>).progressEtaSeconds) ??
+          null;
         const cacheHitsValue =
           normalizeNumber(job.cache_hits) ?? normalizeNumber(job.cacheHits) ?? null;
         const googleCallsValue =
@@ -1829,33 +1857,54 @@ export default function ParsePage() {
         const updatedAtValue = job.updated_at ?? job.updatedAt;
         const updatedAt =
           typeof updatedAtValue === 'string' ? new Date(updatedAtValue).getTime() : Date.now();
+
         if (typeof done === 'number' && typeof total === 'number' && total > 0) {
           progressSamplesRef.current = [
-            ...progressSamplesRef.current.slice(-2),
-            { timestamp: updatedAt, done },
+            ...progressSamplesRef.current.slice(-14),
+            { timestamp: updatedAt, done, total },
           ];
         }
+
         const samples = progressSamplesRef.current;
-        let eta = null;
-        if (samples.length >= 2 && typeof done === 'number' && typeof total === 'number') {
+        let etaSeconds: number | null = backendEtaSeconds;
+        if (etaSeconds === null && samples.length >= 5 && typeof done === 'number' && typeof total === 'number') {
           const first = samples[0];
           const last = samples[samples.length - 1];
-          const timeDelta = last.timestamp - first.timestamp;
+          const timeDeltaMs = last.timestamp - first.timestamp;
           const doneDelta = last.done - first.done;
-          if (timeDelta > 0 && doneDelta > 0) {
-            const ratePerMs = doneDelta / timeDelta;
-            const remaining = total - done;
-            const etaSeconds = remaining > 0 ? remaining / ratePerMs / 1000 : 0;
-            eta = formatEta(etaSeconds);
+          if (timeDeltaMs >= 4000 && doneDelta > 0) {
+            const ratePerSec = doneDelta / (timeDeltaMs / 1000);
+            const remaining = Math.max(total - done, 0);
+            etaSeconds = ratePerSec > 0 ? remaining / ratePerSec : null;
           }
         }
-        const percent = computeProgressPercent(phase, done, total);
-        if (typeof percent === 'number') {
-          setProgressPercent(Math.round(percent));
+
+        if (etaSeconds !== null && Number.isFinite(etaSeconds)) {
+          const prevEta = etaSecondsRef.current;
+          const raw = Math.max(0, etaSeconds);
+          if (prevEta === null) {
+            etaSecondsRef.current = raw;
+          } else {
+            const clamped = Math.min(prevEta * 1.35 + 8, Math.max(prevEta * 0.7 - 8, raw));
+            etaSecondsRef.current = prevEta * 0.7 + clamped * 0.3;
+          }
+        }
+
+        const computedPercent = computeProgressPercent(phase, done, total);
+        const rawPercent = typeof backendPercent === 'number' ? backendPercent : computedPercent;
+        if (typeof rawPercent === 'number') {
+          setProgressPercent((prev) => {
+            const normalized = Math.max(0, Math.min(100, Math.round(rawPercent)));
+            if (activeProgressJobIdRef.current !== jobIdToWatch) return normalized;
+            if (prev === null) return normalized;
+            return Math.max(prev, normalized);
+          });
         }
         if (phase) {
           setProgressStep(mapPhaseToStep(phase));
         }
+
+        const showEta = samples.length >= 5;
         setProgressInfo({
           phase,
           done,
@@ -1863,7 +1912,7 @@ export default function ParsePage() {
           detail: progressDetail,
           cacheHits: cacheHitsValue,
           googleCallsUsed: googleCallsValue,
-          eta,
+          eta: showEta && etaSecondsRef.current !== null ? formatEta(etaSecondsRef.current) : null,
         });
         setPollErrorCount(0);
         setPollError(null);
@@ -2007,7 +2056,8 @@ export default function ParsePage() {
     setLegacyMode(false);
     setIsJobReload(false);
     setProgressStep(0);
-    setProgressPercent(5);
+    setProgressPercent(null);
+    etaSecondsRef.current = null;
     setPollError(null);
     setPollErrorCount(0);
     setProcessingReportFilter('all');
@@ -2295,7 +2345,9 @@ export default function ParsePage() {
     }
 
     if (updatedJob) {
-      const totalRows = pickNumberFromRecord(updatedJob, [
+      const { job: normalizedUpdatedJob, parseSummary: normalizedSummary } = normalizeUpdatedJobPayload(updatedJob);
+      if (!normalizedUpdatedJob && !normalizedSummary) return;
+      const totalRows = pickNumberFromRecord((normalizedUpdatedJob ?? {}) as Record<string, unknown>, [
         'rows_received',
         'rowsReceived',
         'total_rows',
@@ -2332,7 +2384,7 @@ export default function ParsePage() {
         typeof totalRows === 'number' ? totalRows : prev,
       );
       setMetadata((prev) => {
-        const next = { ...(prev ?? {}) };
+        const next = { ...(prev ?? {}), ...((normalizedUpdatedJob ?? {}) as Record<string, unknown>) };
         if (typeof totalRows === 'number') next.rows_received = totalRows;
         if (typeof matchedCount === 'number') next.matched_count = matchedCount;
         if (typeof unmatchedCount === 'number') next.unmatched_count = unmatchedCount;
@@ -2341,14 +2393,7 @@ export default function ParsePage() {
         if (typeof googleCallsValue === 'number') next.google_calls_used = googleCallsValue;
         return next;
       });
-      setParseSummary((prev) =>
-        prev
-          ? {
-              ...prev,
-              rows_received: typeof totalRows === 'number' ? totalRows : prev.rows_received,
-            }
-          : prev,
-      );
+      setParseSummary((prev) => normalizedSummary ?? prev);
     }
 
     if (freshReload && jobId) {
@@ -2368,7 +2413,11 @@ export default function ParsePage() {
   };
 
   const handleClearResults = () => {
+    resetInProgressRef.current = true;
     resetParseUi();
+    window.setTimeout(() => {
+      resetInProgressRef.current = false;
+    }, 0);
   };
 
   const handleReviewRetry = async () => {
@@ -2403,7 +2452,7 @@ export default function ParsePage() {
             )
           : await retryJobRow(jobId, memberRows[0].source_row_id, trimmedAddress, forceRefresh);
       const updates = response.updated_row_results ?? response.updated_rows ?? [];
-      const updatedJob = response.updated_job as Record<string, unknown> | undefined;
+      const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob,
@@ -2471,7 +2520,7 @@ export default function ParsePage() {
         allowScopeOverride,
       });
       const updates = response.updated_row_results ?? response.updated_rows ?? [];
-      const updatedJob = response.updated_job as Record<string, unknown> | undefined;
+      const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob,
@@ -2526,7 +2575,7 @@ export default function ParsePage() {
       const approvedCount = metadata?.approved_count ?? updates.length;
       const failedCount = metadata?.failed_count ?? failedRows.length;
       const requestedCount = metadata?.requested_count ?? rowIds.length;
-      const updatedJob = response.updated_job as Record<string, unknown> | undefined;
+      const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob,
@@ -2799,11 +2848,6 @@ export default function ParsePage() {
                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                     {renderReasonCell(row)}
                   </td>
-                  {showDebugMode ? (
-                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                      {stringifyPreview(row.raw_row)}
-                    </td>
-                  ) : null}
                   <td className="px-4 py-3 text-right">
                     <div className="flex flex-wrap justify-end gap-2">
                       <button
@@ -2850,8 +2894,9 @@ export default function ParsePage() {
     (reviewRow as Record<string, unknown> | null)?.mismatch_field || '';
   const reviewNeedsReview = reviewRow ? isNeedsReviewRow(reviewRow) : false;
   const reviewOutOfScope = reviewRow ? isOutOfScopeRow(reviewRow) : false;
+  const reviewSkipped = reviewRow ? isSkippedRow(reviewRow) : false;
   const reviewScopePass = !reviewOutOfScope;
-  const canEditReview = reviewNeedsReview;
+  const canEditReview = reviewNeedsReview || reviewOutOfScope || reviewSkipped;
 
   const handleCopyRowJson = async (payload: unknown) => {
     try {
@@ -3012,20 +3057,6 @@ export default function ParsePage() {
                   >
                     {parseCtaLabel}
                   </button>
-                  {fileId && hasLocation ? (
-                    <button
-                      type="button"
-                      onClick={() => void runParseWithExistingUpload(fileId)}
-                      disabled={!canRerunSameUpload}
-                      className={`rounded-xl border px-4 py-3 text-sm font-semibold transition ${
-                        canRerunSameUpload
-                          ? 'border-indigo-200 text-indigo-700 hover:bg-indigo-50 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-500/10'
-                          : 'border-slate-200 text-slate-400 dark:border-slate-700 dark:text-slate-500'
-                      }`}
-                    >
-                      Re-run (use same upload)
-                    </button>
-                  ) : null}
                 </div>
               </div>
               {error ? (
@@ -3089,26 +3120,6 @@ export default function ParsePage() {
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2 rounded-full border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                  <span>Debug mode</span>
-                  <button
-                    type="button"
-                    onClick={() => setShowDebugMode((prev) => !prev)}
-                    className={`relative inline-flex h-5 w-9 items-center rounded-full border transition ${
-                      showDebugMode
-                        ? 'border-indigo-600 bg-indigo-600'
-                        : 'border-slate-300 bg-slate-200 dark:border-slate-600 dark:bg-slate-700'
-                    }`}
-                    role="switch"
-                    aria-checked={showDebugMode}
-                  >
-                    <span
-                      className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition dark:bg-slate-100 ${
-                        showDebugMode ? 'translate-x-4' : 'translate-x-1'
-                      }`}
-                    />
-                  </button>
-                </div>
                 {parseSummary ? (
                   <button
                     type="button"
@@ -3149,33 +3160,6 @@ export default function ParsePage() {
                     Downloaded
                   </span>
                 ) : null}
-                {hasPersistableResults ? (
-                  <button
-                    type="button"
-                    onClick={handleClearResults}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Clear results / Start new parse
-                  </button>
-                ) : null}
-                {showDebugMode ? (
-                  <button
-                    type="button"
-                    onClick={handleCopyDebugInfo}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Copy debug info
-                  </button>
-                ) : null}
-                {showDebugMode && legacyMode ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowRaw((prev) => !prev)}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    {showRaw ? 'Hide Source / Raw' : 'Show Source / Raw'}
-                  </button>
-                ) : null}
               </div>
             </div>
 
@@ -3202,7 +3186,7 @@ export default function ParsePage() {
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  Needs Review ({computedParseSummary?.needs_review ?? 0})
+                  Needs Review ({computedParseSummary?.needs_review ?? 0} rows)
                 </button>
                 <button
                   type="button"
@@ -3213,7 +3197,7 @@ export default function ParsePage() {
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  Skipped ({computedParseSummary?.skipped ?? 0})
+                  Skipped ({computedParseSummary?.skipped ?? 0} rows)
                 </button>
                 <button
                   type="button"
@@ -3236,7 +3220,7 @@ export default function ParsePage() {
                         : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                     }`}
                   >
-                    Out of Scope ({computedParseSummary?.out_of_scope})
+                    Out of Scope ({computedParseSummary?.out_of_scope} rows)
                   </button>
                 ) : null}
               </div>
@@ -4160,7 +4144,7 @@ export default function ParsePage() {
               </div>
 
               <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
-                {reviewNeedsReview ? (
+                {canEditReview ? (
                   <>
                     <div className="flex items-center justify-between gap-3">
                       <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
@@ -4207,10 +4191,10 @@ export default function ParsePage() {
                     Close
                   </button>
                   <button type="button" onClick={() => navigateReviewRow('next')} disabled={!canReviewNext} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Skip & Next</button>
-                  {reviewNeedsReview ? (
+                  {canEditReview ? (
                     <button type="button" onClick={async () => { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; await handleReviewRetry(); if (nextGroup) openReviewDrawer(nextGroup.displayRow); }} disabled={!canEditReview || reviewSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300">{reviewSaving ? 'Retrying...' : 'Retry & Next'}</button>
                   ) : null}
-                  <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; await handleApproveMatched(reviewRow, reviewOutOfScope); if (nextGroup) openReviewDrawer(nextGroup.displayRow); } }} disabled={!reviewRow || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
+                  <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; await handleApproveMatched(reviewRow, reviewOutOfScope); if (nextGroup) openReviewDrawer(nextGroup.displayRow); } }} disabled={!reviewRow || !getMatchedAddress(reviewRow) || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
                 </div>
               </div>
             </div>
