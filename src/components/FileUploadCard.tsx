@@ -40,6 +40,7 @@ export default function FileUploadCard({ file, onChange }: FileUploadCardProps) 
           onChange={(event) => {
             const nextFile = event.target.files?.[0] ?? null;
             onChange(nextFile);
+            if (!nextFile && inputRef.current) inputRef.current.value = '';
           }}
         />
         <div className="space-y-2">
@@ -77,7 +78,10 @@ export default function FileUploadCard({ file, onChange }: FileUploadCardProps) 
             </button>
             <button
               type="button"
-              onClick={() => onChange(null)}
+              onClick={() => {
+                onChange(null);
+                if (inputRef.current) inputRef.current.value = '';
+              }}
               className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 shadow-sm transition hover:bg-rose-100 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200 dark:hover:bg-rose-500/20"
             >
               Remove

@@ -56,6 +56,18 @@ describe('ParsePage export launcher', () => {
     getJobExportCatalog.mockResolvedValue([]);
   });
 
+
+  it('does not render debug mode controls in production UI', async () => {
+    render(
+      <MemoryRouter initialEntries={['/parse?job=job-1']}>
+        <ParsePage />
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('Processing Results');
+    expect(screen.queryByText('Debug mode')).not.toBeInTheDocument();
+  });
+
   it('shows one Export button and grouped options after click', async () => {
     const user = userEvent.setup();
     render(
