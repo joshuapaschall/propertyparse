@@ -28,9 +28,21 @@ describe('HistoryDetailPage exports', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getJobDetail.mockResolvedValue({ job: { display_name: 'Test', created_at: new Date().toISOString() }, summary: {} });
-    getJobResults.mockResolvedValue({ summary: { rows_received: 10, valid_total: 8, valid_unique: 7, needs_review: 1, out_of_scope: 1, skipped: 1, duplicates: 1, matched: 8, attention_total: 3 }, row_results: [], canonical_addresses: [] });
+    getJobResults.mockResolvedValue({ summary: { rows_received: 10, valid_total: 8, valid_unique: 7, needs_review: 1, out_of_scope: 1, skipped: 1, duplicates: 1, matched: 8, attention_total: 3 }, row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', detected_address: '123 Main' }], canonical_addresses: [] });
     getJobExportCatalog.mockResolvedValue([]);
     downloadJobExport.mockResolvedValue({ blob: new Blob(['x']), filename: 'original-upload.xlsx' });
+  });
+
+  it('renders row/group labels consistently', async () => {
+    render(
+      <MemoryRouter initialEntries={['/history/job-1']}>
+        <Routes>
+          <Route path="/history/:jobId" element={<HistoryDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Needs Review \(rows\)/)).toBeInTheDocument();
   });
 
   it('renders one compact Export trigger and grouped options after interaction', async () => {
