@@ -7,6 +7,7 @@ import type {
 } from '../types/parse';
 import { getAuthHeaderState } from './authState';
 import { supabase } from './supabase';
+import type { ExportCatalogResponseItem } from '../types/exports';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -26,6 +27,7 @@ type ApiResponse<T> = {
 export type JobRecord = Record<string, JsonValue>;
 export type JobExportType =
   | 'original_file'
+  | 'propstream_import'
   | 'unique_valid'
   | 'needs_review'
   | 'processing_report'
@@ -35,6 +37,7 @@ export type JobExportType =
 
 export const JOB_EXPORT_TYPES: JobExportType[] = [
   'original_file',
+  'propstream_import',
   'unique_valid',
   'needs_review',
   'processing_report',
@@ -687,4 +690,15 @@ export async function downloadJobExport(jobId: string, type: JobExportType) {
     getFilenameFromDisposition(res.headers.get('content-disposition')) ??
     `job-${jobId}-${type}.csv`;
   return { blob: await res.blob(), filename };
+}
+
+export async function getJobExportCatalog(jobId: string) {
+  const res = await requestJson<ApiResponse<ExportCatalogResponseItem[]> & { catalog?: ExportCatalogResponseItem[] }>(
+    `/jobs/${jobId}/exports/catalog`,
+    {
+      method: 'GET',
+      headers: getAuthHeaders(),
+    },
+  );
+  return (res.catalog ?? res.items ?? res.data ?? []) as ExportCatalogResponseItem[];
 }

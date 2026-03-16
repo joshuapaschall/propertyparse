@@ -66,3 +66,55 @@ describe('API error handling', () => {
     throw new Error('Expected runAiFixFlaggedRows to throw');
   });
 });
+
+
+describe('export APIs', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.restoreAllMocks();
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com');
+
+    const { setAuthHeaderState } = await import('./authState');
+    setAuthHeaderState({
+      accessToken: 'token-123',
+      orgId: 'org-123',
+      userId: 'user-123',
+      role: 'admin',
+    });
+  });
+
+  afterEach(async () => {
+    const { clearAuthHeaderState } = await import('./authState');
+    clearAuthHeaderState();
+    vi.unstubAllEnvs();
+  });
+
+  it('loads export catalog from backend endpoint', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            catalog: [
+              {
+                type: 'propstream_import',
+                label: 'PropStream Import',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        ),
+      ),
+    );
+
+    const { getJobExportCatalog } = await import('./api');
+    const catalog = await getJobExportCatalog('job-123');
+
+    expect(catalog).toEqual([
+      {
+        type: 'propstream_import',
+        label: 'PropStream Import',
+      },
+    ]);
+  });
+});

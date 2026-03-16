@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import TablePagination from '../components/TablePagination';
-import { downloadJobExport, getJobDetail, getJobResults, JobExportType, JobRecord } from '../lib/api';
+import { downloadJobExport, getJobDetail, getJobExportCatalog, getJobResults, JobExportType, JobRecord } from '../lib/api';
 import { groupRows, GroupedRow } from '../lib/groupRows';
 import {
   getReasonMetadata,
@@ -12,17 +12,10 @@ import {
   stringifyPreview,
 } from '../lib/parseUtils';
 import { useToast } from '../components/ui/ToastProvider';
+import ExportPanel from '../components/exports/ExportPanel';
+import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
+import type { ExportCatalogItem } from '../types/exports';
 import type { CanonicalAddress, ParseSummary, RowResult } from '../types/parse';
-
-const EXPORT_OPTIONS: Array<{ label: string; type: JobExportType }> = [
-  { label: 'Original File Uploaded', type: 'original_file' },
-  { label: 'Processing Report', type: 'processing_report' },
-  { label: 'Unique Valid', type: 'unique_valid' },
-  { label: 'Needs Review', type: 'needs_review' },
-  { label: 'Out of Scope', type: 'out_of_scope' },
-  { label: 'Duplicates', type: 'duplicates' },
-  { label: 'Skipped', type: 'skipped' },
-];
 
 type ResultsTab = 'valid' | 'needs_review' | 'out_of_scope' | 'skipped' | 'duplicates';
 
@@ -100,6 +93,7 @@ export default function HistoryDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
+  const [exportCatalog, setExportCatalog] = useState<ExportCatalogItem[]>(FALLBACK_EXPORT_CATALOG);
   const [activeTab, setActiveTab] = useState<ResultsTab>('valid');
   const [showRaw, setShowRaw] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
@@ -117,7 +111,7 @@ export default function HistoryDetailPage() {
       setLoading(true);
       setError(null);
       try {
-        const [jobDetail, jobResults] = await Promise.all([getJobDetail(jobId), getJobResults(jobId)]);
+        const [jobDetail, jobResults, catalog] = await Promise.all([getJobDetail(jobId), getJobResults(jobId), getJobExportCatalog(jobId)]);
         if (!active) return;
         const mergedJob = { ...(jobDetail.summary ?? {}), ...(jobDetail.job ?? {}) } as JobRecord;
         setJobMeta({
@@ -125,10 +119,12 @@ export default function HistoryDetailPage() {
           createdAt: pickString(mergedJob, ['created_at', 'createdAt', 'created', 'timestamp']),
         });
         setResults(jobResults);
+        setExportCatalog(normalizeExportCatalog(catalog));
       } catch (err) {
         if (!active) return;
         const message = (err as Error).message ?? 'Unable to load job details.';
         setError(message);
+        setExportCatalog(FALLBACK_EXPORT_CATALOG);
         showToast({ title: message, variant: 'error' });
       } finally {
         if (active) setLoading(false);
@@ -180,14 +176,14 @@ export default function HistoryDetailPage() {
 
   const paginate = <T,>(rows: T[]) => rows.slice((resultsPage - 1) * resultsPageSize, resultsPage * resultsPageSize);
 
-  const handleDownload = async (type: JobExportType) => {
+  const handleDownload = async (type: JobExportType, label: string) => {
     if (!jobId) return;
     const key = `${jobId}-${type}`;
     setDownloading((prev) => ({ ...prev, [key]: true }));
     try {
       const result = await downloadJobExport(jobId, type);
       triggerDownload(result.blob, result.filename);
-      showToast({ title: 'Export downloaded', variant: 'success' });
+      showToast({ title: `${label} downloaded`, variant: 'success' });
     } catch (err) {
       const message = (err as Error).message ?? 'Export failed.';
       setError(message);
@@ -247,18 +243,16 @@ export default function HistoryDetailPage() {
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link to="/history" className="text-xs font-semibold text-indigo-600 transition hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">← Back to history</Link>
-          <div className="flex flex-wrap items-center gap-2">
-            {EXPORT_OPTIONS.map((option) => (
-              <button
-                key={option.type}
-                type="button"
-                onClick={() => handleDownload(option.type)}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                disabled={!jobId || downloading[`${jobId}-${option.type}`]}
-              >
-                {downloading[`${jobId}-${option.type}`] ? 'Downloading...' : `Download ${option.label} CSV`}
-              </button>
-            ))}
+          <div className="w-full max-w-4xl">
+            <ExportPanel
+              mode="inline"
+              catalog={exportCatalog}
+              onDownload={(type, label) => {
+                void handleDownload(type, label);
+              }}
+              activeDownloadType={jobId ? (Object.keys(downloading).find((key) => key.startsWith(`${jobId}-`) && downloading[key])?.slice(jobId.length + 1) as JobExportType | null) : null}
+              disabled={!jobId}
+            />
           </div>
         </div>
 
