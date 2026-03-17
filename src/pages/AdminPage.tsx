@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useState } from 'react';
 import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
 import Button from '../components/ui/Button';
@@ -8,12 +8,9 @@ import EmptyState from '../components/ui/EmptyState';
 import {
   ApiErrorInfo,
   getApiErrorInfo,
-  getMetricsSummary,
   getOrgMembers,
   getSystemDiagnostics,
   inviteOrgMember,
-  MetricsRange,
-  MetricsSummary,
   OrgMember,
   removeOrgMember,
   resetOrgMemberPassword,
@@ -21,42 +18,7 @@ import {
   updateOrgMember,
 } from '../lib/api';
 
-type RangeKey = MetricsRange;
-
-type MetricCard = {
-  key: string;
-  label: string;
-  description: string;
-};
-
-const metricCards: MetricCard[] = [
-  { key: 'uploads', label: 'Uploads', description: 'Total parsing jobs created.' },
-  { key: 'leads', label: 'Leads', description: 'Rows received across uploads.' },
-  { key: 'matched', label: 'Matched', description: 'Matched rows returned.' },
-  { key: 'unmatched', label: 'Unmatched', description: 'Unmatched rows returned.' },
-  { key: 'exports', label: 'Exports', description: 'Exports generated from jobs.' },
-  { key: 'googleCalls', label: 'Google Calls', description: 'Google API calls used.' },
-];
-
-const rangeTabs: { key: RangeKey; label: string }[] = [
-  { key: 'today', label: 'Today' },
-  { key: 'week', label: 'Week' },
-  { key: 'month', label: 'Month' },
-  { key: 'year', label: 'Year' },
-];
-
 const roleOptions = ['member', 'manager', 'admin', 'owner'];
-
-const formatNumber = (value: number) => new Intl.NumberFormat().format(value);
-
-const toNumber = (value: unknown) => {
-  if (typeof value === 'number') return value;
-  if (typeof value === 'string') {
-    const parsed = Number(value);
-    return Number.isNaN(parsed) ? 0 : parsed;
-  }
-  return 0;
-};
 
 type SetupGuidance = {
   title: string;
@@ -100,21 +62,6 @@ const getSetupGuidanceFromDiagnostics = (diagnostics: SystemDiagnostics | null, 
   };
 };
 
-const getMetricTrendBars = (value: number) => {
-  const seed = Math.max(1, Math.floor(Math.abs(value)));
-  return Array.from({ length: 7 }, (_, index) => {
-    const slice = Math.floor(seed / 10 ** (index % 3)) % 10;
-    return Math.max(20, Math.min(100, 25 + slice * 8));
-  });
-};
-
-const formatMetricValue = (metricKey: string, value: number) => {
-  if (metricKey === 'spend' || metricKey === 'spend_usd' || metricKey === 'ocrSpend') {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value);
-  }
-  return formatNumber(value);
-};
-
 function SetupRequiredCard({ guidance, errorInfo }: { guidance: SetupGuidance | null; errorInfo: ApiErrorInfo }) {
   const { showToast } = useToast();
   const checklist = [
@@ -123,13 +70,13 @@ function SetupRequiredCard({ guidance, errorInfo }: { guidance: SetupGuidance | 
       value:
         guidance?.supabaseConfigured === null
           ? 'Unknown'
-          : guidance.supabaseConfigured
+          : guidance?.supabaseConfigured
             ? 'Yes'
             : 'No',
     },
     {
       label: 'Missing tables',
-      value: guidance?.missingTables.length ? guidance.missingTables.join(', ') : 'None',
+      value: guidance?.missingTables.length ? guidance?.missingTables.join(', ') : 'None',
     },
   ];
 
@@ -218,13 +165,6 @@ export default function AdminPage() {
   const canManageTeam = role === 'admin' || role === 'owner';
 
   const { showToast } = useToast();
-  const [activeRange, setActiveRange] = useState<RangeKey>('today');
-
-  const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
-  const [metricsLoading, setMetricsLoading] = useState(false);
-  const [metricsError, setMetricsError] = useState<ApiErrorInfo | null>(null);
-  const [metricsDiagnostics, setMetricsDiagnostics] = useState<SystemDiagnostics | null>(null);
-
   const [members, setMembers] = useState<OrgMember[]>([]);
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamError, setTeamError] = useState<ApiErrorInfo | null>(null);
@@ -249,27 +189,6 @@ export default function AdminPage() {
   const [removingByUserId, setRemovingByUserId] = useState<Record<string, boolean>>({});
   const [resettingByUserId, setResettingByUserId] = useState<Record<string, boolean>>({});
 
-  const loadMetrics = async (range: RangeKey) => {
-    setMetricsLoading(true);
-    setMetricsError(null);
-    setMetricsDiagnostics(null);
-    try {
-      const data = await getMetricsSummary(range);
-      setMetrics(data ?? null);
-    } catch (err) {
-      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to load admin metrics.', endpoint: '/metrics/summary' };
-      setMetricsError(errorInfo);
-      try {
-        const diagnostics = await getSystemDiagnostics();
-        setMetricsDiagnostics(diagnostics ?? null);
-      } catch {
-        setMetricsDiagnostics(null);
-      }
-    } finally {
-      setMetricsLoading(false);
-    }
-  };
-
   const loadMembers = async () => {
     setTeamLoading(true);
     setTeamError(null);
@@ -293,32 +212,8 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!canAccessAdmin) return;
-    void loadMetrics(activeRange);
-  }, [activeRange, canAccessAdmin]);
-
-  useEffect(() => {
-    if (!canAccessAdmin) return;
     void loadMembers();
   }, [canAccessAdmin]);
-
-  const renderedCards = useMemo(() => {
-    const cards = [...metricCards];
-    const hasOcrCalls = metrics && Object.prototype.hasOwnProperty.call(metrics, 'ocrCalls');
-    const hasOcrSpend = metrics && Object.prototype.hasOwnProperty.call(metrics, 'ocrSpend');
-    const hasSpend = metrics && (Object.prototype.hasOwnProperty.call(metrics, 'spend_usd') || Object.prototype.hasOwnProperty.call(metrics, 'spendUsd'));
-
-    if (hasOcrCalls) {
-      cards.push({ key: 'ocrCalls', label: 'OCR Calls', description: 'OCR API calls used.' });
-    }
-    if (hasOcrSpend) {
-      cards.push({ key: 'ocrSpend', label: 'OCR Spend', description: 'Estimated OCR spend.' });
-    }
-    if (hasSpend) {
-      cards.push({ key: 'spend_usd', label: 'Spend', description: 'Total platform spend for selected range.' });
-    }
-
-    return cards.slice(0, 6);
-  }, [metrics]);
 
   const sendInvite = async ({ resend = false }: { resend?: boolean } = {}) => {
     if (!canManageTeam) return;
@@ -491,7 +386,7 @@ export default function AdminPage() {
   };
 
   return (
-    <AppShell title="Admin" subtitle="Monitor parsing usage and manage your organization team.">
+    <AppShell title="Admin" subtitle="Manage your organization team.">
       {!hasRoleInfo || !canAccessAdmin ? (
         <Card className="p-10 text-center">
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Not authorized</h2>
@@ -501,51 +396,6 @@ export default function AdminPage() {
         </Card>
       ) : (
         <div className="space-y-6">
-          <Card>
-            <SectionHeader title="Admin Metrics" subtitle="Snapshot totals from server-side metrics." action={<div className="flex flex-wrap gap-2">
-                {rangeTabs.map((tab) => {
-                  const isActive = tab.key === activeRange;
-                  return (
-                    <Button
-                      key={tab.key}
-                      type="button"
-                      onClick={() => setActiveRange(tab.key)}
-                      size="sm"
-                      variant={isActive ? 'secondary' : 'ghost'}
-                    >
-                      {tab.label}
-                    </Button>
-                  );
-                })}
-              </div>} />
-            {metricsLoading ? (
-              <EmptyState className="mt-6" title="Loading metrics" description="Loading admin metrics..." />
-            ) : metricsError ? (
-              <SetupRequiredCard guidance={getSetupGuidanceFromDiagnostics(metricsDiagnostics, metricsError.message)} errorInfo={metricsError} />
-            ) : (
-              <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {renderedCards.map((metric) => {
-                  const value = toNumber(metrics?.[metric.key] ?? (metric.key === 'spend_usd' ? metrics?.spendUsd : 0));
-                  const trendBars = getMetricTrendBars(value);
-                  return (
-                    <Card key={metric.key} className="flex min-h-[170px] flex-col justify-between bg-gradient-to-b from-white to-slate-50/80 p-5 dark:from-slate-950 dark:to-slate-900/60">
-                      <div>
-                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">{metric.label}</p>
-                        <p className="mt-2 text-3xl font-semibold text-slate-900 dark:text-white">{formatMetricValue(metric.key, value)}</p>
-                        <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">{metric.description}</p>
-                      </div>
-                      <div className="mt-4 flex items-end gap-1" aria-hidden="true">
-                        {trendBars.map((barHeight, index) => (
-                          <span key={`${metric.key}-${index}`} className="w-2 rounded-sm bg-indigo-400/70 dark:bg-indigo-500/70" style={{ height: `${barHeight * 0.28}px` }} />
-                        ))}
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-
           <Card>
             <SectionHeader title="Team" subtitle="Manage members and organization access." />
 
