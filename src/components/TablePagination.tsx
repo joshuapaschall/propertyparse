@@ -13,7 +13,7 @@ export default function TablePagination({
   pageSize,
   onPageChange,
   onPageSizeChange,
-  pageSizeOptions = [10, 25, 50],
+  pageSizeOptions = [10, 25, 50, 100],
 }: TablePaginationProps) {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const clampedPage = Math.min(Math.max(page, 1), totalPages);
