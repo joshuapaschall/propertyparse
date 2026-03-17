@@ -3574,7 +3574,7 @@ export default function ParsePage() {
               <>
                 {activeTab === 'valid' ? (
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                    <div className="overflow-auto">
+                    <div className="overflow-x-auto">
                       <table className="min-w-full text-left text-sm">
                         <thead className="sticky top-16 z-20 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
@@ -3652,7 +3652,7 @@ export default function ParsePage() {
                     </button>
                   </div>
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                    <div className="overflow-auto">
+                    <div className="overflow-x-auto">
                       <table className="min-w-full text-left text-sm">
                         <thead className="sticky top-16 z-20 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
@@ -3761,7 +3761,7 @@ export default function ParsePage() {
                       Skipped rows were ignored because no usable property address could be detected.
                       Click Review to see full row data.
                     </div>
-                    <div className="overflow-auto">
+                    <div className="overflow-x-auto">
                       <table className="min-w-full text-left text-sm">
                         <thead className="sticky top-16 z-20 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
@@ -3904,7 +3904,7 @@ export default function ParsePage() {
                 {activeTab === 'out_of_scope' ? (
                   <>
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                    <div className="overflow-auto">
+                    <div className="overflow-x-auto">
                       <table className="min-w-full text-left text-sm">
                         <thead className="sticky top-16 z-20 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
