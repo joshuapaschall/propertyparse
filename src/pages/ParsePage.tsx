@@ -3207,7 +3207,7 @@ export default function ParsePage() {
           ref={resultsRef}
           className="w-full"
         >
-          <div className="sticky top-16 z-20 mb-6 rounded-2xl border border-slate-200/80 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+          <div className="mb-6 rounded-2xl border border-slate-200/80 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Processing Results</h2>
@@ -3255,6 +3255,13 @@ export default function ParsePage() {
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
+                  onClick={() => openProcessingReport('all')}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Processing Report
+                </button>
+                <button
+                  type="button"
                   onClick={() => handleKpiTabClick('valid')}
                   className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                     activeTab === 'valid'
@@ -3263,13 +3270,6 @@ export default function ParsePage() {
                   }`}
                 >
                   Valid (rows: {computedParseSummary?.valid_total ?? 0} · unique: {computedParseSummary?.valid_unique ?? 0})
-                </button>
-                <button
-                  type="button"
-                  onClick={() => openProcessingReport('all')}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Processing Report
                 </button>
                 <button
                   type="button"
