@@ -4,21 +4,20 @@ import userEvent from '@testing-library/user-event';
 import JobWarnings from './JobWarnings';
 
 describe('JobWarnings', () => {
-  it('renders clean migration warning message', async () => {
+  it('renders concise copy for JOB_PROGRESS_DISABLED and keeps details behind disclosure', async () => {
     const user = userEvent.setup();
     render(
       <JobWarnings
         warnings={[
-          { code: 'SUPABASE_SCHEMA_NOT_MIGRATED', message: 'internal' },
+          { code: 'JOB_PROGRESS_DISABLED', message: 'raw backend text', detail: { status: 503 } },
         ]}
       />,
     );
 
-    expect(
-      screen.getByText('Database schema is behind. Run the latest Supabase migration and refresh the app.'),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Live progress is temporarily unavailable for this run.')).toBeInTheDocument();
+    expect(screen.queryByText('raw backend text')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Show technical details' }));
-    expect(screen.getByText(/SUPABASE_SCHEMA_NOT_MIGRATED/)).toBeInTheDocument();
+    expect(screen.getByText(/JOB_PROGRESS_DISABLED/)).toBeInTheDocument();
   });
 });

@@ -10,6 +10,7 @@ import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
 import { normalizeJobSummary } from '../lib/jobSummary';
+import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import type { ExportCatalogItem } from '../types/exports';
 
 type StatusFilter = 'ALL' | 'DONE' | 'RUNNING' | 'FAILED';
@@ -73,6 +74,7 @@ export default function HistoryPage() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [catalogByJobId, setCatalogByJobId] = useState<Record<string, ExportCatalogItem[]>>({});
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
+  const [localParsePersistenceWarning, setLocalParsePersistenceWarning] = useState(false);
 
   const loadJobs = useCallback(async () => {
     setLoading(true);
@@ -92,6 +94,11 @@ export default function HistoryPage() {
   useEffect(() => {
     void loadJobs();
   }, [loadJobs]);
+
+  useEffect(() => {
+    const state = readLocalParsePersistenceState();
+    setLocalParsePersistenceWarning(Boolean(state?.persistenceWarning));
+  }, []);
 
   const rows = useMemo(
     () =>
@@ -211,7 +218,17 @@ export default function HistoryPage() {
         ) : error ? (
           <EmptyState className="mt-6" title="History unavailable" description={error} />
         ) : !hasAnyJobs ? (
-          <EmptyState className="mt-6" title="No jobs yet" description="Upload a file to run your first parsing job." actionLabel="Parse" onAction={() => navigate('/parse')} />
+          localParsePersistenceWarning ? (
+            <EmptyState
+              className="mt-6"
+              title="No persisted jobs yet"
+              description="Your last run completed, but it was not saved to History."
+              actionLabel="Parse"
+              onAction={() => navigate('/parse')}
+            />
+          ) : (
+            <EmptyState className="mt-6" title="No jobs yet" description="Upload a file to run your first parsing job." actionLabel="Parse" onAction={() => navigate('/parse')} />
+          )
         ) : !hasFilterResults ? (
           <EmptyState className="mt-6" title="No jobs in this filter" description="Try another status tab." />
         ) : filteredRows.length === 0 ? (

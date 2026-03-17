@@ -59,6 +59,7 @@ import type {
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
 import JobWarnings from '../components/JobWarnings';
 import { deriveDisplayedParseSummary, deriveDisplayedRowsReceived, normalizeJobSummary, normalizeUpdatedJobPayload, toParseSummary } from '../lib/jobSummary';
+import { writeLocalParsePersistenceState } from '../lib/persistenceStatus';
 import type { ExportCatalogItem } from '../types/exports';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Verifying', 'AI fixing', 'Finalizing'];
@@ -661,6 +662,8 @@ export default function ParsePage() {
   const [error, setError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
   const [pollErrorCount, setPollErrorCount] = useState(0);
+  const [softProgressOutage, setSoftProgressOutage] = useState(false);
+  const [persistenceWarningActive, setPersistenceWarningActive] = useState(false);
   const [metadata, setMetadata] = useState<Record<string, unknown> | null>(null);
   const [editingRow, setEditingRow] = useState<ParsedRow | null>(null);
   const [retryAvailable, setRetryAvailable] = useState<'unknown' | 'available' | 'unavailable'>(
@@ -698,6 +701,7 @@ export default function ParsePage() {
     cacheHits: number | null;
     googleCallsUsed: number | null;
     eta: string | null;
+    unavailableReason: string | null;
   }>({
     phase: null,
     done: null,
@@ -706,6 +710,7 @@ export default function ParsePage() {
     cacheHits: null,
     googleCallsUsed: null,
     eta: null,
+    unavailableReason: null,
   });
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const pollingRef = useRef<number | null>(null);
@@ -833,6 +838,7 @@ export default function ParsePage() {
       setError(null);
       setPollError(null);
       setPollErrorCount(0);
+      setSoftProgressOutage(false);
       setParsePayload(null);
       setProcessingReportOpen(false);
       setProcessingReportFilter('all');
@@ -947,6 +953,8 @@ export default function ParsePage() {
         setLegacyUnmatchedRows([]);
         setMetadata(Object.keys(combinedJob).length ? (combinedJob as Record<string, unknown>) : null);
         setLegacyMode(false);
+        setPersistenceWarningActive(false);
+        writeLocalParsePersistenceState({ jobId: jobIdToLoad, persistenceWarning: false });
         setActiveTab('valid');
         setLegacyTab('matched');
         setShowRaw(false);
@@ -1257,6 +1265,9 @@ export default function ParsePage() {
     if (isStartingParse) {
       return 'Job running…';
     }
+    if (softProgressOutage && busy) {
+      return progressInfo.unavailableReason || 'Processing is still running. Live progress will appear when available.';
+    }
     const done = progressInfo.done;
     const total = progressInfo.total;
     const backendDetail = progressInfo.detail;
@@ -1279,7 +1290,7 @@ export default function ParsePage() {
     const detailText = backendDetail || baseDetail;
     const hasReliableEta = Boolean(progressInfo.eta && progressInfo.eta !== '00:00' && progressInfo.phase !== 'DONE');
     return hasReliableEta ? `${detailText} • ETA ~ ${progressInfo.eta}` : detailText;
-  }, [isStartingParse, progressInfo]);
+  }, [busy, isStartingParse, progressInfo, softProgressOutage]);
 
   const shouldShowProgress = useMemo(
     () => busy || progressInfo.phase !== null || progressPercent !== null || parseSummary !== null,
@@ -1802,6 +1813,44 @@ export default function ParsePage() {
     }
   };
 
+  const isSoftProgressStatus = (status?: number) => status === 404 || status === 503;
+
+  const reconcileDurableJob = useCallback(
+    async (completedJobId: string, attempts = 4) => {
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        try {
+          const detail = await getJobDetail(completedJobId);
+          const results = await getJobResults(completedJobId).catch(() => null);
+          const hasDurableDetail = Boolean(detail?.job && Object.keys(detail.job).length);
+          const hasRows = Boolean(results?.row_results && results.row_results.length > 0);
+          if (hasDurableDetail || hasRows) {
+            setPersistenceWarningActive(false);
+            writeLocalParsePersistenceState({ jobId: completedJobId, persistenceWarning: false });
+            await loadJobResults(
+              completedJobId,
+              {
+                version: LAST_JOB_STORAGE_VERSION,
+                jobId: completedJobId,
+                stateValue,
+                countyValue,
+                cityValue,
+                campaignName,
+              },
+              { fresh: true },
+            );
+            return;
+          }
+        } catch {
+          // keep retrying in background
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 1200 * (attempt + 1)));
+      }
+      setPersistenceWarningActive(true);
+      writeLocalParsePersistenceState({ jobId: completedJobId, persistenceWarning: true });
+    },
+    [campaignName, cityValue, countyValue, loadJobResults, stateValue],
+  );
+
   const startPolling = (jobIdToWatch: string, options?: { onFinished?: () => Promise<void> | void }) => {
     stopPolling();
     activeProgressJobIdRef.current = jobIdToWatch;
@@ -1831,6 +1880,12 @@ export default function ParsePage() {
         const progressDetail =
           (typeof job.progress_detail === 'string' && job.progress_detail) ||
           (typeof job.progressDetail === 'string' && job.progressDetail) ||
+          null;
+        const progressUnavailableReason =
+          (typeof (job as Record<string, unknown>).progress_unavailable_reason === 'string' &&
+            ((job as Record<string, unknown>).progress_unavailable_reason as string)) ||
+          (typeof (job as Record<string, unknown>).progressUnavailableReason === 'string' &&
+            ((job as Record<string, unknown>).progressUnavailableReason as string)) ||
           null;
         const updatedAtValue = job.updated_at ?? job.updatedAt;
         const updatedAt =
@@ -1869,14 +1924,21 @@ export default function ParsePage() {
         }
 
         const computedPercent = computeProgressPercent(phase, done, total);
-        const rawPercent = typeof backendPercent === 'number' ? backendPercent : computedPercent;
-        if (typeof rawPercent === 'number') {
-          setProgressPercent((prev) => {
-            const normalized = Math.max(0, Math.min(100, Math.round(rawPercent)));
-            if (activeProgressJobIdRef.current !== jobIdToWatch) return normalized;
-            if (prev === null) return normalized;
-            return Math.max(prev, normalized);
-          });
+        const hasLiveProgressSource =
+          (typeof backendPercent === 'number' && Number.isFinite(backendPercent)) ||
+          (typeof done === 'number' && typeof total === 'number' && total > 0);
+        if (hasLiveProgressSource) {
+          const rawPercent = typeof backendPercent === 'number' ? backendPercent : computedPercent;
+          if (typeof rawPercent === 'number') {
+            setProgressPercent((prev) => {
+              const normalized = Math.max(0, Math.min(100, Math.round(rawPercent)));
+              if (activeProgressJobIdRef.current !== jobIdToWatch) return normalized;
+              if (prev === null) return normalized;
+              return Math.max(prev, normalized);
+            });
+          }
+        } else {
+          setProgressPercent(null);
         }
         if (phase) {
           setProgressStep(mapPhaseToStep(phase));
@@ -1891,7 +1953,9 @@ export default function ParsePage() {
           cacheHits: cacheHitsValue,
           googleCallsUsed: googleCallsValue,
           eta: showEta && etaSecondsRef.current !== null ? formatEta(etaSecondsRef.current) : null,
+          unavailableReason: progressUnavailableReason,
         });
+        setSoftProgressOutage(false);
         setPollErrorCount(0);
         setPollError(null);
         if (status === 'FAILED' || phase === 'FAILED') {
@@ -1916,6 +1980,19 @@ export default function ParsePage() {
         const errorInfo = getApiErrorInfo(err);
         if (errorInfo?.status === 404 && !busyRef.current) {
           resetParseUi({ showMissingJobToast: true });
+          return;
+        }
+        if (busyRef.current && isSoftProgressStatus(errorInfo?.status)) {
+          setSoftProgressOutage(true);
+          setProgressPercent(null);
+          setProgressInfo((prev) => ({
+            ...prev,
+            unavailableReason:
+              prev.unavailableReason ||
+              'Processing is still running. Live progress will appear when available.',
+          }));
+          setPollErrorCount((prev) => prev + 1);
+          setPollError((err as Error).message ?? 'Polling failed.');
           return;
         }
         const message = (err as Error).message ?? 'Polling failed.';
@@ -1944,6 +2021,12 @@ export default function ParsePage() {
         metadata?: Record<string, unknown>;
       };
       const hasRowAccounting = Boolean(parseResponse.summary && parseResponse.row_results);
+      const responseMeta = (parseResponse.metadata as Record<string, unknown>) ?? {};
+      const persistenceWarning = Boolean(
+        responseMeta.persistence_warning === true ||
+          responseMeta.source === 'memory' ||
+          responseMeta.schema_health === 'degraded',
+      );
       if (hasRowAccounting) {
         const summary = toParseSummary(normalizeJobSummary(parseResponse.summary));
         const rowAccountingMetadata: Record<string, unknown> = {
@@ -1982,6 +2065,13 @@ export default function ParsePage() {
         setDebugInfo((parseResponse.debug ?? null) as ParseDebugInfo | null);
         setMetadata(Object.keys(rowAccountingMetadata).length ? rowAccountingMetadata : null);
         setLegacyMode(false);
+        if (persistenceWarning) {
+          setPersistenceWarningActive(true);
+          writeLocalParsePersistenceState({ persistenceWarning: true });
+        } else {
+          setPersistenceWarningActive(false);
+          writeLocalParsePersistenceState({ persistenceWarning: false });
+        }
       } else {
         setLegacyMode(true);
         const parsedHasBuckets = 'matched' in parseResponse || 'unmatched' in parseResponse;
@@ -2000,11 +2090,11 @@ export default function ParsePage() {
         setMetadata((parseResponse.metadata as Record<string, unknown>) || null);
       }
       const progressMeta = (parseResponse.metadata as Record<string, unknown> | undefined)?.progress;
-      if (typeof progressMeta === 'number') {
+      if (typeof progressMeta === 'number' && Number.isFinite(progressMeta) && progressMeta > 0) {
         setProgressPercent(progressMeta);
       } else if (typeof progressMeta === 'object' && progressMeta !== null) {
         const percent = (progressMeta as { percent?: number }).percent;
-        if (typeof percent === 'number') {
+        if (typeof percent === 'number' && Number.isFinite(percent) && percent > 0) {
           setProgressPercent(percent);
         }
       }
@@ -2040,6 +2130,8 @@ export default function ParsePage() {
     etaSecondsRef.current = null;
     setPollError(null);
     setPollErrorCount(0);
+    setSoftProgressOutage(false);
+    setPersistenceWarningActive(false);
     setProcessingReportFilter('all');
     setActiveTab('valid');
     setLegacyTab('matched');
@@ -2056,6 +2148,7 @@ export default function ParsePage() {
       cacheHits: null,
       googleCallsUsed: null,
       eta: null,
+      unavailableReason: null,
     });
   };
 
@@ -2182,6 +2275,7 @@ export default function ParsePage() {
           onFinished: async () => {
             await hydrateCompletedAsyncJob(newJobId, upload.rowsReceived ?? null);
             setBusy(false);
+            void reconcileDurableJob(newJobId);
           },
         });
         await parseFileAsync(upload.fileId, {
@@ -2205,6 +2299,7 @@ export default function ParsePage() {
         applyParsedResponse(parsed as unknown as Record<string, unknown>, upload.rowsReceived ?? null);
         stopPolling();
         setBusy(false);
+        void reconcileDurableJob(newJobId);
       }
 
       updateJobQueryParam(newJobId);
@@ -3087,12 +3182,24 @@ export default function ParsePage() {
                   <span>{progressDetail}</span>
                 </div>
               ) : null}
-              {pollErrorCount >= 8 && pollError ? (
-                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
-                  Still working, but live progress is unavailable. Last error: {pollError}
+              {softProgressOutage ? (
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                  {progressInfo.unavailableReason || 'Live progress is reconnecting…'}
+                  {pollErrorCount >= 8 && pollError ? (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-[11px] font-semibold">Technical details</summary>
+                      <div className="mt-1 text-[11px]">{pollError}</div>
+                    </details>
+                  ) : null}
                 </div>
               ) : null}
             </div>
+          </div>
+        ) : null}
+
+        {persistenceWarningActive && parseSummary ? (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+            This run completed locally, but has not been saved to History yet.
           </div>
         ) : null}
 
