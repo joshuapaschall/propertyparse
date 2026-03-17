@@ -227,24 +227,6 @@ const copyTextToClipboard = async (text: string) => {
 };
 
 
-const downloadCsv = (filename: string, rows: Record<string, unknown>[]) => {
-  if (!rows.length) return;
-  const headers = Object.keys(rows[0]);
-  const body = rows
-    .map((row) => headers.map((header) => JSON.stringify(row[header] ?? '')).join(','))
-    .join('\n');
-  const csv = `${headers.join(',')}\n${body}`;
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-};
-
 const normalizeNumber = (value: unknown) => {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') {
@@ -755,7 +737,6 @@ export default function ParsePage() {
 
   const dedupedMatched = useMemo(() => dedupeRows(legacyMatchedRows), [legacyMatchedRows]);
   const dedupedUnmatched = useMemo(() => dedupeRows(legacyUnmatchedRows), [legacyUnmatchedRows]);
-  const hasLegacyResults = dedupedMatched.length > 0 || dedupedUnmatched.length > 0;
   const loadStateOptions = useCallback(async (inputValue: string) => searchStates(inputValue), []);
 
   const loadCountyOptions = useCallback(
@@ -3556,14 +3537,6 @@ export default function ParsePage() {
                 <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Out of Scope</p>
                 <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">0</p>
               </div>
-              {hasLegacyResults ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Rows Processed</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {dedupedMatched.length + dedupedUnmatched.length}
-                  </p>
-                </div>
-              ) : null}
               {candidatesExtracted !== null ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
@@ -4067,32 +4040,6 @@ export default function ParsePage() {
                         className="rounded-lg border border-amber-200 px-3 py-2 text-xs font-semibold text-amber-700 transition disabled:border-slate-200 disabled:text-slate-400 dark:border-amber-400/40 dark:text-amber-200 dark:disabled:border-slate-700 dark:disabled:text-slate-500"
                       >
                         Retry marked
-                      </button>
-                    ) : null}
-                    {(legacyTab === 'matched' ? dedupedMatched.length : dedupedUnmatched.length) > 0 ? (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          downloadCsv(
-                            legacyTab === 'matched'
-                              ? 'valid-addresses.csv'
-                              : 'needs-review-addresses.csv',
-                            (legacyTab === 'matched' ? dedupedMatched : dedupedUnmatched).map(
-                              (row) => ({
-                                full_address: row.fullAddress,
-                                street_address: row.streetAddress,
-                                address2: row.address2,
-                                city: row.city,
-                                state: row.state,
-                                zip_code: row.zipCode,
-                                source_raw: row.sourceRaw,
-                              }),
-                            ),
-                          )
-                        }
-                        className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                      >
-                        Download {legacyTab === 'matched' ? 'Valid' : 'Needs Review'} CSV
                       </button>
                     ) : null}
                   </div>
