@@ -227,24 +227,6 @@ const copyTextToClipboard = async (text: string) => {
 };
 
 
-const downloadCsv = (filename: string, rows: Record<string, unknown>[]) => {
-  if (!rows.length) return;
-  const headers = Object.keys(rows[0]);
-  const body = rows
-    .map((row) => headers.map((header) => JSON.stringify(row[header] ?? '')).join(','))
-    .join('\n');
-  const csv = `${headers.join(',')}\n${body}`;
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', filename);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-};
-
 const normalizeNumber = (value: unknown) => {
   if (typeof value === 'number') return value;
   if (typeof value === 'string') {
@@ -3555,12 +3537,6 @@ export default function ParsePage() {
                 <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Out of Scope</p>
                 <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">0</p>
               </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">API Calls Used</p>
-                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                  {apiCallsUsed ?? '--'}
-                </p>
-              </div>
               {candidatesExtracted !== null ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
@@ -4066,30 +4042,6 @@ export default function ParsePage() {
                         Retry marked
                       </button>
                     ) : null}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        downloadCsv(
-                          legacyTab === 'matched'
-                            ? 'valid-addresses.csv'
-                            : 'needs-review-addresses.csv',
-                          (legacyTab === 'matched' ? dedupedMatched : dedupedUnmatched).map(
-                            (row) => ({
-                              full_address: row.fullAddress,
-                              street_address: row.streetAddress,
-                              address2: row.address2,
-                              city: row.city,
-                              state: row.state,
-                              zip_code: row.zipCode,
-                              source_raw: row.sourceRaw,
-                            }),
-                          ),
-                        )
-                      }
-                      className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                    >
-                      Download {legacyTab === 'matched' ? 'Valid' : 'Needs Review'} CSV
-                    </button>
                   </div>
                 </div>
                 <div className="mt-6">
