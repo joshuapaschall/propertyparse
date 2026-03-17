@@ -12,7 +12,10 @@ const parseFile = vi.fn();
 const uploadFile = vi.fn();
 const getApiErrorInfo = vi.fn();
 const runAiFixFlaggedRows = vi.fn();
+const downloadJobExport = vi.fn();
+const getJobExportCatalog = vi.fn();
 const publishJobUpdate = vi.fn();
+const showToast = vi.fn();
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
 vi.mock('../components/AccountedRowsIndicator', () => ({ default: () => <div>accounted</div> }));
@@ -46,13 +49,22 @@ vi.mock('../components/EditRowModal', () => ({ default: () => null }));
 vi.mock('../components/ui/Card', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
 vi.mock('../components/ui/EmptyState', () => ({ default: () => null }));
 vi.mock('../components/ui/Skeleton', () => ({ default: () => null }));
-vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
+vi.mock('../components/exports/ExportPanel', () => ({
+  default: ({ catalog, onDownload }: { catalog: Array<{ type: string; label: string }>; onDownload: (type: any, label: string) => void }) => (
+    <div>
+      {catalog.map((item) => (
+        <button key={item.type} type="button" onClick={() => onDownload(item.type as any, item.label)}>{`download-${item.type}`}</button>
+      ))}
+    </div>
+  ),
+}));
+vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast }) }));
 vi.mock('../lib/locationApi', () => ({ searchCities: vi.fn(), searchCounties: vi.fn(), searchStates: vi.fn() }));
 vi.mock('../lib/liveUpdates', () => ({ publishJobUpdate: (...args: unknown[]) => publishJobUpdate(...args) }));
 vi.mock('../lib/api', () => ({
-  downloadJobExport: vi.fn(),
+  downloadJobExport: (...args: unknown[]) => downloadJobExport(...args),
   getApiErrorInfo: (...args: unknown[]) => getApiErrorInfo(...args),
-  getJobExportCatalog: vi.fn(async () => []),
+  getJobExportCatalog: (...args: unknown[]) => getJobExportCatalog(...args),
   getJobDetail: (...args: unknown[]) => getJobDetail(...args),
   getAllJobRows: (...args: unknown[]) => getAllJobRows(...args),
   getJobResults: (...args: unknown[]) => getJobResults(...args),
@@ -77,11 +89,16 @@ describe('ParsePage', () => {
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
     parseFile.mockResolvedValue({ summary: { rows_received: 1 }, row_results: [], canonical_addresses: [], duplicate_groups: [] });
     getJobWithStatus.mockResolvedValue({ job: { job_id: 'job-1', status: 'RUNNING', phase: 'VERIFYING' } });
+    getJobExportCatalog.mockResolvedValue([]);
+    downloadJobExport.mockResolvedValue({ blob: new Blob(['header\n'], { type: 'text/csv' }), filename: 'f.csv' });
     getJobDetail.mockResolvedValue({ job: { job_id: 'job-1' }, summary: {} });
     getJobResults.mockResolvedValue({ summary: { rows_received: 0 }, row_results: [], canonical_addresses: [], duplicate_groups: [] });
     getAllJobRows.mockResolvedValue([]);
     runAiFixFlaggedRows.mockResolvedValue({ attempted_count: 1, upgraded_count: 1, rewritten_count: 0, updated_row_results: [], updated_job: {} });
     window.localStorage.clear();
+    showToast.mockClear();
+    Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:mock'), configurable: true });
+    Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
   });
 
   it('publishes invalidation events after parse completion', async () => {
@@ -145,6 +162,71 @@ describe('ParsePage', () => {
     expect(await screen.findByText(/Needs Review \(2 issues · 3 rows\)/)).toBeInTheDocument();
   });
 
+
+
+
+  it('shows export integrity warning when visible rows exist and catalog row count is zero', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
+    const summary = { rows_received: 1, needs_review: 1, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 1 };
+    const rows = [{ source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'LOW_PRECISION', detected_address: 'x' }];
+    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobExportCatalog.mockResolvedValue([{ type: 'needs_review', row_count: 0 }]);
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    expect(await screen.findByText(/Saved export rows are unavailable for this run/i)).toBeInTheDocument();
+  });
+
+  it('uses local export fallback when backend export is header-only', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
+    const summary = { rows_received: 1, needs_review: 1, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 1 };
+    const rows = [{ source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'LOW_PRECISION', detected_address: '12 a st' }];
+    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    downloadJobExport.mockResolvedValue({ blob: new Blob(['col1,col2\n'], { type: 'text/csv' }), filename: 'needs.csv' });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await user.click(screen.getByRole('button', { name: 'download-needs_review' }));
+    expect(downloadJobExport).toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(expect.objectContaining({ title: 'Used local export fallback' }));
+  });
+
+  it('renders review breakdown/filter and compare debug metadata', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 3 });
+    const summary = { rows_received: 3, needs_review: 3, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 3 };
+    const rows = [
+      { source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'ROUTE_ALIAS', detected_address: '1 a', blocked_by: 'directional conflict' },
+      { source_row_id: 'r2', source_row_index: 2, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'HOUSE_NUMBER_MISMATCH', detected_address: '2 b', compare_debug: 'same house number' },
+      { source_row_id: 'r3', source_row_index: 3, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'LOW_PRECISION', detected_address: '3 c', verification_precision: 'county' },
+    ];
+    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await user.click(screen.getByRole('button', { name: /^Needs Review \(/i }));
+    expect(await screen.findByText(/Route Alias \/ Route Mismatch:/)).toBeInTheDocument();
+    expect(screen.getByText(/Grouped by issue so repeated copies do not inflate workload./)).toBeInTheDocument();
+    expect(screen.getByText(/Blocked by directional conflict/)).toBeInTheDocument();
+
+  });
 
   it('does not leak review rows with canonical_id into Valid Unique table', async () => {
     const user = userEvent.setup();

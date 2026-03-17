@@ -11,6 +11,11 @@ import {
   isSkippedRow,
   stringifyPreview,
   getDisplaySafeMatchedAddress,
+  getReviewDebugHint,
+  getReviewReasonBucket,
+  type ReviewReasonFilter,
+  buildLocalCsvForExport,
+  isHeaderOnlyCsv,
 } from '../lib/parseUtils';
 import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
@@ -112,6 +117,7 @@ export default function HistoryDetailPage() {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [resultsPage, setResultsPage] = useState(1);
   const [resultsPageSize, setResultsPageSize] = useState(10);
+  const [reviewReasonFilter, setReviewReasonFilter] = useState<ReviewReasonFilter>('all');
 
   const [jobMeta, setJobMeta] = useState<JobSummaryMeta | null>(null);
   const [mergedJobSummary, setMergedJobSummary] = useState<JobRecord | null>(null);
@@ -212,13 +218,26 @@ export default function HistoryDetailPage() {
   const duplicateRows = useMemo(() => rowResults.filter((row) => row.is_duplicate || row.status === 'DUPLICATE'), [rowResults]);
 
   const needsReviewGroups = useMemo(() => groupRows(needsReviewRows), [needsReviewRows]);
+  const filteredNeedsReviewGroups = useMemo(() => {
+    if (reviewReasonFilter === 'all') return needsReviewGroups;
+    return needsReviewGroups.filter((group) => getReviewReasonBucket(group.displayRow) === reviewReasonFilter);
+  }, [needsReviewGroups, reviewReasonFilter]);
+  const reviewBreakdown = useMemo(() => {
+    const buckets = { route_alias: 0, missing_street_number: 0, house_number: 0, county_rescue: 0, low_precision: 0, other: 0 };
+    needsReviewGroups.forEach((group) => {
+      const bucket = getReviewReasonBucket(group.displayRow);
+      if (bucket === 'all') buckets.other += group.count;
+      else (buckets as Record<string, number>)[bucket] += group.count;
+    });
+    return buckets;
+  }, [needsReviewGroups]);
   const outOfScopeGroups = useMemo(() => groupRows(outOfScopeRows), [outOfScopeRows]);
   const skippedGroups = useMemo(() => groupRows(skippedRows), [skippedRows]);
   const duplicateGroups = useMemo(() => groupRows(duplicateRows), [duplicateRows]);
 
   const tabCounts: Record<ResultsTab, number> = {
     valid: parseSummary?.valid_unique ?? 0,
-    needs_review: needsReviewGroups.length,
+    needs_review: filteredNeedsReviewGroups.length,
     out_of_scope: parseSummary?.out_of_scope ?? 0,
     skipped: parseSummary?.skipped ?? 0,
     duplicates: parseSummary?.duplicates ?? 0,
@@ -226,7 +245,7 @@ export default function HistoryDetailPage() {
 
   const totalCountByTab: Record<ResultsTab, number> = {
     valid: canonicalAddresses.length,
-    needs_review: needsReviewGroups.length,
+    needs_review: filteredNeedsReviewGroups.length,
     out_of_scope: outOfScopeGroups.length,
     skipped: skippedGroups.length,
     duplicates: duplicateGroups.length,
@@ -234,13 +253,46 @@ export default function HistoryDetailPage() {
 
   const paginate = <T,>(rows: T[]) => rows.slice((resultsPage - 1) * resultsPageSize, resultsPage * resultsPageSize);
 
+  const exportCatalogByType = useMemo(() => new Map(exportCatalog.map((item) => [item.type, item])), [exportCatalog]);
+  const hasVisibleRows = rowResults.length > 0 || canonicalAddresses.length > 0;
+  const exportIntegrityWarningVisible = useMemo(() => {
+    if (!hasVisibleRows) return false;
+    const monitoredTypes: JobExportType[] = ['processing_report', 'unique_valid', 'needs_review', 'out_of_scope', 'duplicates', 'skipped'];
+    return monitoredTypes.some((type) => (exportCatalogByType.get(type)?.rowCount ?? 1) === 0);
+  }, [exportCatalogByType, hasVisibleRows]);
+
   const handleDownload = async (type: JobExportType, label: string) => {
     if (!jobId) return;
     const key = `${jobId}-${type}`;
     setDownloading((prev) => ({ ...prev, [key]: true }));
     try {
       const result = await downloadJobExport(jobId, type);
-      triggerDownload(result.blob, result.filename);
+      const csvText =
+        type === 'original_file' || type === 'propstream_import'
+          ? ''
+          : typeof result.blob.text === 'function'
+            ? await result.blob.text()
+            : '';
+      const catalogItem = exportCatalogByType.get(type);
+      const shouldFallback =
+        (type === 'processing_report' ||
+          type === 'unique_valid' ||
+          type === 'needs_review' ||
+          type === 'out_of_scope' ||
+          type === 'duplicates' ||
+          type === 'skipped') &&
+        (isHeaderOnlyCsv(csvText) || ((catalogItem?.rowCount ?? 1) === 0 && hasVisibleRows));
+
+      if (shouldFallback) {
+        const fallbackBlob = buildLocalCsvForExport(type, {
+          rowResults,
+          canonicalAddresses,
+        });
+        triggerDownload(fallbackBlob, `job-${jobId}-${type}-local-fallback.csv`);
+        showToast({ title: 'Used local export fallback', variant: 'info' });
+      } else {
+        triggerDownload(result.blob, result.filename);
+      }
       showToast({ title: `${label} downloaded`, variant: 'success' });
     } catch (err) {
       const message = (err as Error).message ?? 'Export failed.';
@@ -250,6 +302,7 @@ export default function HistoryDetailPage() {
       setDownloading((prev) => ({ ...prev, [key]: false }));
     }
   };
+
 
   const renderGroupedRows = (groups: GroupedRow[]) => {
     const pageGroups = paginate(groups);
@@ -274,7 +327,12 @@ export default function HistoryDetailPage() {
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row)}</td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCity(row)}</td>
                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
-                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getReasonMetadata(row).label}</td>
+                  <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                    {getReasonMetadata(row).label}
+                    {getReviewDebugHint(row) ? (
+                      <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">{getReviewDebugHint(row)}</p>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <button
                       type="button"
@@ -305,7 +363,12 @@ export default function HistoryDetailPage() {
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link to="/history" className="text-xs font-semibold text-indigo-600 transition hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">← Back to history</Link>
-          <div>
+          <div className="flex flex-col items-end gap-2">
+            {exportIntegrityWarningVisible ? (
+              <p className="max-w-sm rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
+                Saved export rows are unavailable for this run. Downloads may be incomplete until backend persistence is repaired.
+              </p>
+            ) : null}
             <ExportPanel
               catalog={exportCatalog}
               onDownload={(type, label) => {
@@ -380,6 +443,35 @@ export default function HistoryDetailPage() {
             </button>
           </div>
 
+          {activeTab === 'needs_review' ? (
+            <div className="mt-4 space-y-2">
+              <p className="text-xs text-slate-500 dark:text-slate-400">Grouped by issue so repeated copies do not inflate workload.</p>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span>Route Alias / Route Mismatch: {reviewBreakdown.route_alias}</span>
+                  <span>Street Number Not Verified: {reviewBreakdown.missing_street_number}</span>
+                  <span>House Number Mismatch: {reviewBreakdown.house_number}</span>
+                  <span>County Rescue Needed: {reviewBreakdown.county_rescue}</span>
+                  <span>Low Precision: {reviewBreakdown.low_precision}</span>
+                  <span>Other: {reviewBreakdown.other}</span>
+                </div>
+              </div>
+              <select
+                aria-label="Needs review reason filter"
+                value={reviewReasonFilter}
+                onChange={(event) => setReviewReasonFilter(event.target.value as ReviewReasonFilter)}
+                className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+              >
+                <option value="all">All</option>
+                <option value="route_alias">Route Alias</option>
+                <option value="house_number">House Number</option>
+                <option value="low_precision">Low Precision</option>
+                <option value="county_rescue">County Rescue</option>
+                <option value="missing_street_number">Missing Street Number</option>
+              </select>
+            </div>
+          ) : null}
+
           <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="overflow-auto">
               {activeTab === 'valid' ? (
@@ -426,7 +518,7 @@ export default function HistoryDetailPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {activeTab === 'needs_review' ? renderGroupedRows(needsReviewGroups) : null}
+                    {activeTab === 'needs_review' ? renderGroupedRows(filteredNeedsReviewGroups) : null}
                     {activeTab === 'out_of_scope' ? renderGroupedRows(outOfScopeGroups) : null}
                     {activeTab === 'skipped' ? renderGroupedRows(skippedGroups) : null}
                     {activeTab === 'duplicates' ? renderGroupedRows(duplicateGroups) : null}

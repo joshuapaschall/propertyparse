@@ -25,6 +25,11 @@ import {
   isValidRow,
   stringifyPreview,
   getDisplaySafeMatchedAddress,
+  getReviewDebugHint,
+  getReviewReasonBucket,
+  type ReviewReasonFilter,
+  buildLocalCsvForExport,
+  isHeaderOnlyCsv,
 } from '../lib/parseUtils';
 import { canStartParse, hasValidLocation } from '../lib/parseValidation';
 import { groupRows, type GroupedRow } from '../lib/groupRows';
@@ -412,6 +417,9 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
         'duplicate_of_source_row_id',
         'duplicateOfSourceRowId',
       ]),
+      verification_precision: pickStringValue(row, ['verification_precision', 'verificationPrecision']) || undefined,
+      compare_debug: row.compare_debug ?? row.compareDebug ?? undefined,
+      blocked_by: (row.blocked_by as string | string[] | undefined) ?? (row.blockedBy as string | string[] | undefined),
     };
   }
 
@@ -478,6 +486,9 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
     duplicate_of_source_row_id:
       pickStringValue(row, ['duplicate_of_source_row_id', 'duplicateOfSourceRowId']) ||
       undefined,
+    verification_precision: pickStringValue(row, ['verification_precision', 'verificationPrecision']) || undefined,
+    compare_debug: row.compare_debug ?? row.compareDebug ?? undefined,
+    blocked_by: (row.blocked_by as string | string[] | undefined) ?? (row.blockedBy as string | string[] | undefined),
   };
 };
 
@@ -655,6 +666,7 @@ export default function ParsePage() {
   const [legacyTab, setLegacyTab] = useState<'matched' | 'unmatched'>('matched');
   const [showRaw, setShowRaw] = useState(false);
   const [showDebugMode, setShowDebugMode] = useState(false);
+  const [reviewReasonFilter, setReviewReasonFilter] = useState<ReviewReasonFilter>('all');
   const [resultsPage, setResultsPage] = useState(1);
   const [resultsPageSize, setResultsPageSize] = useState(10);
   const [progressStep, setProgressStep] = useState(0);
@@ -1137,6 +1149,26 @@ export default function ParsePage() {
     [rowResults],
   );
   const needsReviewGroups = useMemo(() => groupRows(needsReviewRows), [needsReviewRows]);
+  const filteredNeedsReviewGroups = useMemo(() => {
+    if (reviewReasonFilter === 'all') return needsReviewGroups;
+    return needsReviewGroups.filter((group) => getReviewReasonBucket(group.displayRow) === reviewReasonFilter);
+  }, [needsReviewGroups, reviewReasonFilter]);
+  const reviewBreakdown = useMemo(() => {
+    const buckets = {
+      route_alias: 0,
+      missing_street_number: 0,
+      house_number: 0,
+      county_rescue: 0,
+      low_precision: 0,
+      other: 0,
+    };
+    needsReviewGroups.forEach((group) => {
+      const bucket = getReviewReasonBucket(group.displayRow);
+      if (bucket === 'all') buckets.other += group.count;
+      else (buckets as Record<string, number>)[bucket] += group.count;
+    });
+    return buckets;
+  }, [needsReviewGroups]);
   const outOfScopeGroups = useMemo(() => groupRows(outOfScopeRows), [outOfScopeRows]);
   const duplicateRowGroups = useMemo(
     () => groupRows(rowResults).filter((group) => group.count > 1),
@@ -1172,7 +1204,7 @@ export default function ParsePage() {
       case 'valid':
         return canonicalAddressesForDisplay.length;
       case 'needs_review':
-        return needsReviewGroups.length;
+        return filteredNeedsReviewGroups.length;
       case 'skipped':
         return skippedRows.length;
       case 'out_of_scope':
@@ -1186,7 +1218,7 @@ export default function ParsePage() {
     activeTab,
     canonicalAddressesForDisplay.length,
     duplicateRowGroups.length,
-    needsReviewGroups.length,
+    filteredNeedsReviewGroups.length,
     outOfScopeGroups.length,
     parseSummary,
     skippedRows.length,
@@ -1213,12 +1245,12 @@ export default function ParsePage() {
     [canonicalAddressesForDisplay, paginateRows],
   );
   const paginatedNeedsReviewGroups = useMemo(
-    () => paginateRows(needsReviewGroups),
-    [needsReviewGroups, paginateRows],
+    () => paginateRows(filteredNeedsReviewGroups),
+    [filteredNeedsReviewGroups, paginateRows],
   );
   const allNeedsReviewRowIds = useMemo(
-    () => needsReviewGroups.flatMap((group) => group.memberRowIds),
-    [needsReviewGroups],
+    () => filteredNeedsReviewGroups.flatMap((group) => group.memberRowIds),
+    [filteredNeedsReviewGroups],
   );
   const allNeedsReviewSelected =
     allNeedsReviewRowIds.length > 0 &&
@@ -2762,6 +2794,26 @@ export default function ParsePage() {
   };
 
 
+  const exportCatalogByType = useMemo(() => new Map(exportCatalog.map((item) => [item.type, item])), [exportCatalog]);
+  const hasVisibleRows = rowResults.length > 0 || canonicalAddressesForDisplay.length > 0;
+  const exportIntegrityWarningVisible = useMemo(() => {
+    if (!hasVisibleRows) return false;
+    const monitoredTypes: JobExportType[] = ['processing_report', 'unique_valid', 'needs_review', 'out_of_scope', 'duplicates', 'skipped'];
+    return monitoredTypes.some((type) => (exportCatalogByType.get(type)?.rowCount ?? 1) === 0);
+  }, [exportCatalogByType, hasVisibleRows]);
+
+  const triggerBlobDownload = (blob: Blob, filename: string) => {
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(href);
+  };
+
+
 
   const handleDownloadJobExport = async (type: JobExportType, label: string) => {
     if (!jobId) {
@@ -2772,14 +2824,36 @@ export default function ParsePage() {
     setPollError(null);
     try {
       const { blob, filename } = await downloadJobExport(jobId, type);
-      const href = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = href;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(href);
+      const csvText =
+        type === 'original_file' || type === 'propstream_import'
+          ? ''
+          : typeof blob.text === 'function'
+            ? await blob.text()
+            : '';
+      const catalogItem = exportCatalogByType.get(type);
+      const shouldFallback =
+        (type === 'processing_report' ||
+          type === 'unique_valid' ||
+          type === 'needs_review' ||
+          type === 'out_of_scope' ||
+          type === 'duplicates' ||
+          type === 'skipped') &&
+        (isHeaderOnlyCsv(csvText) || ((catalogItem?.rowCount ?? 1) === 0 && hasVisibleRows));
+
+      if (shouldFallback) {
+        const fallbackBlob = buildLocalCsvForExport(type, {
+          rowResults,
+          canonicalAddresses: canonicalAddressesForDisplay,
+        });
+        triggerBlobDownload(fallbackBlob, `job-${jobId}-${type}-local-fallback.csv`);
+        showToast({
+          title: 'Used local export fallback',
+          description: 'Backend export was incomplete for this dataset.',
+          variant: 'info',
+        });
+      } else {
+        triggerBlobDownload(blob, filename);
+      }
       setDownloadSuccessLabel(`${label} downloaded`);
       publishLiveUpdate('job-exported');
       publishLiveUpdate('metrics-updated');
@@ -2799,6 +2873,7 @@ export default function ParsePage() {
       setActiveDownloadType(null);
     }
   };
+
 
   const handleAutoFixFlaggedRows = async () => {
     if (!jobId) {
@@ -3284,6 +3359,12 @@ export default function ParsePage() {
                   </button>
                 ) : null}
                 {parseSummary ? (
+                  <div className="flex flex-col items-end gap-2">
+                    {exportIntegrityWarningVisible ? (
+                      <p className="max-w-sm rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
+                        Saved export rows are unavailable for this run. Downloads may be incomplete until backend persistence is repaired.
+                      </p>
+                    ) : null}
                   <ExportPanel
                     triggerLabel="Export"
                     catalog={exportCatalog}
@@ -3293,6 +3374,7 @@ export default function ParsePage() {
                     activeDownloadType={activeDownloadType}
                     disabled={!jobId}
                   />
+                  </div>
                 ) : null}
                 {downloadSuccessLabel ? (
                   <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
@@ -3688,6 +3770,32 @@ export default function ParsePage() {
                 ) : null}
                 {activeTab === 'needs_review' ? (
                   <>
+                  <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold">Route Alias / Route Mismatch: {reviewBreakdown.route_alias}</span>
+                      <span>Street Number Not Verified: {reviewBreakdown.missing_street_number}</span>
+                      <span>House Number Mismatch: {reviewBreakdown.house_number}</span>
+                      <span>County Rescue Needed: {reviewBreakdown.county_rescue}</span>
+                      <span>Low Precision: {reviewBreakdown.low_precision}</span>
+                      <span>Other: {reviewBreakdown.other}</span>
+                    </div>
+                  </div>
+                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Grouped by issue so repeated copies do not inflate workload.</p>
+                    <select
+                      aria-label="Needs review reason filter"
+                      value={reviewReasonFilter}
+                      onChange={(event) => setReviewReasonFilter(event.target.value as ReviewReasonFilter)}
+                      className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                    >
+                      <option value="all">All</option>
+                      <option value="route_alias">Route Alias</option>
+                      <option value="house_number">House Number</option>
+                      <option value="low_precision">Low Precision</option>
+                      <option value="county_rescue">County Rescue</option>
+                      <option value="missing_street_number">Missing Street Number</option>
+                    </select>
+                  </div>
                   <div className="mb-3 flex items-center justify-end">
                     <button
                       type="button"
@@ -3778,7 +3886,12 @@ export default function ParsePage() {
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row) || '--'}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedAddress(row) || '--'}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
-                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{renderReasonCell(row)}</td>
+                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                      {renderReasonCell(row)}
+                                      {getReviewDebugHint(row) ? (
+                                        <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">{getReviewDebugHint(row)}</p>
+                                      ) : null}
+                                    </td>
                                     {showDebugMode ? <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{stringifyPreview(row.raw_row)}</td> : null}
                                     <td className="px-4 py-3 text-right">
                                       <div className="flex min-w-[170px] flex-col items-stretch gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
@@ -3797,7 +3910,7 @@ export default function ParsePage() {
                       </table>
                     </div>
                     <TablePagination
-                      totalCount={needsReviewGroups.length}
+                      totalCount={filteredNeedsReviewGroups.length}
                       page={resultsPage}
                       pageSize={resultsPageSize}
                       onPageChange={setResultsPage}
@@ -4001,7 +4114,12 @@ export default function ParsePage() {
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row) || '—'}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCity(row) || '—'}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
-                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{renderReasonCell(row)}</td>
+                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
+                                      {renderReasonCell(row)}
+                                      {getReviewDebugHint(row) ? (
+                                        <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">{getReviewDebugHint(row)}</p>
+                                      ) : null}
+                                    </td>
                                     {showDebugMode ? <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{stringifyPreview(row.raw_row)}</td> : null}
                                     <td className="px-4 py-3 text-right">
                                       <div className="flex min-w-[170px] flex-col items-stretch gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
