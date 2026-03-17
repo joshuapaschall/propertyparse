@@ -2902,7 +2902,7 @@ export default function ParsePage() {
       <div className="px-4 pb-4">
         <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+            <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
               <tr>
                 <th className="px-4 py-3">Record ID / Row (data)</th>
                 <th className="px-4 py-3">Detected Address</th>
@@ -2997,7 +2997,7 @@ export default function ParsePage() {
       title="Address Parser"
       subtitle="Upload a file, set your location context, and parse addresses."
     >
-      <div className="space-y-8">
+      <div className="mx-auto w-full max-w-[1160px] space-y-8">
         <div className="grid gap-6 lg:grid-cols-2">
             <div className="space-y-4">
               <div>
@@ -3152,7 +3152,7 @@ export default function ParsePage() {
         </div>
 
         {shouldShowProgress ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+          <div className="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-semibold">Parsing Progress</h2>
@@ -3207,7 +3207,7 @@ export default function ParsePage() {
           ref={resultsRef}
           className="w-full"
         >
-          <div className="sticky top-16 z-20 -mx-6 mb-6 border-b border-slate-200/80 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+          <div className="sticky top-16 z-20 mb-6 rounded-2xl border border-slate-200/80 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Processing Results</h2>
@@ -3215,16 +3215,7 @@ export default function ParsePage() {
                   Review parsed rows, fix issues, and export results.
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                {parseSummary ? (
-                  <button
-                    type="button"
-                    onClick={() => openProcessingReport('all')}
-                    className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Processing Report
-                  </button>
-                ) : null}
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 {parseSummary ? (
                   <button
                     type="button"
@@ -3261,7 +3252,7 @@ export default function ParsePage() {
 
 
             {parseSummary ? (
-              <div className="mt-4 flex flex-wrap gap-2">
+              <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={() => handleKpiTabClick('valid')}
@@ -3272,6 +3263,13 @@ export default function ParsePage() {
                   }`}
                 >
                   Valid (rows: {computedParseSummary?.valid_total ?? 0} · unique: {computedParseSummary?.valid_unique ?? 0})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openProcessingReport('all')}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Processing Report
                 </button>
                 <button
                   type="button"
@@ -3578,7 +3576,7 @@ export default function ParsePage() {
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                     <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
-                        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
                             <th className="px-4 py-3">#</th>
                             <th className="px-4 py-3">Full Address</th>
@@ -3656,7 +3654,7 @@ export default function ParsePage() {
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                     <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
-                        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
                             <th className="px-4 py-3">
                               <input
@@ -3732,9 +3730,9 @@ export default function ParsePage() {
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{renderReasonCell(row)}</td>
                                     {showDebugMode ? <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{stringifyPreview(row.raw_row)}</td> : null}
                                     <td className="px-4 py-3 text-right">
-                                      <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
-                                        <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy}>Review</button>
-                                        <button type="button" onClick={() => void handleApproveMatched(row, true)} disabled={isRowBusy}>
+                                      <div className="flex min-w-[170px] flex-col items-stretch gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
+                                        <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy} className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">Review</button>
+                                        <button type="button" onClick={() => void handleApproveMatched(row, true)} disabled={isRowBusy} className="w-full rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20">
                                           {approvingRowIds.has(row.source_row_id) ? '⏳ Approving…' : 'Approve matched'}
                                         </button>
                                       </div>
@@ -3765,7 +3763,7 @@ export default function ParsePage() {
                     </div>
                     <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
-                        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
                             <th className="px-4 py-3">Record ID / Row</th>
                             <th className="px-4 py-3">Detected Address</th>
@@ -3908,7 +3906,7 @@ export default function ParsePage() {
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                     <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
-                        <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
                             <th className="px-4 py-3">Record ID / Row</th>
                             <th className="px-4 py-3">Original Address</th>
@@ -3949,9 +3947,9 @@ export default function ParsePage() {
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{renderReasonCell(row)}</td>
                                     {showDebugMode ? <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{stringifyPreview(row.raw_row)}</td> : null}
                                     <td className="px-4 py-3 text-right">
-                                      <div className="flex flex-wrap justify-end gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
-                                        <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy}>Review</button>
-                                        <button type="button" onClick={() => void handleApproveMatched(row, isOutOfScopeRow(row))} disabled={isRowBusy}>{approvingRowIds.has(row.source_row_id) ? '⏳ Approving…' : 'Approve matched'}</button>
+                                      <div className="flex min-w-[170px] flex-col items-stretch gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
+                                        <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy} className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">Review</button>
+                                        <button type="button" onClick={() => void handleApproveMatched(row, isOutOfScopeRow(row))} disabled={isRowBusy} className="w-full rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20">{approvingRowIds.has(row.source_row_id) ? '⏳ Approving…' : 'Approve matched'}</button>
                                       </div>
                                     </td>
                                   </tr>
