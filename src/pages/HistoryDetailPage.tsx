@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import TablePagination from '../components/TablePagination';
@@ -17,6 +17,7 @@ import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCa
 import { deriveDisplayedParseSummary, normalizeJobSummary, toParseSummary } from '../lib/jobSummary';
 import type { ExportCatalogItem } from '../types/exports';
 import type { CanonicalAddress, RowResult } from '../types/parse';
+import { subscribeJobUpdates } from '../lib/liveUpdates';
 
 type ResultsTab = 'valid' | 'needs_review' | 'out_of_scope' | 'skipped' | 'duplicates';
 
@@ -40,6 +41,16 @@ const pickString = (job: JobRecord, keys: string[]) => {
   return typeof value === 'string' ? value : value != null ? String(value) : null;
 };
 
+const pickNumber = (job: JobRecord, keys: string[]) => {
+  const value = pickValue(job, keys);
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
 const formatDateTime = (value: string | null) => {
   if (!value) return '--';
   const date = new Date(value);
@@ -47,7 +58,7 @@ const formatDateTime = (value: string | null) => {
   return date.toLocaleString();
 };
 
-const formatCurrency = (value?: number) => {
+const formatCurrency = (value?: number | null) => {
   if (typeof value !== 'number' || Number.isNaN(value)) return '--';
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(value);
 };
@@ -102,41 +113,74 @@ export default function HistoryDetailPage() {
   const [resultsPageSize, setResultsPageSize] = useState(10);
 
   const [jobMeta, setJobMeta] = useState<JobSummaryMeta | null>(null);
+  const [mergedJobSummary, setMergedJobSummary] = useState<JobRecord | null>(null);
   const [results, setResults] = useState<Awaited<ReturnType<typeof getJobResults>> | null>(null);
 
-  useEffect(() => {
+  const loadDetails = useCallback(async () => {
     if (!jobId) return;
-    let active = true;
+    setLoading(true);
+    setError(null);
+    try {
+      const [jobDetail, jobResults, catalog] = await Promise.all([getJobDetail(jobId), getJobResults(jobId), getJobExportCatalog(jobId)]);
+      const mergedJob = {
+        ...(jobDetail.summary ?? {}),
+        ...(jobDetail.job ?? {}),
+        ...(jobResults.summary ?? {}),
+      } as JobRecord;
+      setMergedJobSummary(mergedJob);
+      setJobMeta({
+        filename: pickString(mergedJob, ['display_name', 'displayName', 'campaign_name', 'file_name', 'original_filename']),
+        createdAt: pickString(mergedJob, ['created_at', 'createdAt', 'created', 'timestamp']),
+      });
+      setResults(jobResults);
+      setExportCatalog(normalizeExportCatalog(catalog));
+    } catch (err) {
+      const message = (err as Error).message ?? 'Unable to load job details.';
+      setError(message);
+      setExportCatalog(FALLBACK_EXPORT_CATALOG);
+      showToast({ title: message, variant: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId, showToast]);
 
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const [jobDetail, jobResults, catalog] = await Promise.all([getJobDetail(jobId), getJobResults(jobId), getJobExportCatalog(jobId)]);
-        if (!active) return;
-        const mergedJob = { ...(jobDetail.summary ?? {}), ...(jobDetail.job ?? {}) } as JobRecord;
-        setJobMeta({
-          filename: pickString(mergedJob, ['display_name', 'displayName', 'campaign_name', 'file_name', 'original_filename']),
-          createdAt: pickString(mergedJob, ['created_at', 'createdAt', 'created', 'timestamp']),
-        });
-        setResults(jobResults);
-        setExportCatalog(normalizeExportCatalog(catalog));
-      } catch (err) {
-        if (!active) return;
-        const message = (err as Error).message ?? 'Unable to load job details.';
-        setError(message);
-        setExportCatalog(FALLBACK_EXPORT_CATALOG);
-        showToast({ title: message, variant: 'error' });
-      } finally {
-        if (active) setLoading(false);
+  useEffect(() => {
+    void loadDetails();
+  }, [loadDetails]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeJobUpdates((event) => {
+      if (event.jobId && jobId && event.jobId !== jobId) return;
+      void loadDetails();
+    });
+    return unsubscribe;
+  }, [jobId, loadDetails]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      void loadDetails();
+    };
+    const onVisibility = () => {
+      if (!document.hidden) {
+        void loadDetails();
       }
     };
-
-    load();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      active = false;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [jobId, showToast]);
+  }, [loadDetails]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!document.hidden) {
+        void loadDetails();
+      }
+    }, 25000);
+    return () => window.clearInterval(timer);
+  }, [loadDetails]);
 
   useEffect(() => {
     setResultsPage(1);
@@ -145,9 +189,17 @@ export default function HistoryDetailPage() {
   const rowResults = useMemo(() => results?.row_results ?? [], [results]);
 
   const parseSummary = useMemo(() => {
-    const backendSummary = results?.summary ? toParseSummary(normalizeJobSummary(results.summary)) : null;
+    const backendSummary = mergedJobSummary ? toParseSummary(normalizeJobSummary(mergedJobSummary)) : null;
     return deriveDisplayedParseSummary(rowResults, backendSummary);
-  }, [results?.summary, rowResults]);
+  }, [mergedJobSummary, rowResults]);
+
+  const totalCost = useMemo(() => {
+    const fromParseSummary = parseSummary?.spend_usd;
+    const fromResultsSummary = pickNumber((results?.summary ?? {}) as JobRecord, ['spend_usd', 'spendUsd']);
+    const fromJobSummary = pickNumber((mergedJobSummary ?? {}) as JobRecord, ['spend_usd', 'spendUsd']);
+    return fromParseSummary ?? fromResultsSummary ?? fromJobSummary;
+  }, [mergedJobSummary, parseSummary, results?.summary]);
+
   const canonicalAddresses = useMemo(
     () => (results?.canonical_addresses ?? []).map(normalizeCanonicalAddress),
     [results],
@@ -270,12 +322,12 @@ export default function HistoryDetailPage() {
               <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
                 {[
                   ['Rows Received', parseSummary?.rows_received],
-                  ['Valid Unique', parseSummary?.valid_unique],
+                  ['Unique Valid', parseSummary?.valid_unique],
                   ['Needs Review', parseSummary?.needs_review],
                   ['Out Of Scope', parseSummary?.out_of_scope],
                   ['Skipped', parseSummary?.skipped],
                   ['Duplicates', parseSummary?.duplicates],
-                  ['Total Cost/Spend', formatCurrency((results?.metadata as Record<string, unknown> | undefined)?.spend_usd as number | undefined)],
+                  ['Total Cost', formatCurrency(totalCost)],
                 ].map(([label, value]) => (
                   <div key={String(label)} className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                     <p className="text-xs uppercase text-slate-500 dark:text-slate-400">{label}</p>
@@ -292,7 +344,7 @@ export default function HistoryDetailPage() {
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap gap-3">
               {([
-                ['valid', 'Valid Unique'],
+                ['valid', 'Unique Valid'],
                 ['needs_review', 'Needs Review (rows)'],
                 ['out_of_scope', 'Out Of Scope (rows)'],
                 ['skipped', 'Skipped (rows)'],
