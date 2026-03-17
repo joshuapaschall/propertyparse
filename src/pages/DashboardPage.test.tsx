@@ -16,14 +16,16 @@ vi.mock('../lib/api', () => ({
 vi.mock('../lib/persistenceStatus', () => ({
   readLocalParsePersistenceState: () => readLocalParsePersistenceState(),
 }));
+const subscribeJobUpdates = vi.fn();
 vi.mock('../lib/liveUpdates', () => ({
-  subscribeJobUpdates: vi.fn(() => () => undefined),
+  subscribeJobUpdates: (...args: unknown[]) => subscribeJobUpdates(...args),
 }));
 
 describe('DashboardPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     readLocalParsePersistenceState.mockReturnValue(null);
+    subscribeJobUpdates.mockImplementation(() => () => undefined);
     getMetricsSummary.mockResolvedValue({
       files_uploaded: 4,
       potential_properties: 20,
@@ -62,8 +64,23 @@ describe('DashboardPage', () => {
 
   it('shows helper copy when durable metrics are zero and last run had persistence warning', async () => {
     readLocalParsePersistenceState.mockReturnValue({ persistenceWarning: true, completedAt: '2025-01-01T00:00:00.000Z', version: 1 });
+    subscribeJobUpdates.mockImplementation(() => () => undefined);
     getMetricsSummary.mockResolvedValue({ files_uploaded: 0, potential_properties: 0, valid_unique: 0, review_queue_total: 0, exports: 0, total_cost_usd: 0 });
     render(<MemoryRouter><DashboardPage /></MemoryRouter>);
     expect(await screen.findByText(/Dashboard metrics only include saved jobs/i)).toBeInTheDocument();
+  });
+
+  it('refreshes when summary-ready live updates fire', async () => {
+    let handler: ((event: { kind: string }) => void) | null = null;
+    subscribeJobUpdates.mockImplementation((cb: (event: { kind: string }) => void) => {
+      handler = cb;
+      return () => undefined;
+    });
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>);
+    await screen.findByText('Files Uploaded');
+    const before = getMetricsSummary.mock.calls.length;
+    handler?.({ kind: 'metrics-updated' });
+    await screen.findByText('Files Uploaded');
+    expect(getMetricsSummary.mock.calls.length).toBeGreaterThan(before);
   });
 });

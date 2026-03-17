@@ -30,6 +30,8 @@ import {
   type ReviewReasonFilter,
   buildLocalCsvForExport,
   isHeaderOnlyCsv,
+  hasHydratedResultsPayload,
+  isTemporaryResultsUnavailableError,
 } from '../lib/parseUtils';
 import { canStartParse, hasValidLocation } from '../lib/parseValidation';
 import { groupRows, type GroupedRow } from '../lib/groupRows';
@@ -70,6 +72,9 @@ import type { ExportCatalogItem } from '../types/exports';
 import { publishJobUpdate } from '../lib/liveUpdates';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Verifying', 'AI fixing', 'Finalizing'];
+
+const RESULTS_HYDRATION_MAX_ATTEMPTS = 7;
+const RESULTS_HYDRATION_BASE_DELAY_MS = 700;
 const ASYNC_PARSE_FILE_SIZE_THRESHOLD = 5 * 1024 * 1024;
 const ASYNC_PARSE_MIME_PREFIXES = ['application/pdf', 'image/'];
 const ASYNC_PARSE_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'tiff', 'tif', 'bmp', 'heic', 'heif'];
@@ -672,6 +677,7 @@ export default function ParsePage() {
   const [progressStep, setProgressStep] = useState(0);
   const [progressPercent, setProgressPercent] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [resultsFinalizing, setResultsFinalizing] = useState(false);
   const [rehydrating, setRehydrating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pollError, setPollError] = useState<string | null>(null);
@@ -881,6 +887,7 @@ export default function ParsePage() {
       setCampaignName('');
       setForceRefresh(false);
       setBusy(false);
+      setResultsFinalizing(false);
       setRehydrating(false);
       progressSamplesRef.current = [];
       if (options?.showMissingJobToast) {
@@ -978,6 +985,7 @@ export default function ParsePage() {
         setLegacyUnmatchedRows([]);
         setMetadata(Object.keys(combinedJob).length ? (combinedJob as Record<string, unknown>) : null);
         setLegacyMode(false);
+        setResultsFinalizing(false);
         setPersistenceWarningActive(false);
         writeLocalParsePersistenceState({ jobId: jobIdToLoad, persistenceWarning: false });
         setActiveTab('valid');
@@ -1008,6 +1016,7 @@ export default function ParsePage() {
         setError((err as Error).message ?? 'Unable to load job results.');
       } finally {
         setRehydrating(false);
+        setResultsFinalizing(false);
       }
     },
     [resetParseUi, updateJobQueryParam],
@@ -1312,6 +1321,12 @@ export default function ParsePage() {
   );
 
   const isStartingParse = busy && progressInfo.phase === null;
+  const parseLifecycleStatus = useMemo(() => {
+    if (busy) return 'Running…';
+    if (resultsFinalizing) return 'Finalizing results…';
+    if (parseSummary) return 'Ready';
+    return null;
+  }, [busy, parseSummary, resultsFinalizing]);
 
   const progressDetail = useMemo(() => {
     if (isStartingParse) {
@@ -1345,8 +1360,8 @@ export default function ParsePage() {
   }, [busy, isStartingParse, progressInfo, softProgressOutage]);
 
   const shouldShowProgress = useMemo(
-    () => busy || progressInfo.phase !== null || progressPercent !== null || parseSummary !== null,
-    [busy, parseSummary, progressInfo.phase, progressPercent],
+    () => busy || resultsFinalizing || progressInfo.phase !== null || progressPercent !== null || parseSummary !== null,
+    [busy, parseSummary, progressInfo.phase, progressPercent, resultsFinalizing],
   );
 
   const getRecordId = (row: RowResult) => {
@@ -2155,10 +2170,55 @@ export default function ParsePage() {
     [],
   );
 
+  const hydrateSummaryFromJobDetail = useCallback(
+    async (completedJobId: string, fallbackRowsReceived: number | null) => {
+      const jobDetail = await getJobDetail(completedJobId);
+      const mergedJob: JobRecord = {
+        ...(jobDetail.summary ?? {}),
+        ...(jobDetail.job ?? {}),
+      };
+      const summary = buildParseSummaryFromJob(mergedJob);
+      const displayedSummary = deriveDisplayedParseSummary([], summary);
+      const resolvedRowsReceived = displayedSummary?.rows_received ?? fallbackRowsReceived ?? null;
+      setParseSummary(displayedSummary);
+      setRowsReceived(resolvedRowsReceived);
+      setMetadata(Object.keys(mergedJob).length ? mergedJob : null);
+      setProgressInfo((prev) => ({
+        ...prev,
+        phase: 'DONE',
+        done: resolvedRowsReceived,
+        total: resolvedRowsReceived,
+      }));
+      setProgressPercent(100);
+      return displayedSummary;
+    },
+    [],
+  );
+
   const hydrateCompletedAsyncJob = useCallback(
     async (completedJobId: string, fallbackRowsReceived: number | null) => {
-      const results = await getJobResults(completedJobId);
-      applyParsedResponse(results as unknown as Record<string, unknown>, fallbackRowsReceived);
+      setResultsFinalizing(true);
+      let lastError: unknown = null;
+      for (let attempt = 0; attempt < RESULTS_HYDRATION_MAX_ATTEMPTS; attempt += 1) {
+        try {
+          const results = await getJobResults(completedJobId, { fresh: true });
+          if (!hasHydratedResultsPayload(results)) {
+            throw new Error('Results not ready yet.');
+          }
+          applyParsedResponse(results as unknown as Record<string, unknown>, fallbackRowsReceived);
+          setResultsFinalizing(false);
+          return;
+        } catch (error) {
+          lastError = error;
+          if (!isTemporaryResultsUnavailableError(error) && (error as Error).message !== 'Results not ready yet.') {
+            break;
+          }
+          const delayMs = RESULTS_HYDRATION_BASE_DELAY_MS * 2 ** attempt;
+          await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+        }
+      }
+      setResultsFinalizing(false);
+      throw lastError instanceof Error ? lastError : new Error('Finalizing results timed out.');
     },
     [applyParsedResponse],
   );
@@ -2166,6 +2226,7 @@ export default function ParsePage() {
   const resetForFreshParse = () => {
     setError(null);
     setBusy(true);
+    setResultsFinalizing(false);
     setRowsReceived(null);
     setParseSummary(null);
     setCanonicalAddresses([]);
@@ -2304,6 +2365,7 @@ export default function ParsePage() {
     } finally {
       stopPolling();
       setBusy(false);
+      setResultsFinalizing(false);
     }
   };
 
@@ -2328,11 +2390,20 @@ export default function ParsePage() {
         }));
         startPolling(newJobId, {
           onFinished: async () => {
-            await hydrateCompletedAsyncJob(newJobId, upload.rowsReceived ?? null);
-            publishLiveUpdate('job-updated', newJobId);
-            publishLiveUpdate('metrics-updated', newJobId);
-            setBusy(false);
-            void reconcileDurableJob(newJobId);
+            try {
+              await hydrateSummaryFromJobDetail(newJobId, upload.rowsReceived ?? null);
+              publishLiveUpdate('job-updated', newJobId);
+              publishLiveUpdate('metrics-updated', newJobId);
+              setBusy(false);
+              await hydrateCompletedAsyncJob(newJobId, upload.rowsReceived ?? null);
+              publishLiveUpdate('job-updated', newJobId);
+              publishLiveUpdate('metrics-updated', newJobId);
+              void reconcileDurableJob(newJobId);
+            } catch (hydrationError) {
+              setBusy(false);
+              setResultsFinalizing(false);
+              setError((hydrationError as Error).message ?? 'Unable to finalize parse results.');
+            }
           },
         });
         await parseFileAsync(upload.fileId, {
@@ -2354,6 +2425,7 @@ export default function ParsePage() {
           jobName: trimmedCampaignName || undefined,
         });
         applyParsedResponse(parsed as unknown as Record<string, unknown>, upload.rowsReceived ?? null);
+        setResultsFinalizing(false);
         publishLiveUpdate('job-updated', newJobId);
         publishLiveUpdate('metrics-updated', newJobId);
         stopPolling();
@@ -3287,9 +3359,9 @@ export default function ParsePage() {
                   Live status updates while we process your file.
                 </p>
               </div>
-              {isStartingParse ? (
+              {parseLifecycleStatus ? (
                 <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-                  Job running…
+                  {parseLifecycleStatus}
                 </span>
               ) : null}
             </div>
@@ -3699,6 +3771,9 @@ export default function ParsePage() {
           ) : null}
           <div className="mt-6">
             {busy && !parseSummary ? <ResultsTableSkeleton /> : null}
+            {parseSummary && resultsFinalizing ? (
+              <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">Finalizing results… tables will populate automatically.</p>
+            ) : null}
             {parseSummary ? (
               <>
                 {activeTab === 'valid' ? (

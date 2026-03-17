@@ -8,6 +8,7 @@ const getJobDetail = vi.fn();
 const getJobResults = vi.fn();
 const getJobExportCatalog = vi.fn();
 const downloadJobExport = vi.fn();
+const showToast = vi.fn();
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
 vi.mock('../components/TablePagination', () => ({ default: ({ totalCount, rangeContext }: { totalCount: number; rangeContext?: string }) => <div>{`pagination: ${totalCount}${rangeContext ? ` ${rangeContext}` : ''}`}</div> }));
@@ -16,7 +17,7 @@ vi.mock('../components/exports/ExportPanel', () => ({
     <div>{catalog.map((item) => <button key={item.type} type="button" onClick={() => onDownload(item.type as any, item.label)}>{`download-${item.type}`}</button>)}</div>
   ),
 }));
-vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
+vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast }) }));
 vi.mock('../lib/liveUpdates', () => ({ subscribeJobUpdates: vi.fn(() => () => undefined) }));
 vi.mock('../lib/api', () => ({
   getJobDetail: (...args: unknown[]) => getJobDetail(...args),
@@ -30,12 +31,43 @@ describe('HistoryDetailPage summary normalization', () => {
     vi.clearAllMocks();
     getJobExportCatalog.mockResolvedValue([]);
     downloadJobExport.mockResolvedValue({ blob: new Blob(['h1\n'], { type: 'text/csv' }), filename: 'f.csv' });
+    showToast.mockClear();
     Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:mock'), configurable: true });
     Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
   });
 
 
 
+
+  it('renders summary while results are finalizing, then hydrates tables', async () => {
+    getJobDetail.mockResolvedValue({
+      job: { job_id: 'job-1', spend_usd: 2.5 },
+      summary: { rows_received: 2, valid_total: 1, valid_unique: 1, needs_review: 1, skipped: 0, out_of_scope: 0, duplicates: 0 },
+    });
+    getJobResults
+      .mockRejectedValueOnce(new Error('HTTP 202: finalizing'))
+      .mockResolvedValueOnce({
+        summary: { rows_received: 2, valid_total: 1, valid_unique: 1, needs_review: 1, skipped: 0, out_of_scope: 0, duplicates: 0 },
+        row_results: [
+          { source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1' },
+          { source_row_id: 'r2', source_row_index: 2, status: 'UNMATCHED_NEEDS_REVIEW' },
+        ],
+        canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St' }],
+      });
+
+    render(
+      <MemoryRouter initialEntries={['/history/job-1']}>
+        <Routes>
+          <Route path="/history/:jobId" element={<HistoryDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Rows Received')).toBeInTheDocument();
+    expect(screen.getByText(/Results are finalizing/i)).toBeInTheDocument();
+    expect(await screen.findByText('1 Main St', {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(showToast).not.toHaveBeenCalled();
+  });
   it('shows needs review issue/row counts and grouped row impact with safe display addresses', async () => {
     const user = userEvent.setup();
     getJobDetail.mockResolvedValue({

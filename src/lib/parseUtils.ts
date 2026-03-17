@@ -2,6 +2,33 @@ import type { CanonicalAddress, ParseSummary, RowResult } from '../types/parse';
 
 const normalizeValue = (value?: string) => (value ?? '').toUpperCase();
 
+const getHttpStatusFromError = (error: unknown) => {
+  if (!error || typeof error !== 'object') return null;
+  const maybeInfo = (error as { apiErrorInfo?: { status?: number } }).apiErrorInfo;
+  if (typeof maybeInfo?.status === 'number') return maybeInfo.status;
+  const message = error instanceof Error ? error.message : String(error);
+  const match = message.match(/HTTP\s+(\d+)/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+export const isTemporaryResultsUnavailableError = (error: unknown) => {
+  const status = getHttpStatusFromError(error);
+  return status === 202 || status === 404 || status === 409 || status === 425 || status === 429 || status === 503;
+};
+
+export const hasHydratedResultsPayload = (payload: unknown) => {
+  if (!payload || typeof payload !== 'object') return false;
+  const record = payload as { row_results?: unknown; canonical_addresses?: unknown; summary?: ParseSummary };
+  if (!Array.isArray(record.row_results) || !Array.isArray(record.canonical_addresses)) return false;
+  const rowsReceived = typeof record.summary?.rows_received === 'number' ? record.summary.rows_received : null;
+  if (rowsReceived !== null && rowsReceived > 0) {
+    return record.row_results.length > 0 || record.canonical_addresses.length > 0;
+  }
+  return true;
+};
+
 const SKIPPED_REASON_CODES = new Set(['PO_BOX', 'NON_ADDRESS_TEXT']);
 
 type ReasonMetadata = {

@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import TablePagination from '../components/TablePagination';
 import { downloadJobExport, getJobDetail, getJobExportCatalog, getJobResults, JobExportType, JobRecord } from '../lib/api';
+
 import { groupRows, GroupedRow } from '../lib/groupRows';
 import {
   getReasonMetadata,
@@ -16,6 +17,7 @@ import {
   type ReviewReasonFilter,
   buildLocalCsvForExport,
   isHeaderOnlyCsv,
+  isTemporaryResultsUnavailableError,
 } from '../lib/parseUtils';
 import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
@@ -24,6 +26,9 @@ import { deriveDisplayedParseSummary, normalizeJobSummary, toParseSummary } from
 import type { ExportCatalogItem } from '../types/exports';
 import type { CanonicalAddress, RowResult } from '../types/parse';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
+
+const RESULTS_RETRY_MAX_ATTEMPTS = 6;
+const RESULTS_RETRY_BASE_DELAY_MS = 800;
 
 type ResultsTab = 'valid' | 'needs_review' | 'out_of_scope' | 'skipped' | 'duplicates';
 
@@ -122,34 +127,60 @@ export default function HistoryDetailPage() {
   const [jobMeta, setJobMeta] = useState<JobSummaryMeta | null>(null);
   const [mergedJobSummary, setMergedJobSummary] = useState<JobRecord | null>(null);
   const [results, setResults] = useState<Awaited<ReturnType<typeof getJobResults>> | null>(null);
+  const [resultsFinalizing, setResultsFinalizing] = useState(false);
+
+  const hydrateResultsWithRetry = useCallback(async () => {
+    if (!jobId) return;
+    for (let attempt = 0; attempt < RESULTS_RETRY_MAX_ATTEMPTS; attempt += 1) {
+      try {
+        const jobResults = await getJobResults(jobId, { fresh: true });
+        setResults(jobResults);
+        setMergedJobSummary((prev) => ({ ...(prev ?? {}), ...((jobResults.summary ?? {}) as JobRecord) }));
+        setResultsFinalizing(false);
+        return;
+      } catch (err) {
+        if (!isTemporaryResultsUnavailableError(err)) {
+          throw err;
+        }
+        setResultsFinalizing(true);
+        await new Promise((resolve) => window.setTimeout(resolve, RESULTS_RETRY_BASE_DELAY_MS * 2 ** attempt));
+      }
+    }
+  }, [jobId]);
 
   const loadDetails = useCallback(async () => {
     if (!jobId) return;
     setLoading(true);
     setError(null);
     try {
-      const [jobDetail, jobResults, catalog] = await Promise.all([getJobDetail(jobId), getJobResults(jobId), getJobExportCatalog(jobId)]);
+      const [jobDetail, catalog] = await Promise.all([getJobDetail(jobId), getJobExportCatalog(jobId)]);
       const mergedJob = {
         ...(jobDetail.summary ?? {}),
         ...(jobDetail.job ?? {}),
-        ...(jobResults.summary ?? {}),
       } as JobRecord;
       setMergedJobSummary(mergedJob);
       setJobMeta({
         filename: pickString(mergedJob, ['display_name', 'displayName', 'campaign_name', 'file_name', 'original_filename']),
         createdAt: pickString(mergedJob, ['created_at', 'createdAt', 'created', 'timestamp']),
       });
-      setResults(jobResults);
       setExportCatalog(normalizeExportCatalog(catalog));
+      setResults(null);
+      setResultsFinalizing(true);
+      setLoading(false);
+      void hydrateResultsWithRetry().catch((resultsError) => {
+        const message = (resultsError as Error).message ?? 'Unable to load job results.';
+        setResultsFinalizing(false);
+        setError(message);
+        showToast({ title: message, variant: 'error' });
+      });
     } catch (err) {
       const message = (err as Error).message ?? 'Unable to load job details.';
       setError(message);
       setExportCatalog(FALLBACK_EXPORT_CATALOG);
-      showToast({ title: message, variant: 'error' });
-    } finally {
       setLoading(false);
+      showToast({ title: message, variant: 'error' });
     }
-  }, [jobId, showToast]);
+  }, [hydrateResultsWithRetry, jobId, showToast]);
 
   useEffect(() => {
     void loadDetails();
@@ -472,6 +503,9 @@ export default function HistoryDetailPage() {
             </div>
           ) : null}
 
+          {resultsFinalizing ? (
+            <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">Results are finalizing… row tables will appear automatically.</p>
+          ) : null}
           <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="overflow-auto">
               {activeTab === 'valid' ? (
