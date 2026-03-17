@@ -3578,13 +3578,13 @@ export default function ParsePage() {
                       <table className="min-w-full text-left text-sm">
                         <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
-                            <th className="px-4 py-3">#</th>
-                            <th className="px-4 py-3">Full Address</th>
-                            <th className="px-4 py-3">Street Address</th>
-                            <th className="px-4 py-3">Address 2</th>
-                            <th className="px-4 py-3">City</th>
-                            <th className="px-4 py-3">State</th>
-                            <th className="px-4 py-3">Zip</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">#</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Full Address</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Street Address</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Address 2</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">City</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">State</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Zip</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -3656,7 +3656,7 @@ export default function ParsePage() {
                       <table className="min-w-full text-left text-sm">
                         <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
-                            <th className="px-4 py-3">
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">
                               <input
                                 type="checkbox"
                                 aria-label="Select all needs review rows"
@@ -3669,13 +3669,13 @@ export default function ParsePage() {
                                 }}
                               />
                             </th>
-                            <th className="px-4 py-3">Record ID / Row</th>
-                            <th className="px-4 py-3">Original Address</th>
-                            <th className="px-4 py-3">Matched Address</th>
-                            <th className="px-4 py-3">Status</th>
-                            <th className="px-4 py-3">Reason</th>
-                            {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
-                            <th className="px-4 py-3 text-right">Actions</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Record ID / Row</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Original Address</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Matched Address</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Status</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Reason</th>
+                            {showDebugMode ? <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Raw Preview</th> : null}
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 text-right dark:bg-slate-900">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -3765,12 +3765,12 @@ export default function ParsePage() {
                       <table className="min-w-full text-left text-sm">
                         <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
-                            <th className="px-4 py-3">Record ID / Row</th>
-                            <th className="px-4 py-3">Detected Address</th>
-                            <th className="px-4 py-3">Status</th>
-                            <th className="px-4 py-3">Reason</th>
-                            {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
-                            <th className="px-4 py-3 text-right">Actions</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Record ID / Row</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Detected Address</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Status</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Reason</th>
+                            {showDebugMode ? <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Raw Preview</th> : null}
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 text-right dark:bg-slate-900">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -3908,15 +3908,15 @@ export default function ParsePage() {
                       <table className="min-w-full text-left text-sm">
                         <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
-                            <th className="px-4 py-3">Record ID / Row</th>
-                            <th className="px-4 py-3">Original Address</th>
-                            <th className="px-4 py-3">Matched Address</th>
-                            <th className="px-4 py-3">Matched County</th>
-                            <th className="px-4 py-3">Matched City</th>
-                            <th className="px-4 py-3">Status</th>
-                            <th className="px-4 py-3">Reason</th>
-                            {showDebugMode ? <th className="px-4 py-3">Raw Preview</th> : null}
-                            <th className="px-4 py-3 text-right">Actions</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Record ID / Row</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Original Address</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Matched Address</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Matched County</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Matched City</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Status</th>
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Reason</th>
+                            {showDebugMode ? <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 dark:bg-slate-900">Raw Preview</th> : null}
+                            <th className="sticky top-16 z-20 bg-slate-50 px-4 py-3 text-right dark:bg-slate-900">Actions</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
