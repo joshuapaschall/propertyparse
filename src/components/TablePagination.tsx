@@ -5,6 +5,8 @@ type TablePaginationProps = {
   onPageChange: (page: number) => void;
   onPageSizeChange: (pageSize: number) => void;
   pageSizeOptions?: number[];
+  perPageLabel?: string;
+  rangeContext?: string;
 };
 
 export default function TablePagination({
@@ -14,6 +16,8 @@ export default function TablePagination({
   onPageChange,
   onPageSizeChange,
   pageSizeOptions = [10, 25, 50, 100],
+  perPageLabel = "Rows per page",
+  rangeContext,
 }: TablePaginationProps) {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
   const clampedPage = Math.min(Math.max(page, 1), totalPages);
@@ -23,7 +27,7 @@ export default function TablePagination({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
       <div className="flex items-center gap-2">
-        <span>Rows per page</span>
+        <span>{perPageLabel}</span>
         <select
           className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
           value={pageSize}
@@ -38,7 +42,7 @@ export default function TablePagination({
       </div>
       <div className="flex items-center gap-3">
         <span>
-          {start}–{end} of {totalCount}
+          {start}–{end} of {totalCount}{rangeContext ? ` ${rangeContext}` : ""}
         </span>
         <div className="flex items-center gap-2">
           <button

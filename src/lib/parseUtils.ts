@@ -184,6 +184,21 @@ export const computeParseSummaryFromRowResults = (rows: RowResult[]): ParseSumma
   };
 };
 
+
+export const getDisplaySafeMatchedAddress = (row: RowResult) => {
+  const candidates = [
+    row.google_display_address,
+    row.google_formatted_address,
+    row.matched_address_display,
+    row.matched_address,
+    row.formatted_address,
+  ];
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  }
+  return '';
+};
+
 export const buildReasonLabel = (row: RowResult) => getReasonMetadata(row).label;
 
 export const stringifyPreview = (value: unknown, maxLength = 180) => {
