@@ -9,6 +9,7 @@ const getJobDetail = vi.fn();
 const getJobResults = vi.fn();
 const getAllJobRows = vi.fn();
 const parseFile = vi.fn();
+const parseFileAsync = vi.fn();
 const uploadFile = vi.fn();
 const getApiErrorInfo = vi.fn();
 const runAiFixFlaggedRows = vi.fn();
@@ -16,12 +17,13 @@ const downloadJobExport = vi.fn();
 const getJobExportCatalog = vi.fn();
 const publishJobUpdate = vi.fn();
 const showToast = vi.fn();
+const selectedFileFactory = vi.fn(() => new File(['a'], 'sample.csv', { type: 'text/csv' }));
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
 vi.mock('../components/AccountedRowsIndicator', () => ({ default: () => <div>accounted</div> }));
 vi.mock('../components/FileUploadCard', () => ({
   default: ({ onChange }: { onChange: (file: File) => void }) => (
-    <button type="button" onClick={() => onChange(new File(['a'], 'sample.csv', { type: 'text/csv' }))}>select-file</button>
+    <button type="button" onClick={() => onChange(selectedFileFactory())}>select-file</button>
   ),
 }));
 vi.mock('../components/AsyncLocationSelect', () => ({
@@ -70,7 +72,7 @@ vi.mock('../lib/api', () => ({
   getJobResults: (...args: unknown[]) => getJobResults(...args),
   getJobWithStatus: (...args: unknown[]) => getJobWithStatus(...args),
   parseFile: (...args: unknown[]) => parseFile(...args),
-  parseFileAsync: vi.fn(),
+  parseFileAsync: (...args: unknown[]) => parseFileAsync(...args),
   approveMatchedJobRow: vi.fn(async () => ({ updated_row_results: [], updated_job: {} })),
   approveMatchedJobRowsBatch: vi.fn(),
   retryJobBatch: vi.fn(),
@@ -88,6 +90,7 @@ describe('ParsePage', () => {
     getApiErrorInfo.mockImplementation(() => null);
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
     parseFile.mockResolvedValue({ summary: { rows_received: 1 }, row_results: [], canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ ok: true });
     getJobWithStatus.mockResolvedValue({ job: { job_id: 'job-1', status: 'RUNNING', phase: 'VERIFYING' } });
     getJobExportCatalog.mockResolvedValue([]);
     downloadJobExport.mockResolvedValue({ blob: new Blob(['header\n'], { type: 'text/csv' }), filename: 'f.csv' });
@@ -95,6 +98,7 @@ describe('ParsePage', () => {
     getJobResults.mockResolvedValue({ summary: { rows_received: 0 }, row_results: [], canonical_addresses: [], duplicate_groups: [] });
     getAllJobRows.mockResolvedValue([]);
     runAiFixFlaggedRows.mockResolvedValue({ attempted_count: 1, upgraded_count: 1, rewritten_count: 0, updated_row_results: [], updated_job: {} });
+    selectedFileFactory.mockImplementation(() => new File(['a'], 'sample.csv', { type: 'text/csv' }));
     window.localStorage.clear();
     showToast.mockClear();
     Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:mock'), configurable: true });
@@ -293,6 +297,44 @@ describe('ParsePage', () => {
     expect(screen.queryByText('Douglas County, GA, USA')).not.toBeInTheDocument();
   });
 
+
+  it('hydrates summary first and retries rows for async completion', async () => {
+    const user = userEvent.setup();
+    selectedFileFactory.mockImplementation(() => new File(['pdf'], 'sample.pdf', { type: 'application/pdf' }));
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 3 });
+    getJobWithStatus.mockResolvedValue({ job: { job_id: 'job-1', status: 'DONE', phase: 'DONE' } });
+    getJobDetail.mockResolvedValue({
+      job: { job_id: 'job-1' },
+      summary: { rows_received: 3, valid_total: 2, valid_unique: 2, needs_review: 1, skipped: 0, out_of_scope: 0, duplicates: 0 },
+    });
+    getJobResults
+      .mockRejectedValueOnce(new Error('HTTP 202: not ready'))
+      .mockResolvedValueOnce({
+        summary: { rows_received: 3, valid_total: 2, valid_unique: 2, needs_review: 1, skipped: 0, out_of_scope: 0, duplicates: 0 },
+        row_results: [
+          { source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1', formatted_address: '1 Main St' },
+          { source_row_id: 'r2', source_row_index: 2, status: 'VALID', canonical_id: 'c2', formatted_address: '2 Main St' },
+          { source_row_id: 'r3', source_row_index: 3, status: 'UNMATCHED_NEEDS_REVIEW' },
+        ],
+        canonical_addresses: [
+          { canonical_id: 'c1', formatted_address: '1 Main St' },
+          { canonical_id: 'c2', formatted_address: '2 Main St' },
+        ],
+        duplicate_groups: [],
+      });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    expect(await screen.findByText('Rows Received')).toBeInTheDocument();
+    expect((await screen.findAllByText(/Finalizing results/i)).length).toBeGreaterThan(0);
+
+    await waitFor(() => expect(screen.queryByText(/Finalizing results/i)).not.toBeInTheDocument(), { timeout: 4000 });
+    expect(publishJobUpdate).toHaveBeenCalledTimes(4);
+  });
   it('publishes invalidation events after AI auto-fix completion', async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
