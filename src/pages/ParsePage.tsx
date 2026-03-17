@@ -180,6 +180,21 @@ const normalizeCanonicalAddress = (row: CanonicalAddress): NormalizedCanonicalAd
   };
 };
 
+const CANONICAL_VALID_STATUSES = new Set(['VALID', 'VALID_OVERRIDE']);
+
+const isCanonicalStatusEligible = (row: RowResult) =>
+  CANONICAL_VALID_STATUSES.has(normalizeStatus(row.status));
+
+const isRenderableCanonicalAddress = (address: NormalizedCanonicalAddress) => {
+  const hasFullAddress = Boolean(address.fullAddress?.trim() || address.formatted_address?.trim());
+  const hasStreet = Boolean(address.street1?.trim());
+  const hasCity = Boolean(address.city?.trim());
+  const hasState = Boolean(address.state?.trim());
+  const hasZip = Boolean(address.zip?.trim());
+  const hasIdentifier = Boolean(address.place_id?.trim() || address.canonical_id?.trim());
+  return hasFullAddress && hasStreet && hasCity && hasState && hasZip && hasIdentifier;
+};
+
 const buildKey = (row: ParsedRow) =>
   `${row.streetAddress} ${row.city} ${row.state} ${row.zipCode}`
     .toLowerCase()
@@ -514,9 +529,11 @@ const buildDuplicateGroupsFromRows = (rows: RowResult[]) => {
 const buildCanonicalAddressesFromRows = (rows: RowResult[]) => {
   const canonicalMap = new Map<string, CanonicalAddress>();
   rows.forEach((row) => {
-    if (!row.canonical_id || canonicalMap.has(row.canonical_id)) return;
-    canonicalMap.set(row.canonical_id, {
-      canonical_id: row.canonical_id,
+    if (!isCanonicalStatusEligible(row)) return;
+    const canonicalKey = row.canonical_id || row.place_id;
+    if (!canonicalKey || canonicalMap.has(canonicalKey)) return;
+    canonicalMap.set(canonicalKey, {
+      canonical_id: row.canonical_id ?? canonicalKey,
       formatted_address: row.formatted_address ?? row.detected_address ?? '',
       place_id: row.place_id,
       components: row.components,
@@ -644,6 +661,7 @@ export default function ParsePage() {
   const [rowsReceived, setRowsReceived] = useState<number | null>(null);
   const [parseSummary, setParseSummary] = useState<ParseSummary | null>(null);
   const [canonicalAddresses, setCanonicalAddresses] = useState<NormalizedCanonicalAddress[]>([]);
+  const [deriveCanonicalsFromRows, setDeriveCanonicalsFromRows] = useState(false);
   const [rowResults, setRowResults] = useState<RowResult[]>([]);
   const [duplicateGroups, setDuplicateGroups] = useState<DuplicateGroup[]>([]);
   const [debugInfo, setDebugInfo] = useState<ParseDebugInfo | null>(null);
@@ -947,7 +965,18 @@ export default function ParsePage() {
         const displayedSummary = deriveDisplayedParseSummary(normalizedRows, summary);
         setRowsReceived(deriveDisplayedRowsReceived(normalizedRows, displayedSummary));
         setParseSummary(displayedSummary);
-        setCanonicalAddresses(buildCanonicalAddressesFromRows(normalizedRows));
+        const backendCanonicalRows =
+          resultsResponse &&
+          Array.isArray((resultsResponse as { canonical_addresses?: unknown }).canonical_addresses)
+            ? ((resultsResponse as { canonical_addresses?: CanonicalAddress[] }).canonical_addresses ?? [])
+            : null;
+        if (backendCanonicalRows) {
+          setCanonicalAddresses(backendCanonicalRows.map(normalizeCanonicalAddress));
+          setDeriveCanonicalsFromRows(false);
+        } else {
+          setCanonicalAddresses(buildCanonicalAddressesFromRows(normalizedRows));
+          setDeriveCanonicalsFromRows(true);
+        }
         setRowResults(normalizedRows);
         setDuplicateGroups(buildDuplicateGroupsFromRows(normalizedRows));
         setDebugInfo((combinedJob.debug as ParseDebugInfo | null) ?? null);
@@ -991,9 +1020,11 @@ export default function ParsePage() {
   );
 
   useEffect(() => {
-    setCanonicalAddresses(buildCanonicalAddressesFromRows(rowResults));
+    if (deriveCanonicalsFromRows) {
+      setCanonicalAddresses(buildCanonicalAddressesFromRows(rowResults));
+    }
     setDuplicateGroups(buildDuplicateGroupsFromRows(rowResults));
-  }, [rowResults]);
+  }, [deriveCanonicalsFromRows, rowResults]);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -1144,6 +1175,11 @@ export default function ParsePage() {
     [parseSummary, rowResults],
   );
 
+  const canonicalAddressesForDisplay = useMemo(
+    () => canonicalAddresses.filter(isRenderableCanonicalAddress),
+    [canonicalAddresses],
+  );
+
   useEffect(() => {
     setResultsPage(1);
   }, [activeTab, legacyTab, resultsPageSize, parseSummary]);
@@ -1152,7 +1188,7 @@ export default function ParsePage() {
     if (!parseSummary) return 0;
     switch (activeTab) {
       case 'valid':
-        return canonicalAddresses.length;
+        return canonicalAddressesForDisplay.length;
       case 'needs_review':
         return needsReviewGroups.length;
       case 'skipped':
@@ -1166,7 +1202,7 @@ export default function ParsePage() {
     }
   }, [
     activeTab,
-    canonicalAddresses.length,
+    canonicalAddressesForDisplay.length,
     duplicateRowGroups.length,
     needsReviewGroups.length,
     outOfScopeGroups.length,
@@ -1191,8 +1227,8 @@ export default function ParsePage() {
   );
 
   const paginatedCanonicalAddresses = useMemo(
-    () => paginateRows(canonicalAddresses),
-    [canonicalAddresses, paginateRows],
+    () => paginateRows(canonicalAddressesForDisplay),
+    [canonicalAddressesForDisplay, paginateRows],
   );
   const paginatedNeedsReviewGroups = useMemo(
     () => paginateRows(needsReviewGroups),
@@ -2062,6 +2098,7 @@ export default function ParsePage() {
         setRowsReceived(deriveDisplayedRowsReceived(parsedRows, displayedSummary));
         const canonicalRows = (parseResponse.canonical_addresses ?? []) as CanonicalAddress[];
         setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
+        setDeriveCanonicalsFromRows(false);
         setRowResults((parseResponse.row_results ?? []) as RowResult[]);
         setDuplicateGroups((parseResponse.duplicate_groups ?? []) as DuplicateGroup[]);
         setDebugInfo((parseResponse.debug ?? null) as ParseDebugInfo | null);
@@ -2118,6 +2155,7 @@ export default function ParsePage() {
     setRowsReceived(null);
     setParseSummary(null);
     setCanonicalAddresses([]);
+    setDeriveCanonicalsFromRows(false);
     setRowResults([]);
     setDuplicateGroups([]);
     setDebugInfo(null);
@@ -2212,6 +2250,7 @@ export default function ParsePage() {
         setRowsReceived(deriveDisplayedRowsReceived(parsedRows, displayedSummary));
         const canonicalRows = (parsed.canonical_addresses ?? []) as CanonicalAddress[];
         setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
+        setDeriveCanonicalsFromRows(false);
         setRowResults((parsed.row_results ?? []) as RowResult[]);
         setDuplicateGroups((parsed.duplicate_groups ?? []) as DuplicateGroup[]);
         setDebugInfo((parsed.debug ?? null) as ParseDebugInfo | null);
@@ -2407,6 +2446,7 @@ export default function ParsePage() {
   }) => {
     const { updatedRows, updatedJob, freshReload } = payload;
     if (updatedRows?.length) {
+      setDeriveCanonicalsFromRows(true);
       setRowResults((prev) => {
         const updates = new Map<string, RowResult>();
         updatedRows.forEach((row) => {
@@ -3619,7 +3659,7 @@ export default function ParsePage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {canonicalAddresses.length === 0 ? (
+                          {canonicalAddressesForDisplay.length === 0 ? (
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
@@ -3662,7 +3702,7 @@ export default function ParsePage() {
                       </table>
                     </div>
                     <TablePagination
-                      totalCount={canonicalAddresses.length}
+                      totalCount={canonicalAddressesForDisplay.length}
                       page={resultsPage}
                       pageSize={resultsPageSize}
                       onPageChange={setResultsPage}
