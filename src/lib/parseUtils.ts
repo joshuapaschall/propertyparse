@@ -151,7 +151,13 @@ export const isErrorRow = (row: RowResult) => normalizeValue(row.status).startsW
 
 export const isValidRow = (row: RowResult) => {
   const status = normalizeValue(row.status);
-  return status === 'VALID' || status === 'MATCHED' || status === 'DUPLICATE' || row.is_duplicate === true;
+  return (
+    status === 'VALID' ||
+    status === 'VALID_OVERRIDE' ||
+    status === 'MATCHED' ||
+    status === 'DUPLICATE' ||
+    row.is_duplicate === true
+  );
 };
 
 export const computeParseSummaryFromRowResults = (rows: RowResult[]): ParseSummary => {

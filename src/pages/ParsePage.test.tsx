@@ -81,6 +81,7 @@ describe('ParsePage', () => {
     getJobResults.mockResolvedValue({ summary: { rows_received: 0 }, row_results: [], canonical_addresses: [], duplicate_groups: [] });
     getAllJobRows.mockResolvedValue([]);
     runAiFixFlaggedRows.mockResolvedValue({ attempted_count: 1, upgraded_count: 1, rewritten_count: 0, updated_row_results: [], updated_job: {} });
+    window.localStorage.clear();
   });
 
   it('publishes invalidation events after parse completion', async () => {
@@ -142,6 +143,72 @@ describe('ParsePage', () => {
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(await screen.findByText(/Needs Review \(2 issues · 3 rows\)/)).toBeInTheDocument();
+  });
+
+
+  it('does not leak review rows with canonical_id into Valid Unique table', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 3 });
+    const summary = {
+      rows_received: 3,
+      needs_review: 3,
+      valid_total: 0,
+      valid_unique: 0,
+      skipped: 0,
+      duplicates: 0,
+      out_of_scope: 0,
+      matched: 0,
+      attention_total: 3,
+    };
+    parseFile.mockResolvedValue({
+      summary,
+      row_results: [
+        {
+          source_row_id: 'r1',
+          source_row_index: 1,
+          status: 'UNMATCHED_NEEDS_REVIEW',
+          detected_address: '600 Sutton Pl',
+          canonical_id: 'canon-review-1',
+          place_id: 'place-review-1',
+          formatted_address: 'Sutton Pl, Douglasville, GA 30135, USA',
+          components: { street_address: 'Sutton Pl', city: 'Douglasville', state: 'GA', zip: '30135' },
+        },
+        {
+          source_row_id: 'r2',
+          source_row_index: 2,
+          status: 'UNMATCHED_NEEDS_REVIEW',
+          detected_address: '8786 N. View DR',
+          canonical_id: 'canon-review-2',
+          place_id: 'place-review-2',
+          formatted_address: 'N View Dr, Georgia 30122, USA',
+          components: { street_address: 'N View Dr', city: 'Douglasville', state: 'GA', zip: '30122' },
+        },
+        {
+          source_row_id: 'r3',
+          source_row_index: 3,
+          status: 'UNMATCHED_NEEDS_REVIEW',
+          detected_address: '3277 TALKEENTA',
+          canonical_id: 'canon-review-3',
+          place_id: 'place-review-3',
+          formatted_address: 'Douglas County, GA, USA',
+          components: { street_address: 'Douglas County', city: 'Douglasville', state: 'GA', zip: '30135' },
+        },
+      ],
+      canonical_addresses: [],
+      duplicate_groups: [],
+    });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    expect(await screen.findByText('Processing Results')).toBeInTheDocument();
+    expect(screen.getByText('No unique valid addresses yet.')).toBeInTheDocument();
+    expect(screen.queryByText('Sutton Pl, Douglasville, GA 30135, USA')).not.toBeInTheDocument();
+    expect(screen.queryByText('N View Dr, Georgia 30122, USA')).not.toBeInTheDocument();
+    expect(screen.queryByText('Douglas County, GA, USA')).not.toBeInTheDocument();
   });
 
   it('publishes invalidation events after AI auto-fix completion', async () => {

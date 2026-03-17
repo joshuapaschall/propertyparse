@@ -34,8 +34,13 @@ describe('parseUtils filters', () => {
     expect(isNeedsReviewRow(buildRow({ status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'PO_BOX' }))).toBe(false);
   });
 
+
   it('flags matched rows as valid', () => {
     expect(isValidRow(buildRow({ status: 'MATCHED' }))).toBe(true);
+  });
+
+  it('treats VALID_OVERRIDE rows as valid', () => {
+    expect(isValidRow(buildRow({ status: 'VALID_OVERRIDE' }))).toBe(true);
   });
 
 
