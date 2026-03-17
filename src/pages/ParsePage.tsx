@@ -2902,7 +2902,7 @@ export default function ParsePage() {
       <div className="px-4 pb-4">
         <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
           <table className="min-w-full text-left text-sm">
-            <thead className="sticky top-16 z-20 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+            <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
               <tr>
                 <th className="px-4 py-3">Record ID / Row (data)</th>
                 <th className="px-4 py-3">Detected Address</th>
@@ -3207,7 +3207,7 @@ export default function ParsePage() {
           ref={resultsRef}
           className="w-full"
         >
-          <div className="mb-6 rounded-2xl border border-slate-200/80 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
+          <div className="sticky top-16 z-20 mb-6 rounded-2xl border border-slate-200/80 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold">Processing Results</h2>
@@ -3255,13 +3255,6 @@ export default function ParsePage() {
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => openProcessingReport('all')}
-                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Processing Report
-                </button>
-                <button
-                  type="button"
                   onClick={() => handleKpiTabClick('valid')}
                   className={`rounded-full px-3 py-1.5 text-xs font-semibold ${
                     activeTab === 'valid'
@@ -3270,6 +3263,13 @@ export default function ParsePage() {
                   }`}
                 >
                   Valid (rows: {computedParseSummary?.valid_total ?? 0} · unique: {computedParseSummary?.valid_unique ?? 0})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => openProcessingReport('all')}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  Processing Report
                 </button>
                 <button
                   type="button"
@@ -3574,9 +3574,9 @@ export default function ParsePage() {
               <>
                 {activeTab === 'valid' ? (
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                    <div className="overflow-x-auto">
+                    <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
-                        <thead className="sticky top-16 z-20 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
                             <th className="px-4 py-3">#</th>
                             <th className="px-4 py-3">Full Address</th>
@@ -3652,9 +3652,9 @@ export default function ParsePage() {
                     </button>
                   </div>
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                    <div className="overflow-x-auto">
+                    <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
-                        <thead className="sticky top-16 z-20 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
                             <th className="px-4 py-3">
                               <input
@@ -3761,9 +3761,9 @@ export default function ParsePage() {
                       Skipped rows were ignored because no usable property address could be detected.
                       Click Review to see full row data.
                     </div>
-                    <div className="overflow-x-auto">
+                    <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
-                        <thead className="sticky top-16 z-20 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
                             <th className="px-4 py-3">Record ID / Row</th>
                             <th className="px-4 py-3">Detected Address</th>
@@ -3904,9 +3904,9 @@ export default function ParsePage() {
                 {activeTab === 'out_of_scope' ? (
                   <>
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
-                    <div className="overflow-x-auto">
+                    <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
-                        <thead className="sticky top-16 z-20 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                        <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
                             <th className="px-4 py-3">Record ID / Row</th>
                             <th className="px-4 py-3">Original Address</th>
