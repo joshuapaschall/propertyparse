@@ -46,6 +46,9 @@ export type RowResult = {
   canonical_id?: string;
   is_duplicate?: boolean;
   duplicate_of_source_row_id?: string;
+  verification_precision?: string;
+  compare_debug?: unknown;
+  blocked_by?: string | string[];
 };
 
 export type DuplicateGroup = {

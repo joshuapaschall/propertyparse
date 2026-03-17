@@ -1,4 +1,4 @@
-import type { ParseSummary, RowResult } from '../types/parse';
+import type { CanonicalAddress, ParseSummary, RowResult } from '../types/parse';
 
 const normalizeValue = (value?: string) => (value ?? '').toUpperCase();
 
@@ -232,4 +232,110 @@ export const matchesSearch = (row: RowResult, query: string) => {
     .join(' ')
     .toLowerCase();
   return haystack.includes(normalized);
+};
+
+
+export type ReviewReasonFilter = 'all' | 'route_alias' | 'house_number' | 'low_precision' | 'county_rescue' | 'missing_street_number';
+
+export const getReviewReasonBucket = (row: RowResult) => {
+  const reason = normalizeValue(row.reason_code);
+  if (reason.includes('ALIAS') || reason.includes('ROUTE')) return 'route_alias' as const;
+  if (reason.includes('HOUSE_NUMBER_MISMATCH') || reason.includes('HOUSE_NUMBER')) return 'house_number' as const;
+  if (reason.includes('MISSING_STREET_NUMBER') || reason.includes('STREET_NUMBER_NOT_VERIFIED')) return 'missing_street_number' as const;
+  if (reason.includes('COUNTY')) return 'county_rescue' as const;
+  if (reason.includes('LOW_PRECISION') || reason.includes('LOW_PRECISION_MATCH')) return 'low_precision' as const;
+  return 'all' as const;
+};
+
+export const getReviewDebugHint = (row: RowResult) => {
+  const debug = typeof row.compare_debug === 'string' ? row.compare_debug : '';
+  const blocked = Array.isArray(row.blocked_by) ? row.blocked_by.join(', ') : row.blocked_by ?? '';
+  const precision = typeof row.verification_precision === 'string' ? row.verification_precision : '';
+
+  if (debug.toLowerCase().includes('same house number')) return 'Same house number · safe alias candidate';
+  if (blocked.toLowerCase().includes('directional')) return 'Blocked by directional conflict';
+  if (blocked.toLowerCase().includes('core') || blocked.toLowerCase().includes('token')) return 'Blocked by core token drop';
+  if (precision.toLowerCase().includes('county')) return 'Candidate is county-level only';
+  if (debug.trim()) return debug.trim();
+  if (blocked.trim()) return `Blocked by ${blocked}`;
+  if (precision.trim()) return `Verification precision: ${precision}`;
+  return null;
+};
+
+const csvEscape = (value: unknown) => {
+  const text = value === null || value === undefined ? '' : String(value);
+  if (/[",\n]/.test(text)) return `"${text.replace(/"/g, '""')}"`;
+  return text;
+};
+
+const buildCsvText = (headers: string[], rows: Array<Record<string, unknown>>) => {
+  const header = headers.join(',');
+  const body = rows.map((row) => headers.map((key) => csvEscape(row[key])).join(','));
+  return [header, ...body].join('\n');
+};
+
+export type LocalExportType = 'processing_report' | 'unique_valid' | 'needs_review' | 'out_of_scope' | 'duplicates' | 'skipped';
+
+export const buildLocalCsvForExport = (
+  type: LocalExportType,
+  data: { rowResults: RowResult[]; canonicalAddresses: CanonicalAddress[] },
+) => {
+  if (type === 'unique_valid') {
+    const headers = ['full_address', 'street1', 'street2', 'city', 'state', 'zip', 'canonical_id', 'place_id'];
+    const rows = data.canonicalAddresses.map((item) => ({
+      full_address: (item as { full_address?: string }).full_address ?? item.formatted_address ?? '',
+      street1: item.street1 ?? '',
+      street2: item.street2 ?? '',
+      city: item.city ?? '',
+      state: item.state ?? '',
+      zip: item.zip ?? '',
+      canonical_id: item.canonical_id ?? '',
+      place_id: item.place_id ?? '',
+    }));
+    return new Blob([buildCsvText(headers, rows)], { type: 'text/csv;charset=utf-8' });
+  }
+
+  const filtered = data.rowResults.filter((row) => {
+    const status = normalizeValue(row.status);
+    if (type === 'needs_review') return isNeedsReviewRow(row);
+    if (type === 'out_of_scope') return isOutOfScopeRow(row);
+    if (type === 'duplicates') return status === 'DUPLICATE' || row.is_duplicate;
+    if (type === 'skipped') return isSkippedRow(row);
+    return true;
+  });
+
+  const headers = [
+    'source_row_id',
+    'source_row_index',
+    'status',
+    'reason_code',
+    'reason_detail',
+    'detected_address',
+    'matched_address',
+    'formatted_address',
+    'verification_precision',
+    'blocked_by',
+    'compare_debug',
+  ];
+  const rows = filtered.map((row) => ({
+    source_row_id: row.source_row_id,
+    source_row_index: row.source_row_index,
+    status: row.status,
+    reason_code: row.reason_code ?? '',
+    reason_detail: row.reason_detail ?? '',
+    detected_address: row.detected_address ?? '',
+    matched_address: row.matched_address ?? row.google_display_address ?? '',
+    formatted_address: row.formatted_address ?? '',
+    verification_precision: row.verification_precision ?? '',
+    blocked_by: Array.isArray(row.blocked_by) ? row.blocked_by.join('|') : row.blocked_by ?? '',
+    compare_debug: typeof row.compare_debug === 'string' ? row.compare_debug : row.compare_debug ? JSON.stringify(row.compare_debug) : '',
+  }));
+  return new Blob([buildCsvText(headers, rows)], { type: 'text/csv;charset=utf-8' });
+};
+
+export const isHeaderOnlyCsv = (csvText: string) => {
+  const trimmed = csvText.trim();
+  if (!trimmed) return true;
+  const lines = trimmed.split(/\r?\n/);
+  return lines.length <= 1;
 };

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RowResult } from '../types/parse';
-import { computeParseSummaryFromRowResults, getDisplaySafeMatchedAddress, isNeedsReviewRow, isOutOfScopeRow, isSkippedRow, isValidRow } from './parseUtils';
+import { buildLocalCsvForExport, computeParseSummaryFromRowResults, getDisplaySafeMatchedAddress, getReviewDebugHint, getReviewReasonBucket, isHeaderOnlyCsv, isNeedsReviewRow, isOutOfScopeRow, isSkippedRow, isValidRow } from './parseUtils';
 
 const buildRow = (overrides: Partial<RowResult>): RowResult => ({
   source_row_index: 1,
@@ -91,4 +91,24 @@ describe('parseUtils filters', () => {
     expect(isOutOfScopeRow(buildRow({ status: 'OUT_OF_SCOPE_MARKER' }))).toBe(true);
     expect(isOutOfScopeRow(buildRow({ reason_code: 'OUT_OF_SCOPE_MARKER' }))).toBe(true);
   });
+
+
+  it('maps review reason buckets and debug hints', () => {
+    expect(getReviewReasonBucket(buildRow({ reason_code: 'ROUTE_ALIAS' }))).toBe('route_alias');
+    expect(getReviewReasonBucket(buildRow({ reason_code: 'HOUSE_NUMBER_MISMATCH' }))).toBe('house_number');
+    expect(getReviewReasonBucket(buildRow({ reason_code: 'LOW_PRECISION' }))).toBe('low_precision');
+    expect(getReviewDebugHint(buildRow({ blocked_by: 'directional conflict' }))).toBe('Blocked by directional conflict');
+    expect(getReviewDebugHint(buildRow({ verification_precision: 'county' }))).toBe('Candidate is county-level only');
+  });
+
+  it('builds local csv exports and detects header-only csv', async () => {
+    const blob = buildLocalCsvForExport('needs_review', {
+      rowResults: [buildRow({ source_row_id: 'r1', status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'LOW_PRECISION' })],
+      canonicalAddresses: [],
+    });
+    expect(blob).toBeDefined();
+    expect(isHeaderOnlyCsv('a,b\n')).toBe(true);
+    expect(isHeaderOnlyCsv('a,b\n1,2')).toBe(false);
+  });
+
 });
