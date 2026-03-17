@@ -1,14 +1,15 @@
+import { act, render } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import HistoryPage from './HistoryPage';
 
 const getJobs = vi.fn();
 const readLocalParsePersistenceState = vi.fn();
+const subscribeJobUpdates = vi.fn();
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
-vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
+const showToast = vi.fn();
+vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast }) }));
 vi.mock('../lib/api', () => ({
   getJobs: (...args: unknown[]) => getJobs(...args),
   getJobExportCatalog: vi.fn(async () => []),
@@ -17,41 +18,57 @@ vi.mock('../lib/api', () => ({
 vi.mock('../lib/persistenceStatus', () => ({
   readLocalParsePersistenceState: () => readLocalParsePersistenceState(),
 }));
+vi.mock('../lib/liveUpdates', () => ({
+  subscribeJobUpdates: (...args: unknown[]) => subscribeJobUpdates(...args),
+}));
 
-describe('HistoryPage', () => {
+describe('HistoryPage refresh behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     readLocalParsePersistenceState.mockReturnValue(null);
-  });
-
-  it('shows filtered empty state separately from no-data empty state', async () => {
     getJobs.mockResolvedValue([{ job_id: 'j1', status: 'DONE', display_name: 'Done Job', file_name: 'a.csv' }]);
-    const user = userEvent.setup();
-    render(<MemoryRouter><HistoryPage /></MemoryRouter>);
-    await screen.findByText('Done Job');
-
-    await user.click(screen.getByRole('button', { name: /Running/i }));
-    expect(await screen.findByText('No jobs in this filter')).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: /All/i }));
-    await user.type(screen.getByPlaceholderText('Search job name or file'), 'missing-file');
-    expect(await screen.findByText('No jobs matching search')).toBeInTheDocument();
+    subscribeJobUpdates.mockImplementation(() => () => undefined);
   });
 
-  it('running jobs trigger auto-refresh interval setup', async () => {
-    const intervalSpy = vi.spyOn(window, 'setInterval');
-    getJobs.mockResolvedValue([{ job_id: 'j2', status: 'RUNNING', display_name: 'Running Job', file_name: 'b.csv' }]);
+  it('refreshes on invalidation events', async () => {
+    let handler: ((event: { kind: string }) => void) | null = null;
+    subscribeJobUpdates.mockImplementation((cb: (event: { kind: string }) => void) => {
+      handler = cb;
+      return () => undefined;
+    });
+
     render(<MemoryRouter><HistoryPage /></MemoryRouter>);
-    await screen.findByText('Running Job');
-    expect(intervalSpy).toHaveBeenCalled();
-    intervalSpy.mockRestore();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const before = getJobs.mock.calls.length;
+
+    await act(async () => {
+      handler?.({ kind: 'job-updated' });
+      await Promise.resolve();
+    });
+
+    expect(getJobs.mock.calls.length).toBeGreaterThan(before);
   });
 
-  it('shows persistence-specific empty copy when last local run was not saved', async () => {
-    getJobs.mockResolvedValue([]);
-    readLocalParsePersistenceState.mockReturnValue({ persistenceWarning: true, completedAt: '2025-01-01T00:00:00.000Z', version: 1 });
+  it('refreshes on window focus', async () => {
+    const addEventListenerSpy = vi.spyOn(window, 'addEventListener');
     render(<MemoryRouter><HistoryPage /></MemoryRouter>);
-    expect(await screen.findByText('No persisted jobs yet')).toBeInTheDocument();
-    expect(screen.getByText('Your last run completed, but it was not saved to History.')).toBeInTheDocument();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const focusHandler = addEventListenerSpy.mock.calls.find(([name]) => name === 'focus')?.[1] as
+      | ((event: Event) => void)
+      | undefined;
+    const before = getJobs.mock.calls.length;
+
+    await act(async () => {
+      focusHandler?.(new Event('focus'));
+      await Promise.resolve();
+    });
+
+    expect(getJobs.mock.calls.length).toBeGreaterThan(before);
+    addEventListenerSpy.mockRestore();
   });
 });

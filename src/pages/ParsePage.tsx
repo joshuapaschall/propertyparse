@@ -61,6 +61,7 @@ import JobWarnings from '../components/JobWarnings';
 import { deriveDisplayedParseSummary, deriveDisplayedRowsReceived, normalizeJobSummary, normalizeUpdatedJobPayload, toParseSummary } from '../lib/jobSummary';
 import { writeLocalParsePersistenceState } from '../lib/persistenceStatus';
 import type { ExportCatalogItem } from '../types/exports';
+import { publishJobUpdate } from '../lib/liveUpdates';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Verifying', 'AI fixing', 'Finalizing'];
 const ASYNC_PARSE_FILE_SIZE_THRESHOLD = 5 * 1024 * 1024;
@@ -2274,6 +2275,8 @@ export default function ParsePage() {
         startPolling(newJobId, {
           onFinished: async () => {
             await hydrateCompletedAsyncJob(newJobId, upload.rowsReceived ?? null);
+            publishLiveUpdate('job-updated', newJobId);
+            publishLiveUpdate('metrics-updated', newJobId);
             setBusy(false);
             void reconcileDurableJob(newJobId);
           },
@@ -2297,6 +2300,8 @@ export default function ParsePage() {
           jobName: trimmedCampaignName || undefined,
         });
         applyParsedResponse(parsed as unknown as Record<string, unknown>, upload.rowsReceived ?? null);
+        publishLiveUpdate('job-updated', newJobId);
+        publishLiveUpdate('metrics-updated', newJobId);
         stopPolling();
         setBusy(false);
         void reconcileDurableJob(newJobId);
@@ -2366,6 +2371,8 @@ export default function ParsePage() {
       updateRetryStatus(row.id, false);
       applyRetryResponse(response);
       showToast({ title: 'Row retried', variant: 'success' });
+      publishLiveUpdate('job-updated');
+      publishLiveUpdate('metrics-updated');
     } catch {
       setRetryAvailable('unavailable');
       updateRetryStatus(row.id, true);
@@ -2384,6 +2391,8 @@ export default function ParsePage() {
       setRetryAvailable('available');
       setLegacyUnmatchedRows((prev) => prev.map((row) => ({ ...row, needsRetry: false })));
       applyRetryResponse(response);
+      publishLiveUpdate('job-updated');
+      publishLiveUpdate('metrics-updated');
     } catch {
       setRetryAvailable('unavailable');
       showToast({ title: 'Retry failed', variant: 'error' });
@@ -2532,6 +2541,8 @@ export default function ParsePage() {
         updatedRows: updates,
         updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
       });
+      publishLiveUpdate('job-updated');
+      publishLiveUpdate('metrics-updated');
       setReviewDrafts((prev) => {
         const next = { ...prev };
         delete next[reviewRow.source_row_id];
@@ -2541,6 +2552,8 @@ export default function ParsePage() {
       const hasDuplicate = updates.some((row) => normalizeStatus(row.status).includes('DUPLICATE'));
       const movedToValid = updates.some((row) => isValidRow(row));
       const stillNeedsReview = updates.some((row) => isNeedsReviewRow(row));
+      publishLiveUpdate('job-updated');
+      publishLiveUpdate('metrics-updated');
       showToast({
         title: hasDuplicate
           ? 'Marked duplicate (check Duplicates tab)'
@@ -2605,6 +2618,8 @@ export default function ParsePage() {
       );
       const movedToValid = updates.some((updatedRow) => isValidRow(updatedRow));
       const stillNeedsReview = updates.some((updatedRow) => isNeedsReviewRow(updatedRow));
+      publishLiveUpdate('job-updated');
+      publishLiveUpdate('metrics-updated');
       showToast({
         title: hasDuplicate
           ? 'Marked duplicate (check Duplicates tab)'
@@ -2672,6 +2687,8 @@ export default function ParsePage() {
         `${requestedCount} selected`,
       ];
 
+      publishLiveUpdate('job-updated');
+      publishLiveUpdate('metrics-updated');
       showToast({
         title: failedCount > 0 ? 'Bulk approve completed with partial success' : `Approved ${approvedCount} rows`,
         description:
@@ -2741,6 +2758,8 @@ export default function ParsePage() {
       link.remove();
       URL.revokeObjectURL(href);
       setDownloadSuccessLabel(`${label} downloaded`);
+      publishLiveUpdate('job-exported');
+      publishLiveUpdate('metrics-updated');
       showToast({ title: 'Export downloaded', variant: 'success' });
       if (downloadSuccessTimerRef.current !== null) {
         window.clearTimeout(downloadSuccessTimerRef.current);
@@ -2820,6 +2839,8 @@ export default function ParsePage() {
         });
       }
 
+      publishLiveUpdate('job-updated');
+      publishLiveUpdate('metrics-updated');
       await loadJobResults(jobId, {
         version: LAST_JOB_STORAGE_VERSION,
         jobId,
@@ -2839,6 +2860,14 @@ export default function ParsePage() {
       setRunningAiFixFlaggedRows(false);
     }
   };
+
+
+  const publishLiveUpdate = useCallback(
+    (kind: 'job-updated' | 'metrics-updated' | 'job-exported', targetJobId?: string) => {
+      publishJobUpdate({ kind, jobId: targetJobId ?? jobId ?? undefined });
+    },
+    [jobId],
+  );
 
   const aiFixInProgress =
     runningAiFixFlaggedRows || (busy && progressInfo.phase === 'AI_FIXING');

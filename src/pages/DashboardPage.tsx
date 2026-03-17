@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import AppShell from '../components/AppShell';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import { getApiErrorInfo, getMetricsSummary, MetricsRange, MetricsSummary } from '../lib/api';
 import { useToast } from '../components/ui/ToastProvider';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
+import { subscribeJobUpdates } from '../lib/liveUpdates';
 
 const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -31,41 +32,69 @@ export default function DashboardPage() {
     setLocalParsePersistenceWarning(Boolean(state?.persistenceWarning));
   }, []);
 
+  const loadMetrics = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getMetricsSummary(range === 'custom' ? 'month' : range, {
+        startDate: range === 'custom' ? customStart || undefined : undefined,
+        endDate: range === 'custom' ? customEnd || undefined : undefined,
+      });
+      setMetrics(data);
+    } catch (err) {
+      const info = getApiErrorInfo(err);
+      const message = info?.message ?? (err as Error).message ?? 'Unable to load dashboard metrics.';
+      setError(message);
+      showToast({ title: message, variant: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  }, [customEnd, customStart, range, showToast]);
+
   useEffect(() => {
-    let active = true;
-    const load = async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const data = await getMetricsSummary(range === 'custom' ? 'month' : range, {
-          startDate: range === 'custom' ? customStart || undefined : undefined,
-          endDate: range === 'custom' ? customEnd || undefined : undefined,
-        });
-        if (!active) return;
-        setMetrics(data);
-      } catch (err) {
-        if (!active) return;
-        const info = getApiErrorInfo(err);
-        const message = info?.message ?? (err as Error).message ?? 'Unable to load dashboard metrics.';
-        setError(message);
-        showToast({ title: message, variant: 'error' });
-      } finally {
-        if (active) setLoading(false);
+    void loadMetrics();
+  }, [loadMetrics]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeJobUpdates(() => {
+      void loadMetrics();
+    });
+    return unsubscribe;
+  }, [loadMetrics]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      void loadMetrics();
+    };
+    const onVisibility = () => {
+      if (!document.hidden) {
+        void loadMetrics();
       }
     };
-    void load();
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      active = false;
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [range, customStart, customEnd, showToast]);
+  }, [loadMetrics]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (!document.hidden) {
+        void loadMetrics();
+      }
+    }, 25000);
+    return () => window.clearInterval(timer);
+  }, [loadMetrics]);
 
   const kpis = useMemo(() => {
-    const spend = toNumber(metrics?.spend_usd ?? metrics?.spendUsd);
+    const spend = toNumber(metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd);
     return [
-      ['Files Uploaded', toNumber(metrics?.uploads)],
-      ['Potential Properties', toNumber(metrics?.leads)],
-      ['Unique Valid', toNumber(metrics?.matched)],
-      ['Unresolved', toNumber(metrics?.unmatched)],
+      ['Files Uploaded', toNumber(metrics?.files_uploaded ?? metrics?.uploads)],
+      ['Potential Properties', toNumber(metrics?.potential_properties ?? metrics?.leads)],
+      ['Unique Valid', toNumber(metrics?.valid_unique)],
+      ['Review Queue', toNumber(metrics?.review_queue_total ?? metrics?.needs_review)],
       ['Exports', toNumber(metrics?.exports)],
       ['Total Cost', spend.toLocaleString(undefined, { style: 'currency', currency: 'USD' })],
     ];
@@ -73,10 +102,11 @@ export default function DashboardPage() {
 
   const secondary = useMemo(
     () => [
-      ['Needs Review', toNumber(metrics?.needs_review ?? metrics?.unmatched)],
+      ['Needs Review', toNumber(metrics?.needs_review)],
       ['Skipped', toNumber(metrics?.skipped)],
       ['Out of Scope', toNumber(metrics?.out_of_scope)],
       ['Duplicates', toNumber(metrics?.duplicates)],
+      ['Excluded Total', toNumber(metrics?.excluded_total)],
     ],
     [metrics],
   );
@@ -84,10 +114,10 @@ export default function DashboardPage() {
   const hasZeroDurableMetrics = useMemo(() => {
     if (!metrics) return false;
     return (
-      toNumber(metrics.uploads) === 0 &&
-      toNumber(metrics.leads) === 0 &&
-      toNumber(metrics.matched) === 0 &&
-      toNumber(metrics.unmatched) === 0 &&
+      toNumber(metrics.files_uploaded ?? metrics.uploads) === 0 &&
+      toNumber(metrics.potential_properties ?? metrics.leads) === 0 &&
+      toNumber(metrics.valid_unique) === 0 &&
+      toNumber(metrics.review_queue_total ?? metrics.needs_review) === 0 &&
       toNumber(metrics.exports) === 0
     );
   }, [metrics]);
@@ -135,6 +165,9 @@ export default function DashboardPage() {
                 <div key={label} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
                   <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
                   <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">{value as any}</p>
+                  {label === 'Review Queue' ? (
+                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Rows still requiring review or correction.</p>
+                  ) : null}
                 </div>
               ))}
             </div>
@@ -145,6 +178,7 @@ export default function DashboardPage() {
                 </span>
               ))}
             </div>
+            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Excluded Total: Rows not exportable because they were skipped, out of scope, or duplicates.</p>
             {localParsePersistenceWarning && hasZeroDurableMetrics ? (
               <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
                 Dashboard metrics only include saved jobs. Your last run may be missing until backend persistence is restored.

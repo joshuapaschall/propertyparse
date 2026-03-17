@@ -12,6 +12,7 @@ import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCa
 import { normalizeJobSummary } from '../lib/jobSummary';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import type { ExportCatalogItem } from '../types/exports';
+import { subscribeJobUpdates } from '../lib/liveUpdates';
 
 type StatusFilter = 'ALL' | 'DONE' | 'RUNNING' | 'FAILED';
 
@@ -99,6 +100,30 @@ export default function HistoryPage() {
     const state = readLocalParsePersistenceState();
     setLocalParsePersistenceWarning(Boolean(state?.persistenceWarning));
   }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeJobUpdates(() => {
+      void loadJobs();
+    });
+    return unsubscribe;
+  }, [loadJobs]);
+
+  useEffect(() => {
+    const onFocus = () => {
+      void loadJobs();
+    };
+    const onVisibility = () => {
+      if (!document.hidden) {
+        void loadJobs();
+      }
+    };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, [loadJobs]);
 
   const rows = useMemo(
     () =>
