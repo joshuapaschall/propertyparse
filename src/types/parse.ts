@@ -37,6 +37,9 @@ export type RowResult = {
   scope_debug?: unknown;
   formatted_address?: string;
   matched_address?: string;
+  matched_address_display?: string;
+  google_display_address?: string;
+  google_formatted_address?: string;
   address_raw?: string;
   place_id?: string;
   components?: unknown;

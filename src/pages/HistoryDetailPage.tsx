@@ -10,6 +10,7 @@ import {
   isOutOfScopeRow,
   isSkippedRow,
   stringifyPreview,
+  getDisplaySafeMatchedAddress,
 } from '../lib/parseUtils';
 import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
@@ -87,7 +88,7 @@ const normalizeCanonicalAddress = (row: CanonicalAddress) => {
 
 const rowDisplayId = (row: RowResult) => row.source_row_id || row.source_row_index || '--';
 const getInputAddress = (row: RowResult) => row.address_raw || row.detected_address || '--';
-const getMatchedAddress = (row: RowResult) => row.matched_address || row.formatted_address || '—';
+const getMatchedAddress = (row: RowResult) => getDisplaySafeMatchedAddress(row) || '—';
 const getMatchedCounty = (row: RowResult) => {
   const components = (row.components ?? {}) as Record<string, unknown>;
   return (components.county as string) || (components.matched_county as string) || '—';
@@ -217,7 +218,7 @@ export default function HistoryDetailPage() {
 
   const tabCounts: Record<ResultsTab, number> = {
     valid: parseSummary?.valid_unique ?? 0,
-    needs_review: parseSummary?.needs_review ?? 0,
+    needs_review: needsReviewGroups.length,
     out_of_scope: parseSummary?.out_of_scope ?? 0,
     skipped: parseSummary?.skipped ?? 0,
     duplicates: parseSummary?.duplicates ?? 0,
@@ -263,7 +264,11 @@ export default function HistoryDetailPage() {
             return (
               <Fragment key={group.groupKey}>
                 <tr>
-                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{rowDisplayId(row)}</td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{rowDisplayId(row)}
+                    {group.count > 1 ? (
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{group.count} rows affected</p>
+                    ) : null}
+                  </td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row)}</td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedAddress(row)}</td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row)}</td>
@@ -323,7 +328,6 @@ export default function HistoryDetailPage() {
                 {[
                   ['Rows Received', parseSummary?.rows_received],
                   ['Unique Valid', parseSummary?.valid_unique],
-                  ['Needs Review', parseSummary?.needs_review],
                   ['Out Of Scope', parseSummary?.out_of_scope],
                   ['Skipped', parseSummary?.skipped],
                   ['Duplicates', parseSummary?.duplicates],
@@ -334,6 +338,11 @@ export default function HistoryDetailPage() {
                     <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{value ?? '--'}</p>
                   </div>
                 ))}
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
+                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Needs Review Issues</p>
+                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{needsReviewGroups.length}</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">{needsReviewRows.length} rows</p>
+                </div>
               </div>
             </>
           )}
@@ -345,7 +354,7 @@ export default function HistoryDetailPage() {
             <div className="flex flex-wrap gap-3">
               {([
                 ['valid', 'Unique Valid'],
-                ['needs_review', 'Needs Review (rows)'],
+                ['needs_review', 'Needs Review'],
                 ['out_of_scope', 'Out Of Scope (rows)'],
                 ['skipped', 'Skipped (rows)'],
                 ['duplicates', 'Duplicates (rows)'],
@@ -356,7 +365,9 @@ export default function HistoryDetailPage() {
                   onClick={() => setActiveTab(tab)}
                   className={`rounded-full px-4 py-2 text-xs font-semibold ${activeTab === tab ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'}`}
                 >
-                  {label} ({tabCounts[tab]}){tab !== 'valid' ? ` · ${totalCountByTab[tab]} groups` : ''}
+                  {tab === 'needs_review'
+                    ? `${label} (${needsReviewGroups.length} issues · ${needsReviewRows.length} rows)`
+                    : `${label} (${tabCounts[tab]})${tab !== 'valid' ? ` · ${totalCountByTab[tab]} groups` : ''}`}
                 </button>
               ))}
             </div>
@@ -429,6 +440,8 @@ export default function HistoryDetailPage() {
               pageSize={resultsPageSize}
               onPageChange={setResultsPage}
               onPageSizeChange={setResultsPageSize}
+              perPageLabel={activeTab === 'needs_review' ? "Issues per page" : undefined}
+              rangeContext={activeTab === 'needs_review' ? `issues · ${needsReviewRows.length} rows` : undefined}
             />
           </div>
         </div>

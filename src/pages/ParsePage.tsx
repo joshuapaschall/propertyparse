@@ -24,6 +24,7 @@ import {
   isSkippedRow,
   isValidRow,
   stringifyPreview,
+  getDisplaySafeMatchedAddress,
 } from '../lib/parseUtils';
 import { canStartParse, hasValidLocation } from '../lib/parseValidation';
 import { groupRows, type GroupedRow } from '../lib/groupRows';
@@ -1350,15 +1351,15 @@ export default function ParsePage() {
       rowRecord.verification && typeof rowRecord.verification === 'object'
         ? (rowRecord.verification as Record<string, unknown>)
         : null;
-    const verifierAddress = verificationRecord?.google_formatted_address;
-    if (typeof verifierAddress === 'string' && verifierAddress.trim()) {
-      return verifierAddress.trim();
+    const googleDisplayAddress = verificationRecord?.google_display_address;
+    if (typeof googleDisplayAddress === 'string' && googleDisplayAddress.trim()) {
+      return googleDisplayAddress.trim();
     }
-    const matchedAddress = rowRecord.matched_address;
-    if (typeof matchedAddress === 'string' && matchedAddress.trim()) {
-      return matchedAddress.trim();
+    const googleFormattedAddress = verificationRecord?.google_formatted_address;
+    if (typeof googleFormattedAddress === 'string' && googleFormattedAddress.trim()) {
+      return googleFormattedAddress.trim();
     }
-    return row.formatted_address?.trim() || '';
+    return getDisplaySafeMatchedAddress(row);
   };
 
   const getScopeDebugGroup = (scopeDebug: unknown, key: 'selected' | 'matched') => {
@@ -3309,7 +3310,7 @@ export default function ParsePage() {
                       : 'bg-slate-100 text-slate-600 dark:bg-slate-900 dark:text-slate-300'
                   }`}
                 >
-                  Needs Review ({computedParseSummary?.needs_review ?? 0} rows)
+                  Needs Review ({needsReviewGroups.length} issues · {computedParseSummary?.needs_review ?? 0} rows)
                 </button>
                 <button
                   type="button"
@@ -3445,10 +3446,11 @@ export default function ParsePage() {
                 onClick={() => handleKpiTabClick('needs_review')}
                 className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-left transition hover:border-slate-300 hover:bg-slate-100 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-slate-700 dark:hover:bg-slate-800"
               >
-                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Needs Review</p>
+                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Needs Review Issues</p>
                 <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                  {computedParseSummary?.needs_review ?? 0}
+                  {needsReviewGroups.length}
                 </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{computedParseSummary?.needs_review ?? 0} rows</p>
               </button>
               <button
                 type="button"
@@ -3752,7 +3754,11 @@ export default function ParsePage() {
                                         }}
                                       />
                                     </td>
-                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getRowDisplayId(row)}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getRowDisplayId(row)}
+                                      {group.count > 1 ? (
+                                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{group.count} rows affected</p>
+                                      ) : null}
+                                    </td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row) || '--'}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedAddress(row) || '--'}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
@@ -3780,6 +3786,8 @@ export default function ParsePage() {
                       pageSize={resultsPageSize}
                       onPageChange={setResultsPage}
                       onPageSizeChange={setResultsPageSize}
+                      perPageLabel="Issues per page"
+                      rangeContext={`issues · ${needsReviewRows.length} rows`}
                     />
                   </div>
                   </>
@@ -3967,7 +3975,11 @@ export default function ParsePage() {
                               return (
                                 <Fragment key={group.groupKey}>
                                   <tr className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => openReviewDrawer(row)}>
-                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getRowDisplayId(row)}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getRowDisplayId(row)}
+                                      {group.count > 1 ? (
+                                        <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{group.count} rows affected</p>
+                                      ) : null}
+                                    </td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row) || '--'}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words">{getMatchedAddress(row) || '—'}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row) || '—'}</td>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RowResult } from '../types/parse';
-import { computeParseSummaryFromRowResults, isNeedsReviewRow, isOutOfScopeRow, isSkippedRow, isValidRow } from './parseUtils';
+import { computeParseSummaryFromRowResults, getDisplaySafeMatchedAddress, isNeedsReviewRow, isOutOfScopeRow, isSkippedRow, isValidRow } from './parseUtils';
 
 const buildRow = (overrides: Partial<RowResult>): RowResult => ({
   source_row_index: 1,
@@ -59,6 +59,20 @@ describe('parseUtils filters', () => {
     expect(summary.duplicates).toBeGreaterThan(0);
     expect(summary.needs_review).toBe(1);
     expect(summary.attention_total).toBe(1);
+  });
+
+
+
+  it('prefers google display fields over matched_address for display-safe matched address text', () => {
+    const row = buildRow({
+      matched_address: '4785 Georgia, 5, Douglasville, Georgia 30135',
+      matched_address_display: '4785 Hwy 5, Douglasville, GA 30135',
+      google_formatted_address: '4785 Highway 5, Douglasville, GA 30135',
+      google_display_address: '4785 Highway 5, Douglasville, GA 30135',
+      formatted_address: 'fallback',
+    });
+
+    expect(getDisplaySafeMatchedAddress(row)).toBe('4785 Highway 5, Douglasville, GA 30135');
   });
 
   it('flags out of scope rows by status or reason', () => {
