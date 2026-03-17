@@ -13,9 +13,23 @@ const getWarningView = (warning: WarningInput) => {
   }
 
   const code = typeof warning.code === 'string' ? warning.code : '';
+  if (code === 'JOB_PROGRESS_DISABLED') {
+    return {
+      title: 'Live progress is temporarily unavailable for this run.',
+      details: JSON.stringify(warning, null, 2),
+    };
+  }
+
+  if (code === 'JOB_UPDATE_FAILED') {
+    return {
+      title: 'This run may not appear in History until backend persistence is fixed.',
+      details: JSON.stringify(warning, null, 2),
+    };
+  }
+
   if (code === 'SUPABASE_SCHEMA_NOT_MIGRATED') {
     return {
-      title: 'Database schema is behind. Run the latest Supabase migration and refresh the app.',
+      title: 'This run may not appear in History until backend persistence is fixed.',
       details: JSON.stringify(warning, null, 2),
     };
   }

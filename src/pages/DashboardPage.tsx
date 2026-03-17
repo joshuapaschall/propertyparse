@@ -4,6 +4,7 @@ import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import { getApiErrorInfo, getMetricsSummary, MetricsRange, MetricsSummary } from '../lib/api';
 import { useToast } from '../components/ui/ToastProvider';
+import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 
 const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -23,6 +24,12 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [localParsePersistenceWarning, setLocalParsePersistenceWarning] = useState(false);
+
+  useEffect(() => {
+    const state = readLocalParsePersistenceState();
+    setLocalParsePersistenceWarning(Boolean(state?.persistenceWarning));
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -73,6 +80,17 @@ export default function DashboardPage() {
     ],
     [metrics],
   );
+
+  const hasZeroDurableMetrics = useMemo(() => {
+    if (!metrics) return false;
+    return (
+      toNumber(metrics.uploads) === 0 &&
+      toNumber(metrics.leads) === 0 &&
+      toNumber(metrics.matched) === 0 &&
+      toNumber(metrics.unmatched) === 0 &&
+      toNumber(metrics.exports) === 0
+    );
+  }, [metrics]);
 
   return (
     <AppShell title="Dashboard" subtitle="Workflow-first metrics across your parsing pipeline.">
@@ -127,6 +145,11 @@ export default function DashboardPage() {
                 </span>
               ))}
             </div>
+            {localParsePersistenceWarning && hasZeroDurableMetrics ? (
+              <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
+                Dashboard metrics only include saved jobs. Your last run may be missing until backend persistence is restored.
+              </p>
+            ) : null}
           </>
         )}
       </Card>

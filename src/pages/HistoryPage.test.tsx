@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import HistoryPage from './HistoryPage';
 
 const getJobs = vi.fn();
+const readLocalParsePersistenceState = vi.fn();
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
 vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
@@ -13,10 +14,14 @@ vi.mock('../lib/api', () => ({
   getJobExportCatalog: vi.fn(async () => []),
   downloadJobExport: vi.fn(async () => ({ blob: new Blob(['x']), filename: 'x.csv' })),
 }));
+vi.mock('../lib/persistenceStatus', () => ({
+  readLocalParsePersistenceState: () => readLocalParsePersistenceState(),
+}));
 
 describe('HistoryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    readLocalParsePersistenceState.mockReturnValue(null);
   });
 
   it('shows filtered empty state separately from no-data empty state', async () => {
@@ -40,5 +45,13 @@ describe('HistoryPage', () => {
     await screen.findByText('Running Job');
     expect(intervalSpy).toHaveBeenCalled();
     intervalSpy.mockRestore();
+  });
+
+  it('shows persistence-specific empty copy when last local run was not saved', async () => {
+    getJobs.mockResolvedValue([]);
+    readLocalParsePersistenceState.mockReturnValue({ persistenceWarning: true, completedAt: '2025-01-01T00:00:00.000Z', version: 1 });
+    render(<MemoryRouter><HistoryPage /></MemoryRouter>);
+    expect(await screen.findByText('No persisted jobs yet')).toBeInTheDocument();
+    expect(screen.getByText('Your last run completed, but it was not saved to History.')).toBeInTheDocument();
   });
 });
