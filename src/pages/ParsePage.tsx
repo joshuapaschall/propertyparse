@@ -569,6 +569,17 @@ const normalizePhase = (value: unknown) => {
   return null;
 };
 
+const FINALIZATION_PHASES = new Set(['FINALIZING', 'FINALIZING_RESULTS', 'SAVING_RESULTS']);
+const COMPLETED_PHASES = new Set(['DONE', 'COMPLETED', 'SUCCESS']);
+
+const isCompletionLikePhase = (value: string | null) => Boolean(value && COMPLETED_PHASES.has(value));
+const isFinalizationLikePhase = (value: string | null) => Boolean(value && FINALIZATION_PHASES.has(value));
+
+const isSummaryReadyProgressState = (phase: string | null, status: string | null, done: number | null, total: number | null) => {
+  const atHundredPercent = typeof done === 'number' && typeof total === 'number' && total > 0 && done >= total;
+  return atHundredPercent || isFinalizationLikePhase(phase) || isFinalizationLikePhase(status);
+};
+
 const shouldUseAsyncParse = (selectedFile: File | null) => {
   if (!selectedFile) return false;
   if (selectedFile.size > ASYNC_PARSE_FILE_SIZE_THRESHOLD) return true;
@@ -745,6 +756,9 @@ export default function ParsePage() {
   });
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const pollingRef = useRef<number | null>(null);
+  const pollingInFlightRef = useRef(false);
+  const summaryHydrationPromiseRef = useRef<Promise<ParseSummary | null> | null>(null);
+  const resultsHydrationPromiseRef = useRef<Promise<boolean> | null>(null);
   const busyRef = useRef(busy);
   const progressSamplesRef = useRef<{ timestamp: number; done: number; total: number }[]>([]);
   const etaSecondsRef = useRef<number | null>(null);
@@ -794,6 +808,9 @@ export default function ParsePage() {
         window.clearInterval(pollingRef.current);
         pollingRef.current = null;
       }
+      pollingInFlightRef.current = false;
+      summaryHydrationPromiseRef.current = null;
+      resultsHydrationPromiseRef.current = null;
       if (downloadSuccessTimerRef.current !== null) {
         window.clearTimeout(downloadSuccessTimerRef.current);
         downloadSuccessTimerRef.current = null;
@@ -1939,6 +1956,7 @@ How to fix: ${fixHint}` : ''}`;
       window.clearInterval(pollingRef.current);
       pollingRef.current = null;
     }
+    pollingInFlightRef.current = false;
   };
 
   const isSoftProgressStatus = (status?: number) => status === 404 || status === 503;
@@ -1984,7 +2002,10 @@ How to fix: ${fixHint}` : ''}`;
     activeProgressJobIdRef.current = jobIdToWatch;
     progressSamplesRef.current = [];
     etaSecondsRef.current = null;
-    pollingRef.current = window.setInterval(async () => {
+
+    const runPoll = async () => {
+      if (pollingInFlightRef.current) return;
+      pollingInFlightRef.current = true;
       try {
         const { job } = await getJobWithStatus(jobIdToWatch);
         const phase = normalizePhase(job.phase);
@@ -2096,10 +2117,45 @@ How to fix: ${fixHint}` : ''}`;
           setBusy(false);
           return;
         }
-        if (status === 'DONE' || phase === 'DONE' || status === 'COMPLETED') {
+        const summaryReady = isSummaryReadyProgressState(phase, status, done, total);
+        if (summaryReady && !summaryHydrationPromiseRef.current) {
+          summaryHydrationPromiseRef.current = hydrateSummaryFromJobDetail(jobIdToWatch, total ?? done ?? null)
+            .catch(() => null)
+            .finally(() => {
+              summaryHydrationPromiseRef.current = null;
+            });
+        }
+
+        if (summaryReady && !resultsHydrationPromiseRef.current) {
+          resultsHydrationPromiseRef.current = hydrateCompletedAsyncJob(jobIdToWatch, total ?? done ?? null, {
+            maxAttempts: isCompletionLikePhase(status) || isCompletionLikePhase(phase) ? RESULTS_HYDRATION_MAX_ATTEMPTS : 1,
+          })
+            .then((hydrated) => {
+              if (hydrated) {
+                stopPolling();
+                setBusy(false);
+              }
+              return hydrated;
+            })
+            .catch((resultsError) => {
+              if (isCompletionLikePhase(status) || isCompletionLikePhase(phase)) {
+                throw resultsError;
+              }
+              return false;
+            })
+            .finally(() => {
+              resultsHydrationPromiseRef.current = null;
+            });
+        }
+
+        if (isCompletionLikePhase(status) || isCompletionLikePhase(phase)) {
           setProgressPercent(100);
           setProgressStep(mapPhaseToStep('DONE'));
           stopPolling();
+          await summaryHydrationPromiseRef.current;
+          if (resultsHydrationPromiseRef.current) {
+            await resultsHydrationPromiseRef.current;
+          }
           if (options?.onFinished) {
             await options.onFinished();
           }
@@ -2126,7 +2182,14 @@ How to fix: ${fixHint}` : ''}`;
         const message = (err as Error).message ?? 'Polling failed.';
         setPollErrorCount((prev) => prev + 1);
         setPollError(message);
+      } finally {
+        pollingInFlightRef.current = false;
       }
+    };
+
+    void runPoll();
+    pollingRef.current = window.setInterval(() => {
+      void runPoll();
     }, 900);
   };
 
@@ -2246,21 +2309,24 @@ How to fix: ${fixHint}` : ''}`;
       setMetadata(Object.keys(mergedJob).length ? mergedJob : null);
       setProgressInfo((prev) => ({
         ...prev,
-        phase: 'DONE',
+        phase: prev.phase && !isCompletionLikePhase(prev.phase) ? prev.phase : 'DONE',
         done: resolvedRowsReceived,
         total: resolvedRowsReceived,
       }));
       setProgressPercent(100);
+      publishJobUpdate({ kind: 'job-updated', jobId: completedJobId });
+      publishJobUpdate({ kind: 'metrics-updated', jobId: completedJobId });
       return displayedSummary;
     },
     [],
   );
 
   const hydrateCompletedAsyncJob = useCallback(
-    async (completedJobId: string, fallbackRowsReceived: number | null) => {
+    async (completedJobId: string, fallbackRowsReceived: number | null, options?: { maxAttempts?: number }) => {
       setResultsFinalizing(true);
       let lastError: unknown = null;
-      for (let attempt = 0; attempt < RESULTS_HYDRATION_MAX_ATTEMPTS; attempt += 1) {
+      const maxAttempts = options?.maxAttempts ?? RESULTS_HYDRATION_MAX_ATTEMPTS;
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         try {
           const results = await getJobResults(completedJobId, { fresh: true });
           if (!hasHydratedResultsPayload(results)) {
@@ -2268,18 +2334,27 @@ How to fix: ${fixHint}` : ''}`;
           }
           applyParsedResponse(results as unknown as Record<string, unknown>, fallbackRowsReceived);
           setResultsFinalizing(false);
-          return;
+          publishJobUpdate({ kind: 'job-updated', jobId: completedJobId });
+          publishJobUpdate({ kind: 'metrics-updated', jobId: completedJobId });
+          return true;
         } catch (error) {
           lastError = error;
           if (!isTemporaryResultsUnavailableError(error) && (error as Error).message !== 'Results not ready yet.') {
+            break;
+          }
+          if (attempt + 1 >= maxAttempts) {
             break;
           }
           const delayMs = RESULTS_HYDRATION_BASE_DELAY_MS * 2 ** attempt;
           await new Promise((resolve) => window.setTimeout(resolve, delayMs));
         }
       }
-      setResultsFinalizing(false);
-      throw lastError instanceof Error ? lastError : new Error('Finalizing results timed out.');
+      if (maxAttempts > 1) {
+        setResultsFinalizing(false);
+        throw lastError instanceof Error ? lastError : new Error('Finalizing results timed out.');
+      }
+      setResultsFinalizing(true);
+      return false;
     },
     [applyParsedResponse],
   );

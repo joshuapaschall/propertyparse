@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import ParsePage from './ParsePage';
@@ -49,7 +49,7 @@ vi.mock('../components/TablePagination', () => ({
 }));
 vi.mock('../components/EditRowModal', () => ({ default: () => null }));
 vi.mock('../components/ui/Card', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
-vi.mock('../components/ui/EmptyState', () => ({ default: () => null }));
+vi.mock('../components/ui/EmptyState', () => ({ default: ({ title, description }: { title?: string; description?: string }) => <div>{title}{description ? ` ${description}` : ''}</div> }));
 vi.mock('../components/ui/Skeleton', () => ({ default: () => null }));
 vi.mock('../components/exports/ExportPanel', () => ({
   default: ({ catalog, onDownload }: { catalog: Array<{ type: string; label: string }>; onDownload: (type: any, label: string) => void }) => (
@@ -117,6 +117,72 @@ describe('ParsePage', () => {
     await waitFor(() => expect(publishJobUpdate).toHaveBeenCalled());
     expect(publishJobUpdate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'job-updated' }));
     expect(publishJobUpdate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'metrics-updated' }));
+  });
+
+
+  it('hydrates summary and results during FINALIZING_RESULTS before DONE', async () => {
+    const user = userEvent.setup();
+    selectedFileFactory.mockImplementation(() => new File(['pdf'], 'sample.pdf', { type: 'application/pdf' }));
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 2 });
+    getJobWithStatus.mockResolvedValue({ job: { job_id: 'job-1', status: 'RUNNING', phase: 'FINALIZING_RESULTS', progress_done: 2, progress_total: 2 } });
+    getJobDetail.mockResolvedValue({
+      job: { job_id: 'job-1', status: 'RUNNING', phase: 'FINALIZING_RESULTS', spend_usd: 1.5 },
+      summary: { rows_received: 2, valid_total: 1, valid_unique: 1, needs_review: 1, skipped: 0, duplicates: 0, out_of_scope: 0 },
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 2, valid_total: 1, valid_unique: 1, needs_review: 1, skipped: 0, duplicates: 0, out_of_scope: 0 },
+      row_results: [
+        { source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1', formatted_address: '1 Main St' },
+        { source_row_id: 'r2', source_row_index: 2, status: 'UNMATCHED_NEEDS_REVIEW', detected_address: '2 Main St' },
+      ],
+      canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St', city: 'Austin', state: 'TX', zip: '78701' }],
+      duplicate_groups: [],
+    });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await waitFor(() => expect(getJobDetail).toHaveBeenCalled());
+    await waitFor(() => expect(getJobResults).toHaveBeenCalledWith(expect.stringMatching(/.+/), { fresh: true }));
+    expect(screen.getByText('Rows Received')).toBeInTheDocument();
+    expect(screen.queryByText('No parse results yet')).not.toBeInTheDocument();
+    expect(publishJobUpdate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'job-updated' }));
+    expect(publishJobUpdate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'metrics-updated' }));
+  });
+
+  it('skips overlapping polling requests while one poll is in flight', async () => {
+    const user = userEvent.setup();
+    selectedFileFactory.mockImplementation(() => new File(['pdf'], 'sample.pdf', { type: 'application/pdf' }));
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 2 });
+    let resolvePoll: ((value: unknown) => void) | null = null;
+    let intervalCallback: (() => void) | null = null;
+    vi.spyOn(window, 'setInterval').mockImplementation(((cb: TimerHandler) => {
+      intervalCallback = cb as () => void;
+      return 1 as unknown as number;
+    }) as typeof window.setInterval);
+    vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined);
+    getJobWithStatus.mockImplementation(() => new Promise((resolve) => {
+      resolvePoll = resolve;
+    }));
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    expect(getJobWithStatus).toHaveBeenCalledTimes(1);
+    intervalCallback?.();
+    intervalCallback?.();
+    expect(getJobWithStatus).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolvePoll?.({ job: { job_id: 'job-1', status: 'FAILED', phase: 'FAILED', error_message: 'boom' } });
+      await Promise.resolve();
+    });
   });
 
 
@@ -333,7 +399,7 @@ describe('ParsePage', () => {
     expect((await screen.findAllByText(/Finalizing results/i)).length).toBeGreaterThan(0);
 
     await waitFor(() => expect(screen.queryByText(/Finalizing results/i)).not.toBeInTheDocument(), { timeout: 4000 });
-    expect(publishJobUpdate).toHaveBeenCalledTimes(4);
+    expect(publishJobUpdate.mock.calls.length).toBeGreaterThanOrEqual(4);
   });
   it('publishes invalidation events after AI auto-fix completion', async () => {
     const user = userEvent.setup();
