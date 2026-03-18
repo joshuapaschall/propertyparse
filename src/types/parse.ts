@@ -47,6 +47,12 @@ export type RowResult = {
   is_duplicate?: boolean;
   duplicate_of_source_row_id?: string;
   verification_precision?: string;
+  decision_tier?: string;
+  resolver_strategy?: string;
+  candidate_count_in_scope?: number;
+  converged_place_ids?: string[];
+  competing_place_ids?: string[];
+  ambiguity_reason?: string;
   compare_debug?: unknown;
   blocked_by?: string | string[];
 };

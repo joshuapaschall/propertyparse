@@ -25,8 +25,13 @@ import {
   isValidRow,
   stringifyPreview,
   getDisplaySafeMatchedAddress,
+  getManualApprovalBlocker,
+  getResolverDetails,
   getReviewDebugHint,
+  getReviewExplanation,
   getReviewReasonBucket,
+  isSafeManualApprovalCandidate,
+  shouldShowOneCandidateBadge,
   type ReviewReasonFilter,
   buildLocalCsvForExport,
   isHeaderOnlyCsv,
@@ -425,6 +430,12 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
       verification_precision: pickStringValue(row, ['verification_precision', 'verificationPrecision']) || undefined,
       compare_debug: row.compare_debug ?? row.compareDebug ?? undefined,
       blocked_by: (row.blocked_by as string | string[] | undefined) ?? (row.blockedBy as string | string[] | undefined),
+      decision_tier: pickStringValue(row, ['decision_tier', 'decisionTier']) || undefined,
+      resolver_strategy: pickStringValue(row, ['resolver_strategy', 'resolverStrategy']) || undefined,
+      candidate_count_in_scope: normalizeNumber(row.candidate_count_in_scope ?? row.candidateCountInScope) ?? undefined,
+      converged_place_ids: Array.isArray(row.converged_place_ids) ? row.converged_place_ids.filter((value): value is string => typeof value === 'string') : Array.isArray(row.convergedPlaceIds) ? row.convergedPlaceIds.filter((value): value is string => typeof value === 'string') : undefined,
+      competing_place_ids: Array.isArray(row.competing_place_ids) ? row.competing_place_ids.filter((value): value is string => typeof value === 'string') : Array.isArray(row.competingPlaceIds) ? row.competingPlaceIds.filter((value): value is string => typeof value === 'string') : undefined,
+      ambiguity_reason: pickStringValue(row, ['ambiguity_reason', 'ambiguityReason']) || undefined,
     };
   }
 
@@ -1708,12 +1719,16 @@ export default function ParsePage() {
 
   const renderReasonCell = (row: RowResult) => {
     const { label, description, fix_hint: fixHint } = getReasonMetadata(row);
+    const explanation = getReviewExplanation(row);
     const reasonCode = row.reason_code?.trim();
     const normalizedReasonCode = reasonCode?.toUpperCase() ?? '';
     const isMarkerVerificationFailure =
       normalizedReasonCode === 'OUT_OF_SCOPE_MARKER_VERIFICATION_FAILED';
-    const tooltip = `${description}${fixHint ? `\nHow to fix: ${fixHint}` : ''}`;
+    const tooltip = `${description}${fixHint ? `
+How to fix: ${fixHint}` : ''}`;
     const detailText = getReasonDetailText(row);
+    const debugHint = getReviewDebugHint(row);
+    const resolverDetails = getResolverDetails(row);
     const markerFailureSecondaryText =
       isMarkerVerificationFailure &&
       detailText &&
@@ -1726,8 +1741,13 @@ export default function ParsePage() {
           className="font-medium text-slate-700 underline decoration-dotted decoration-slate-300 underline-offset-4 dark:text-slate-200 dark:decoration-slate-600"
           title={tooltip}
         >
-          {label}
+          {explanation || label}
         </span>
+        {shouldShowOneCandidateBadge(row) ? (
+          <span className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            One candidate found
+          </span>
+        ) : null}
         {isMarkerVerificationFailure && detailText ? (
           <div
             className="text-sm font-semibold text-rose-700 dark:text-rose-300"
@@ -1744,10 +1764,51 @@ export default function ParsePage() {
             {isOutOfScopeRow(row) ? `Why? ${detailText}` : detailText}
           </div>
         ) : null}
+        {debugHint ? (
+          <p className="text-[11px] text-slate-400 dark:text-slate-500">{debugHint}</p>
+        ) : null}
         {showDebugMode && reasonCode ? (
           <div className="text-xs text-slate-400 dark:text-slate-500">{reasonCode}</div>
         ) : null}
+        {resolverDetails.length ? (
+          <details className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-2.5 py-2 text-[11px] text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/80 dark:text-slate-300">
+            <summary className="cursor-pointer list-none font-medium text-slate-600 marker:hidden dark:text-slate-200">Resolver details</summary>
+            <div className="mt-2 grid gap-1.5">
+              {resolverDetails.map((detail) => (
+                <div key={`${detail.label}-${detail.value}`} className="flex flex-wrap gap-1">
+                  <span className="font-semibold text-slate-500 dark:text-slate-400">{detail.label}:</span>
+                  <span>{detail.value}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
       </div>
+    );
+  };
+
+
+  const renderApprovalAction = (row: RowResult, outOfScopeOverride: boolean) => {
+    const approvalBlocker = getManualApprovalBlocker(row);
+    const canApprove = isSafeManualApprovalCandidate(row);
+    const isApproving = approvingRowIds.has(row.source_row_id);
+    if (!canApprove) {
+      return (
+        <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+          <div className="font-semibold text-slate-600 dark:text-slate-200">Approval unavailable</div>
+          <div className="mt-0.5">{approvalBlocker ?? 'Manual approval is not safe for this review case.'}</div>
+        </div>
+      );
+    }
+    return (
+      <button
+        type="button"
+        onClick={() => void handleApproveMatched(row, outOfScopeOverride)}
+        disabled={isApproving}
+        className="w-full rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
+      >
+        {isApproving ? '⏳ Approving…' : 'Approve matched'}
+      </button>
     );
   };
 
@@ -3963,17 +4024,12 @@ export default function ParsePage() {
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                       {renderReasonCell(row)}
-                                      {getReviewDebugHint(row) ? (
-                                        <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">{getReviewDebugHint(row)}</p>
-                                      ) : null}
                                     </td>
                                     {showDebugMode ? <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{stringifyPreview(row.raw_row)}</td> : null}
                                     <td className="px-4 py-3 text-right">
                                       <div className="flex min-w-[170px] flex-col items-stretch gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
                                         <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy} className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">Review</button>
-                                        <button type="button" onClick={() => void handleApproveMatched(row, true)} disabled={isRowBusy} className="w-full rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20">
-                                          {approvingRowIds.has(row.source_row_id) ? '⏳ Approving…' : 'Approve matched'}
-                                        </button>
+                                        {renderApprovalAction(row, true)}
                                       </div>
                                     </td>
                                   </tr>
@@ -4191,15 +4247,12 @@ export default function ParsePage() {
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                       {renderReasonCell(row)}
-                                      {getReviewDebugHint(row) ? (
-                                        <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">{getReviewDebugHint(row)}</p>
-                                      ) : null}
                                     </td>
                                     {showDebugMode ? <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">{stringifyPreview(row.raw_row)}</td> : null}
                                     <td className="px-4 py-3 text-right">
                                       <div className="flex min-w-[170px] flex-col items-stretch gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
                                         <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy} className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">Review</button>
-                                        <button type="button" onClick={() => void handleApproveMatched(row, isOutOfScopeRow(row))} disabled={isRowBusy} className="w-full rounded-md border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/40 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20">{approvingRowIds.has(row.source_row_id) ? '⏳ Approving…' : 'Approve matched'}</button>
+                                        {renderApprovalAction(row, isOutOfScopeRow(row))}
                                       </div>
                                     </td>
                                   </tr>
