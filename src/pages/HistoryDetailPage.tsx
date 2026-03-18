@@ -12,8 +12,11 @@ import {
   isSkippedRow,
   stringifyPreview,
   getDisplaySafeMatchedAddress,
+  getResolverDetails,
   getReviewDebugHint,
+  getReviewExplanation,
   getReviewReasonBucket,
+  shouldShowOneCandidateBadge,
   type ReviewReasonFilter,
   buildLocalCsvForExport,
   isHeaderOnlyCsv,
@@ -359,10 +362,30 @@ export default function HistoryDetailPage() {
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCity(row)}</td>
                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                    {getReasonMetadata(row).label}
-                    {getReviewDebugHint(row) ? (
-                      <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">{getReviewDebugHint(row)}</p>
-                    ) : null}
+                    <div className="space-y-1">
+                      <span className="font-medium text-slate-700 dark:text-slate-200">{getReviewExplanation(row) || getReasonMetadata(row).label}</span>
+                      {shouldShowOneCandidateBadge(row) ? (
+                        <span className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                          One candidate found
+                        </span>
+                      ) : null}
+                      {getReviewDebugHint(row) ? (
+                        <p className="text-[11px] text-slate-400 dark:text-slate-500">{getReviewDebugHint(row)}</p>
+                      ) : null}
+                      {getResolverDetails(row).length ? (
+                        <details className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-2.5 py-2 text-[11px] text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/80 dark:text-slate-300">
+                          <summary className="cursor-pointer list-none font-medium text-slate-600 marker:hidden dark:text-slate-200">Resolver details</summary>
+                          <div className="mt-2 grid gap-1.5">
+                            {getResolverDetails(row).map((detail) => (
+                              <div key={`${detail.label}-${detail.value}`} className="flex flex-wrap gap-1">
+                                <span className="font-semibold text-slate-500 dark:text-slate-400">{detail.label}:</span>
+                                <span>{detail.value}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </details>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-right">
                     <button
@@ -477,6 +500,9 @@ export default function HistoryDetailPage() {
           {activeTab === 'needs_review' ? (
             <div className="mt-4 space-y-2">
               <p className="text-xs text-slate-500 dark:text-slate-400">Grouped by issue so repeated copies do not inflate workload.</p>
+              {needsReviewRows.some((row) => row.resolver_strategy || row.decision_tier || row.candidate_count_in_scope !== undefined) ? (
+                <p className="text-xs text-slate-500 dark:text-slate-400">Only unresolved or ambiguous candidates remain in review.</p>
+              ) : null}
               <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
                 <div className="flex flex-wrap items-center gap-2">
                   <span>Route Alias / Route Mismatch: {reviewBreakdown.route_alias}</span>

@@ -127,16 +127,145 @@ const humanizeReasonCode = (code: string) => {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 };
 
+const asTrimmedString = (value: unknown) => (typeof value === 'string' && value.trim() ? value.trim() : '');
+const asStringArray = (value: unknown) => {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => asTrimmedString(item)).filter(Boolean);
+};
+const asNumber = (value: unknown) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+};
+
+const getBlockedByList = (row: RowResult) => {
+  if (Array.isArray(row.blocked_by)) return row.blocked_by.map((item) => item.trim()).filter(Boolean);
+  if (typeof row.blocked_by === 'string' && row.blocked_by.trim()) {
+    return row.blocked_by
+      .split(/[|,]/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+  return [];
+};
+
+const stringifyUnknown = (value: unknown) => {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.trim();
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+};
+
+const getCompareDebugText = (row: RowResult) => stringifyUnknown(row.compare_debug);
+const getCandidateCount = (row: RowResult) => asNumber(row.candidate_count_in_scope);
+const getCompetingPlaceIds = (row: RowResult) => asStringArray(row.competing_place_ids);
+const getConvergedPlaceIds = (row: RowResult) => asStringArray(row.converged_place_ids);
+const getPrecision = (row: RowResult) => asTrimmedString(row.verification_precision).toLowerCase();
+const getResolverStrategy = (row: RowResult) => asTrimmedString(row.resolver_strategy).toLowerCase();
+const getDecisionTier = (row: RowResult) => asTrimmedString(row.decision_tier).toLowerCase();
+const getAmbiguityReason = (row: RowResult) => asTrimmedString(row.ambiguity_reason);
+const getReasonCode = (row: RowResult) => normalizeValue(row.reason_code);
+
+const inferCompareHint = (row: RowResult) => {
+  const debug = getCompareDebugText(row);
+  const lowered = debug.toLowerCase();
+  if (!lowered) return '';
+  if (lowered.includes('same house number')) return 'Same house number · safe alias candidate';
+  if (lowered.includes('suffix')) return 'Comparison favored a suffix correction';
+  if (lowered.includes('typo') || lowered.includes('edit distance')) return 'Comparison favored a typo correction';
+  if (lowered.includes('directional')) return 'Comparison found a directional conflict';
+  return debug;
+};
+
+const hasHouseNumberConflict = (row: RowResult) => {
+  const reason = getReasonCode(row);
+  const ambiguity = getAmbiguityReason(row).toLowerCase();
+  const debug = getCompareDebugText(row).toLowerCase();
+  return (
+    reason.includes('HOUSE_NUMBER') ||
+    ambiguity.includes('house number conflict') ||
+    ambiguity.includes('house-number conflict') ||
+    debug.includes('house number conflict') ||
+    debug.includes('number mismatch')
+  );
+};
+
+const isLowPrecisionResolverCase = (row: RowResult) => {
+  const precision = getPrecision(row);
+  const strategy = getResolverStrategy(row);
+  const reason = getReasonCode(row);
+  return (
+    ['route', 'route_only', 'county', 'county_only', 'locality', 'locality_only', 'zip', 'postal_code'].includes(precision) ||
+    strategy.includes('route_only') ||
+    strategy.includes('county_only') ||
+    strategy.includes('locality_only') ||
+    reason.includes('LOW_PRECISION')
+  );
+};
+
+export const getReviewExplanation = (row: RowResult) => {
+  const strategy = getResolverStrategy(row);
+  const tier = getDecisionTier(row);
+  const candidateCount = getCandidateCount(row);
+  const ambiguity = getAmbiguityReason(row);
+  const reason = getReasonCode(row);
+  const compareHint = inferCompareHint(row).toLowerCase();
+
+  if (strategy.includes('typo') || tier.includes('typo') || compareHint.includes('typo correction')) {
+    return 'Unique in-scope typo correction';
+  }
+  if (strategy.includes('suffix') || tier.includes('suffix') || compareHint.includes('suffix correction')) {
+    return 'Unique in-scope suffix correction';
+  }
+  if (hasHouseNumberConflict(row)) {
+    return reason.includes('NOT_VERIFIED') || reason.includes('MISSING_STREET_NUMBER')
+      ? 'Street number still not verified'
+      : 'House number conflict';
+  }
+  if (candidateCount !== null && candidateCount > 1) {
+    return `Still ambiguous: ${candidateCount} in-scope candidates`;
+  }
+  if (ambiguity) {
+    return ambiguity;
+  }
+  if (strategy.includes('route_only')) {
+    return 'Route-only candidate; second-pass rescue failed';
+  }
+  if (strategy.includes('county_only')) {
+    return 'County-only candidate; second-pass rescue failed';
+  }
+  if (strategy.includes('locality_only')) {
+    return 'Locality-only candidate; second-pass rescue failed';
+  }
+  if (reason.includes('MISSING_STREET_NUMBER') || reason.includes('STREET_NUMBER_NOT_VERIFIED') || reason.includes('HOUSE_NUMBER_NOT_VERIFIED')) {
+    return 'Street number still not verified';
+  }
+  if (reason.includes('LOW_PRECISION')) {
+    return 'Candidate was only verified at broad area precision';
+  }
+  if (reason.includes('ROUTE') || reason.includes('ALIAS')) {
+    return candidateCount === 1 ? 'Unique in-scope route alias candidate' : 'Route alias still needs confirmation';
+  }
+  return row.reason_detail?.trim() || (reason ? humanizeReasonCode(reason) : 'Needs review');
+};
+
 export const getReasonMetadata = (row: RowResult) => {
-  const normalized = normalizeValue(row.reason_code);
+  const normalized = getReasonCode(row);
   const detail = row.reason_detail?.trim() ?? '';
   let metadata = normalized ? REASON_METADATA[normalized] : undefined;
   if (!metadata && normalized.startsWith('OUT_OF_SCOPE')) {
     metadata = REASON_METADATA.OUT_OF_SCOPE;
   }
-  const label =
-    metadata?.label || detail || (normalized ? humanizeReasonCode(normalized) : 'Needs review');
-  const description = metadata?.description || detail || 'Review the row for more context.';
+
+  const resolverExplanation = getReviewExplanation(row);
+  const label = metadata?.label || detail || resolverExplanation || (normalized ? humanizeReasonCode(normalized) : 'Needs review');
+  const description = metadata?.description || detail || resolverExplanation || 'Review the row for more context.';
   const fixHint = metadata?.fix_hint || 'Update the address and retry if needed.';
   return {
     label,
@@ -148,7 +277,7 @@ export const getReasonMetadata = (row: RowResult) => {
 export const isNeedsReviewRow = (row: RowResult) => {
   if (isSkippedRow(row)) return false;
   const status = normalizeValue(row.status);
-  const reason = normalizeValue(row.reason_code);
+  const reason = getReasonCode(row);
   return (
     status.includes('UNMATCHED') ||
     status.includes('NEEDS_REVIEW') ||
@@ -159,13 +288,13 @@ export const isNeedsReviewRow = (row: RowResult) => {
 
 export const isSkippedRow = (row: RowResult) => {
   const status = normalizeValue(row.status);
-  const reason = normalizeValue(row.reason_code);
+  const reason = getReasonCode(row);
   return status.startsWith('SKIPPED') || SKIPPED_REASON_CODES.has(reason);
 };
 
 export const isOutOfScopeRow = (row: RowResult) => {
   const status = normalizeValue(row.status);
-  const reason = normalizeValue(row.reason_code);
+  const reason = getReasonCode(row);
   return status.includes('OUT_OF_SCOPE') || reason.includes('OUT_OF_SCOPE');
 };
 
@@ -217,7 +346,6 @@ export const computeParseSummaryFromRowResults = (rows: RowResult[]): ParseSumma
   };
 };
 
-
 export const getDisplaySafeMatchedAddress = (row: RowResult) => {
   const candidates = [
     row.google_display_address,
@@ -261,32 +389,97 @@ export const matchesSearch = (row: RowResult, query: string) => {
   return haystack.includes(normalized);
 };
 
-
 export type ReviewReasonFilter = 'all' | 'route_alias' | 'house_number' | 'low_precision' | 'county_rescue' | 'missing_street_number';
 
 export const getReviewReasonBucket = (row: RowResult) => {
-  const reason = normalizeValue(row.reason_code);
-  if (reason.includes('ALIAS') || reason.includes('ROUTE')) return 'route_alias' as const;
-  if (reason.includes('HOUSE_NUMBER_MISMATCH') || reason.includes('HOUSE_NUMBER')) return 'house_number' as const;
+  const reason = getReasonCode(row);
+  const strategy = getResolverStrategy(row);
+  const precision = getPrecision(row);
+  if (reason.includes('ALIAS') || reason.includes('ROUTE') || strategy.includes('route')) return 'route_alias' as const;
+  if (reason.includes('HOUSE_NUMBER_MISMATCH') || reason.includes('HOUSE_NUMBER') || hasHouseNumberConflict(row)) return 'house_number' as const;
   if (reason.includes('MISSING_STREET_NUMBER') || reason.includes('STREET_NUMBER_NOT_VERIFIED')) return 'missing_street_number' as const;
-  if (reason.includes('COUNTY')) return 'county_rescue' as const;
-  if (reason.includes('LOW_PRECISION') || reason.includes('LOW_PRECISION_MATCH')) return 'low_precision' as const;
+  if (reason.includes('COUNTY') || strategy.includes('county') || precision.includes('county')) return 'county_rescue' as const;
+  if (reason.includes('LOW_PRECISION') || reason.includes('LOW_PRECISION_MATCH') || isLowPrecisionResolverCase(row)) return 'low_precision' as const;
   return 'all' as const;
 };
 
 export const getReviewDebugHint = (row: RowResult) => {
-  const debug = typeof row.compare_debug === 'string' ? row.compare_debug : '';
-  const blocked = Array.isArray(row.blocked_by) ? row.blocked_by.join(', ') : row.blocked_by ?? '';
-  const precision = typeof row.verification_precision === 'string' ? row.verification_precision : '';
+  const blocked = getBlockedByList(row);
+  const precision = getPrecision(row);
+  const ambiguity = getAmbiguityReason(row);
+  const compareHint = inferCompareHint(row);
+  const candidateCount = getCandidateCount(row);
 
-  if (debug.toLowerCase().includes('same house number')) return 'Same house number · safe alias candidate';
-  if (blocked.toLowerCase().includes('directional')) return 'Blocked by directional conflict';
-  if (blocked.toLowerCase().includes('core') || blocked.toLowerCase().includes('token')) return 'Blocked by core token drop';
-  if (precision.toLowerCase().includes('county')) return 'Candidate is county-level only';
-  if (debug.trim()) return debug.trim();
-  if (blocked.trim()) return `Blocked by ${blocked}`;
-  if (precision.trim()) return `Verification precision: ${precision}`;
+  if (compareHint) return compareHint;
+  if (blocked.some((item) => item.toLowerCase().includes('directional'))) return 'Blocked by directional conflict';
+  if (blocked.some((item) => item.toLowerCase().includes('core') || item.toLowerCase().includes('token'))) return 'Blocked by core token drop';
+  if (candidateCount !== null && candidateCount > 1) return `${candidateCount} in-scope candidates remain`; 
+  if (precision === 'county' || precision === 'county_only') return 'Candidate is county-level only';
+  if (precision === 'route' || precision === 'route_only') return 'Candidate is route-level only';
+  if (precision === 'locality' || precision === 'locality_only') return 'Candidate is locality-level only';
+  if (blocked.length) return `Blocked by ${blocked.join(', ')}`;
+  if (ambiguity) return ambiguity;
+  if (precision) return `Verification precision: ${precision}`;
   return null;
+};
+
+export const isSafeManualApprovalCandidate = (row: RowResult) => {
+  const candidateCount = getCandidateCount(row);
+  const precision = getPrecision(row);
+  const competing = getCompetingPlaceIds(row);
+  const blocked = getBlockedByList(row);
+  const reason = getReasonCode(row);
+  const ambiguity = getAmbiguityReason(row);
+  const matchedAddress = getDisplaySafeMatchedAddress(row);
+
+  if (!matchedAddress) return false;
+  if (candidateCount !== null && candidateCount !== 1) return false;
+  if (competing.length > 1) return false;
+  if (blocked.length > 0) return false;
+  if (hasHouseNumberConflict(row)) return false;
+  if (ambiguity) return false;
+  if (['route', 'route_only', 'county', 'county_only', 'locality', 'locality_only', 'zip', 'postal_code'].includes(precision)) return false;
+  if (reason.includes('LOW_PRECISION') || reason.includes('MISSING_STREET_NUMBER') || reason.includes('STREET_NUMBER_NOT_VERIFIED')) return false;
+  return true;
+};
+
+export const shouldShowOneCandidateBadge = (row: RowResult) => {
+  return isNeedsReviewRow(row) && getCandidateCount(row) === 1 && !isSafeManualApprovalCandidate(row);
+};
+
+export const getManualApprovalBlocker = (row: RowResult) => {
+  if (isSafeManualApprovalCandidate(row)) return null;
+  const candidateCount = getCandidateCount(row);
+  const precision = getPrecision(row);
+  const ambiguity = getAmbiguityReason(row);
+  const competing = getCompetingPlaceIds(row);
+
+  if (!getDisplaySafeMatchedAddress(row)) return 'No street-level candidate was resolved';
+  if (candidateCount !== null && candidateCount > 1) return `Still ambiguous: ${candidateCount} in-scope candidates`;
+  if (competing.length > 1) return 'Multiple competing candidates remain';
+  if (hasHouseNumberConflict(row)) return getReviewExplanation(row);
+  if (ambiguity) return ambiguity;
+  if (['route', 'route_only'].includes(precision)) return 'Route-only candidate cannot be approved';
+  if (['county', 'county_only'].includes(precision)) return 'County-only candidate cannot be approved';
+  if (['locality', 'locality_only'].includes(precision)) return 'Locality-only candidate cannot be approved';
+  return getReviewExplanation(row);
+};
+
+export const getResolverDetails = (row: RowResult) => {
+  const details: Array<{ label: string; value: string }> = [];
+  if (asTrimmedString(row.resolver_strategy)) details.push({ label: 'Resolver', value: asTrimmedString(row.resolver_strategy) });
+  if (asTrimmedString(row.decision_tier)) details.push({ label: 'Decision tier', value: asTrimmedString(row.decision_tier) });
+  if (getCandidateCount(row) !== null) details.push({ label: 'In-scope candidates', value: String(getCandidateCount(row)) });
+  const blocked = getBlockedByList(row);
+  if (blocked.length) details.push({ label: 'Blocked by', value: blocked.join(', ') });
+  if (getAmbiguityReason(row)) details.push({ label: 'Ambiguity', value: getAmbiguityReason(row) });
+  const compareHint = inferCompareHint(row);
+  if (compareHint) details.push({ label: 'Comparison', value: compareHint });
+  const converged = getConvergedPlaceIds(row);
+  if (converged.length) details.push({ label: 'Converged place IDs', value: converged.join(', ') });
+  const competing = getCompetingPlaceIds(row);
+  if (competing.length) details.push({ label: 'Competing place IDs', value: competing.join(', ') });
+  return details;
 };
 
 const csvEscape = (value: unknown) => {
@@ -341,6 +534,10 @@ export const buildLocalCsvForExport = (
     'matched_address',
     'formatted_address',
     'verification_precision',
+    'resolver_strategy',
+    'decision_tier',
+    'candidate_count_in_scope',
+    'ambiguity_reason',
     'blocked_by',
     'compare_debug',
   ];
@@ -354,6 +551,10 @@ export const buildLocalCsvForExport = (
     matched_address: row.matched_address ?? row.google_display_address ?? '',
     formatted_address: row.formatted_address ?? '',
     verification_precision: row.verification_precision ?? '',
+    resolver_strategy: row.resolver_strategy ?? '',
+    decision_tier: row.decision_tier ?? '',
+    candidate_count_in_scope: row.candidate_count_in_scope ?? '',
+    ambiguity_reason: row.ambiguity_reason ?? '',
     blocked_by: Array.isArray(row.blocked_by) ? row.blocked_by.join('|') : row.blocked_by ?? '',
     compare_debug: typeof row.compare_debug === 'string' ? row.compare_debug : row.compare_debug ? JSON.stringify(row.compare_debug) : '',
   }));
