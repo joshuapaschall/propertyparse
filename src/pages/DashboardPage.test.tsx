@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import DashboardPage from './DashboardPage';
@@ -79,8 +79,13 @@ describe('DashboardPage', () => {
     render(<MemoryRouter><DashboardPage /></MemoryRouter>);
     await screen.findByText('Files Uploaded');
     const before = getMetricsSummary.mock.calls.length;
-    handler?.({ kind: 'metrics-updated' });
+    await act(async () => {
+      handler?.({ kind: 'metrics-updated' });
+      await Promise.resolve();
+    });
     await screen.findByText('Files Uploaded');
     expect(getMetricsSummary.mock.calls.length).toBeGreaterThan(before);
   });
+
 });
+

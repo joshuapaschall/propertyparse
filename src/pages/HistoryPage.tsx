@@ -1,4 +1,4 @@
-import { CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
+import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import Badge, { getBadgeVariant } from '../components/ui/Badge';
@@ -69,26 +69,35 @@ export default function HistoryPage() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const [jobs, setJobs] = useState<JobRecord[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
   const [catalogByJobId, setCatalogByJobId] = useState<Record<string, ExportCatalogItem[]>>({});
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [localParsePersistenceWarning, setLocalParsePersistenceWarning] = useState(false);
+  const hasLoadedJobsRef = useRef(false);
 
   const loadJobs = useCallback(async () => {
-    setLoading(true);
+    const hasExistingJobs = hasLoadedJobsRef.current;
+    if (hasExistingJobs) {
+      setRefreshing(true);
+    } else {
+      setInitialLoading(true);
+    }
     setError(null);
     try {
       const response = await getJobs();
       setJobs(response ?? []);
+      hasLoadedJobsRef.current = true;
     } catch (err) {
       const message = (err as Error).message ?? 'Unable to load history.';
       setError(message);
       showToast({ title: message, variant: 'error' });
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setRefreshing(false);
     }
   }, [showToast]);
 
@@ -238,9 +247,9 @@ export default function HistoryPage() {
           />
         </div>
 
-        {loading ? (
+        {initialLoading && !hasAnyJobs ? (
           <EmptyState className="mt-6" title="Loading history" description="Loading job history..." />
-        ) : error ? (
+        ) : error && !hasAnyJobs ? (
           <EmptyState className="mt-6" title="History unavailable" description={error} />
         ) : !hasAnyJobs ? (
           localParsePersistenceWarning ? (
@@ -259,6 +268,10 @@ export default function HistoryPage() {
         ) : filteredRows.length === 0 ? (
           <EmptyState className="mt-6" title="No jobs matching search" description="Adjust the search query." />
         ) : (
+          <>
+            {refreshing ? (
+              <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">Refreshing…</p>
+            ) : null}
           <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
             <div className="max-h-[68vh] overflow-auto">
               <table className="w-full min-w-[1080px] text-left text-sm">
@@ -311,6 +324,7 @@ export default function HistoryPage() {
               </table>
             </div>
           </div>
+          </>
         )}
       </Card>
     </AppShell>

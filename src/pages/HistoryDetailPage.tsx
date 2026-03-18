@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import TablePagination from '../components/TablePagination';
@@ -116,7 +116,8 @@ export default function HistoryDetailPage() {
   const { showToast } = useToast();
   const { jobId } = useParams();
 
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [exportCatalog, setExportCatalog] = useState<ExportCatalogItem[]>(FALLBACK_EXPORT_CATALOG);
@@ -131,6 +132,7 @@ export default function HistoryDetailPage() {
   const [mergedJobSummary, setMergedJobSummary] = useState<JobRecord | null>(null);
   const [results, setResults] = useState<Awaited<ReturnType<typeof getJobResults>> | null>(null);
   const [resultsFinalizing, setResultsFinalizing] = useState(false);
+  const hasLoadedDetailRef = useRef(false);
 
   const hydrateResultsWithRetry = useCallback(async () => {
     if (!jobId) return;
@@ -153,7 +155,12 @@ export default function HistoryDetailPage() {
 
   const loadDetails = useCallback(async () => {
     if (!jobId) return;
-    setLoading(true);
+    const hasExistingSummary = hasLoadedDetailRef.current;
+    if (hasExistingSummary) {
+      setRefreshing(true);
+    } else {
+      setInitialLoading(true);
+    }
     setError(null);
     try {
       const [jobDetail, catalog] = await Promise.all([getJobDetail(jobId), getJobExportCatalog(jobId)]);
@@ -162,28 +169,33 @@ export default function HistoryDetailPage() {
         ...(jobDetail.job ?? {}),
       } as JobRecord;
       setMergedJobSummary(mergedJob);
+      hasLoadedDetailRef.current = true;
       setJobMeta({
         filename: pickString(mergedJob, ['display_name', 'displayName', 'campaign_name', 'file_name', 'original_filename']),
         createdAt: pickString(mergedJob, ['created_at', 'createdAt', 'created', 'timestamp']),
       });
       setExportCatalog(normalizeExportCatalog(catalog));
-      setResults(null);
       setResultsFinalizing(true);
-      setLoading(false);
+      setInitialLoading(false);
       void hydrateResultsWithRetry().catch((resultsError) => {
         const message = (resultsError as Error).message ?? 'Unable to load job results.';
         setResultsFinalizing(false);
-        setError(message);
-        showToast({ title: message, variant: 'error' });
+        if (!(results?.row_results?.length ?? 0)) {
+          setError(message);
+          showToast({ title: message, variant: 'error' });
+        }
+      }).finally(() => {
+        setRefreshing(false);
       });
     } catch (err) {
       const message = (err as Error).message ?? 'Unable to load job details.';
       setError(message);
       setExportCatalog(FALLBACK_EXPORT_CATALOG);
-      setLoading(false);
+      setInitialLoading(false);
+      setRefreshing(false);
       showToast({ title: message, variant: 'error' });
     }
-  }, [hydrateResultsWithRetry, jobId, showToast]);
+  }, [hydrateResultsWithRetry, jobId, results, showToast]);
 
   useEffect(() => {
     void loadDetails();
@@ -435,7 +447,7 @@ export default function HistoryDetailPage() {
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
-          {loading ? (
+          {initialLoading && !mergedJobSummary ? (
             <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-6 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">Loading job details...</div>
           ) : (
             <>
@@ -463,6 +475,7 @@ export default function HistoryDetailPage() {
               </div>
             </>
           )}
+          {refreshing ? <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">Refreshing…</p> : null}
           {error ? <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">{error}</div> : null}
         </div>
 

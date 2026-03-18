@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppShell from '../components/AppShell';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
@@ -22,10 +22,12 @@ export default function DashboardPage() {
   const [range, setRange] = useState<MetricsRange | 'custom'>('today');
   const [customStart, setCustomStart] = useState('');
   const [customEnd, setCustomEnd] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [localParsePersistenceWarning, setLocalParsePersistenceWarning] = useState(false);
+  const hasLoadedMetricsRef = useRef(false);
 
   useEffect(() => {
     const state = readLocalParsePersistenceState();
@@ -33,7 +35,12 @@ export default function DashboardPage() {
   }, []);
 
   const loadMetrics = useCallback(async () => {
-    setLoading(true);
+    const hasExistingMetrics = hasLoadedMetricsRef.current;
+    if (hasExistingMetrics) {
+      setRefreshing(true);
+    } else {
+      setInitialLoading(true);
+    }
     setError(null);
     try {
       const data = await getMetricsSummary(range === 'custom' ? 'month' : range, {
@@ -41,13 +48,15 @@ export default function DashboardPage() {
         endDate: range === 'custom' ? customEnd || undefined : undefined,
       });
       setMetrics(data);
+      hasLoadedMetricsRef.current = true;
     } catch (err) {
       const info = getApiErrorInfo(err);
       const message = info?.message ?? (err as Error).message ?? 'Unable to load dashboard metrics.';
       setError(message);
       showToast({ title: message, variant: 'error' });
     } finally {
-      setLoading(false);
+      setInitialLoading(false);
+      setRefreshing(false);
     }
   }, [customEnd, customStart, range, showToast]);
 
@@ -154,12 +163,15 @@ export default function DashboardPage() {
           </div>
         ) : null}
 
-        {loading ? (
+        {initialLoading && !metrics ? (
           <EmptyState className="mt-6" title="Loading dashboard" description="Fetching summary metrics..." />
-        ) : error ? (
+        ) : error && !metrics ? (
           <EmptyState className="mt-6" title="Dashboard unavailable" description={error} />
         ) : (
           <>
+            {refreshing ? (
+              <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">Refreshing…</p>
+            ) : null}
             <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
               {kpis.map(([label, value]) => (
                 <div key={label} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">

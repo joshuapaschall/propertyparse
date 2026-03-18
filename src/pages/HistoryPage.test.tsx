@@ -1,6 +1,7 @@
-import { act, render } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
+import userEvent from '@testing-library/user-event';
 import HistoryPage from './HistoryPage';
 
 const getJobs = vi.fn();
@@ -71,4 +72,28 @@ describe('HistoryPage refresh behavior', () => {
     expect(getJobs.mock.calls.length).toBeGreaterThan(before);
     addEventListenerSpy.mockRestore();
   });
+
+  it('keeps current rows visible while refreshing after first load', async () => {
+    const user = userEvent.setup();
+    let resolveRefresh: ((value: unknown) => void) | null = null;
+    getJobs
+      .mockResolvedValueOnce([{ job_id: 'j1', status: 'DONE', display_name: 'Done Job', file_name: 'a.csv' }])
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveRefresh = resolve; }));
+
+    render(<MemoryRouter><HistoryPage /></MemoryRouter>);
+    expect(await screen.findByText('Done Job')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+
+    expect(screen.getByText('Done Job')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Refreshing…')).toBeInTheDocument());
+
+    await act(async () => {
+      resolveRefresh?.([{ job_id: 'j1', status: 'DONE', display_name: 'Done Job', file_name: 'a.csv' }]);
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText('Refreshing…')).not.toBeInTheDocument();
+  });
 });
+

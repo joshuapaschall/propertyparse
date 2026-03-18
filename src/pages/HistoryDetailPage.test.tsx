@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import HistoryDetailPage from './HistoryDetailPage';
@@ -9,6 +9,7 @@ const getJobResults = vi.fn();
 const getJobExportCatalog = vi.fn();
 const downloadJobExport = vi.fn();
 const showToast = vi.fn();
+const subscribeJobUpdates = vi.fn();
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
 vi.mock('../components/TablePagination', () => ({ default: ({ totalCount, rangeContext }: { totalCount: number; rangeContext?: string }) => <div>{`pagination: ${totalCount}${rangeContext ? ` ${rangeContext}` : ''}`}</div> }));
@@ -18,7 +19,7 @@ vi.mock('../components/exports/ExportPanel', () => ({
   ),
 }));
 vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast }) }));
-vi.mock('../lib/liveUpdates', () => ({ subscribeJobUpdates: vi.fn(() => () => undefined) }));
+vi.mock('../lib/liveUpdates', () => ({ subscribeJobUpdates: (...args: unknown[]) => subscribeJobUpdates(...args) }));
 vi.mock('../lib/api', () => ({
   getJobDetail: (...args: unknown[]) => getJobDetail(...args),
   getJobResults: (...args: unknown[]) => getJobResults(...args),
@@ -34,6 +35,7 @@ describe('HistoryDetailPage summary normalization', () => {
     showToast.mockClear();
     Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:mock'), configurable: true });
     Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
+    subscribeJobUpdates.mockImplementation(() => () => undefined);
   });
 
 
@@ -230,4 +232,6 @@ describe('HistoryDetailPage summary normalization', () => {
     expect(screen.getByText(/Only unresolved or ambiguous candidates remain in review./i)).toBeInTheDocument();
   });
 
+
 });
+
