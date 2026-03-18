@@ -113,11 +113,11 @@ describe('parseUtils filters', () => {
   it('prefers resolver metadata for explanations and approval gating while preserving legacy fallbacks', () => {
     const resolverRow = buildRow({
       status: 'UNMATCHED_NEEDS_REVIEW',
-      resolver_strategy: 'typo_unique',
-      decision_tier: 'typo',
+      resolver_strategy: 'wrapper_text_single_candidate',
+      decision_tier: 'manual_confirm',
       candidate_count_in_scope: 1,
       matched_address: '12 Main St',
-      compare_debug: 'edit distance win',
+      normalized_compare_input: '12 MAIN ST',
     });
     const ambiguousRow = buildRow({
       status: 'UNMATCHED_NEEDS_REVIEW',
@@ -126,16 +126,25 @@ describe('parseUtils filters', () => {
       matched_address: '12 Main St',
       competing_place_ids: ['p1', 'p2'],
     });
+    const blockedLowPrecisionRow = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      candidate_count_in_scope: 1,
+      matched_address: '12 Main St',
+      decision_tier: 'low_precision',
+      blocked_by: ['low_precision_match'],
+    });
     const legacyRow = buildRow({
       status: 'UNMATCHED_NEEDS_REVIEW',
       reason_code: 'LOW_PRECISION',
       verification_precision: 'county',
     });
 
-    expect(getReviewExplanation(resolverRow)).toBe('Unique in-scope typo correction');
+    expect(getReviewExplanation(resolverRow)).toBe('Wrapper text removed; one in-scope candidate found');
     expect(isSafeManualApprovalCandidate(resolverRow)).toBe(true);
-    expect(getReviewExplanation(ambiguousRow)).toBe('Still ambiguous: 2 in-scope candidates');
-    expect(getManualApprovalBlocker(ambiguousRow)).toBe('Still ambiguous: 2 in-scope candidates');
+    expect(getReviewExplanation(ambiguousRow)).toBe('Multiple in-scope candidates remain');
+    expect(getManualApprovalBlocker(ambiguousRow)).toBe('Multiple in-scope candidates remain');
+    expect(getReviewExplanation(blockedLowPrecisionRow)).toBe('County-only candidate after rescue');
+    expect(getManualApprovalBlocker(blockedLowPrecisionRow)).toBe('County-only candidate after rescue');
     expect(getReviewExplanation(legacyRow)).toBe('Candidate was only verified at broad area precision');
     expect(getReviewDebugHint(legacyRow)).toBe('Candidate is county-level only');
   });
@@ -143,6 +152,8 @@ describe('parseUtils filters', () => {
   it('shows subtle badge and resolver details for single-candidate reviews that still need confirmation', () => {
     const row = buildRow({
       status: 'UNMATCHED_NEEDS_REVIEW',
+      detected_address: '123 Main St',
+      normalized_compare_input: '123 MAIN ST',
       candidate_count_in_scope: 1,
       resolver_strategy: 'route_only_fallback',
       verification_precision: 'route',
@@ -156,10 +167,24 @@ describe('parseUtils filters', () => {
     expect(getResolverDetails(row)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ label: 'Resolver', value: 'route_only_fallback' }),
+        expect.objectContaining({ label: 'Original', value: '123 Main St' }),
+        expect.objectContaining({ label: 'Compared as', value: '123 MAIN ST' }),
         expect.objectContaining({ label: 'In-scope candidates', value: '1' }),
         expect.objectContaining({ label: 'Blocked by', value: 'missing street number' }),
       ]),
     );
+  });
+
+  it('keeps legacy rows backwards-compatible without resolver metadata', () => {
+    const row = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      detected_address: '789 Oak Ave',
+      reason_code: 'ROUTE_ALIAS',
+    });
+
+    expect(getReviewExplanation(row)).toBe('Route alias still needs confirmation');
+    expect(getResolverDetails(row)).toEqual([{ label: 'Original', value: '789 Oak Ave' }]);
+    expect(getManualApprovalBlocker(row)).toBe('No street-level candidate was resolved');
   });
 
   it('builds local csv exports and detects header-only csv', async () => {

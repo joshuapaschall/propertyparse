@@ -41,6 +41,7 @@ export type RowResult = {
   google_display_address?: string;
   google_formatted_address?: string;
   address_raw?: string;
+  normalized_compare_input?: string;
   place_id?: string;
   components?: unknown;
   canonical_id?: string;

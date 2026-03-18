@@ -7,6 +7,7 @@ import { downloadJobExport, getJobDetail, getJobExportCatalog, getJobResults, Jo
 import { groupRows, GroupedRow } from '../lib/groupRows';
 import {
   getReasonMetadata,
+  getCompareInputDisplay,
   isNeedsReviewRow,
   isOutOfScopeRow,
   isSkippedRow,
@@ -100,7 +101,6 @@ const normalizeCanonicalAddress = (row: CanonicalAddress) => {
 };
 
 const rowDisplayId = (row: RowResult) => row.source_row_id || row.source_row_index || '--';
-const getInputAddress = (row: RowResult) => row.address_raw || row.detected_address || '--';
 const getMatchedAddress = (row: RowResult) => getDisplaySafeMatchedAddress(row) || '—';
 const getMatchedCounty = (row: RowResult) => {
   const components = (row.components ?? {}) as Record<string, unknown>;
@@ -111,6 +111,21 @@ const getMatchedCity = (row: RowResult) => {
   return row.formatted_address?.split(',')?.[1]?.trim() || row.detected_address?.split(',')?.[1]?.trim() || (components.city as string) || '—';
 };
 const getStatusLabel = (row: RowResult) => row.status || '--';
+
+const renderOriginalAddressCell = (row: RowResult) => {
+  const compareInput = getCompareInputDisplay(row);
+  return (
+    <div className="space-y-1">
+      <div className="font-medium text-slate-700 dark:text-slate-200">{compareInput.original || '--'}</div>
+      {compareInput.showNormalized ? (
+        <div className="text-xs text-slate-500 dark:text-slate-400">
+          <span className="font-semibold text-slate-600 dark:text-slate-300">Compared as:</span>{' '}
+          {compareInput.normalized}
+        </div>
+      ) : null}
+    </div>
+  );
+};
 
 export default function HistoryDetailPage() {
   const { showToast } = useToast();
@@ -368,7 +383,7 @@ export default function HistoryDetailPage() {
                       <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{group.count} rows affected</p>
                     ) : null}
                   </td>
-                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row)}</td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{renderOriginalAddressCell(row)}</td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedAddress(row)}</td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row)}</td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCity(row)}</td>

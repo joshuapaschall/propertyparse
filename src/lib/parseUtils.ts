@@ -163,6 +163,7 @@ const stringifyUnknown = (value: unknown) => {
 };
 
 const getCompareDebugText = (row: RowResult) => stringifyUnknown(row.compare_debug);
+const getNormalizedCompareInput = (row: RowResult) => asTrimmedString(row.normalized_compare_input);
 const getCandidateCount = (row: RowResult) => asNumber(row.candidate_count_in_scope);
 const getCompetingPlaceIds = (row: RowResult) => asStringArray(row.competing_place_ids);
 const getConvergedPlaceIds = (row: RowResult) => asStringArray(row.converged_place_ids);
@@ -171,6 +172,37 @@ const getResolverStrategy = (row: RowResult) => asTrimmedString(row.resolver_str
 const getDecisionTier = (row: RowResult) => asTrimmedString(row.decision_tier).toLowerCase();
 const getAmbiguityReason = (row: RowResult) => asTrimmedString(row.ambiguity_reason);
 const getReasonCode = (row: RowResult) => normalizeValue(row.reason_code);
+
+const hasResolverMetadata = (row: RowResult) =>
+  Boolean(
+    getNormalizedCompareInput(row) ||
+      getDecisionTier(row) ||
+      getResolverStrategy(row) ||
+      getCandidateCount(row) !== null ||
+      getConvergedPlaceIds(row).length ||
+      getCompetingPlaceIds(row).length ||
+      getAmbiguityReason(row) ||
+      getBlockedByList(row).length ||
+      row.compare_debug !== undefined,
+  );
+
+const formatBlockedByReason = (value: string) => {
+  const normalized = value.trim().toLowerCase();
+  switch (normalized) {
+    case 'house_number_mismatch':
+      return 'House number conflict';
+    case 'multiple_viable_candidates':
+      return 'Multiple in-scope candidates remain';
+    case 'low_precision_match':
+      return 'County-only candidate after rescue';
+    case 'house_number_not_verified':
+    case 'missing_street_number':
+    case 'street_number_not_verified':
+      return 'Street number still not verified';
+    default:
+      return humanizeReasonCode(value.trim().toUpperCase());
+  }
+};
 
 const inferCompareHint = (row: RowResult) => {
   const debug = getCompareDebugText(row);
@@ -216,6 +248,47 @@ export const getReviewExplanation = (row: RowResult) => {
   const ambiguity = getAmbiguityReason(row);
   const reason = getReasonCode(row);
   const compareHint = inferCompareHint(row).toLowerCase();
+  const blocked = getBlockedByList(row);
+
+  if (hasResolverMetadata(row)) {
+    if (blocked.some((item) => item.toLowerCase() === 'house_number_mismatch') || hasHouseNumberConflict(row)) {
+      return reason.includes('NOT_VERIFIED') || reason.includes('MISSING_STREET_NUMBER')
+        ? 'Street number still not verified'
+        : 'House number conflict';
+    }
+    if (
+      blocked.some((item) =>
+        ['house_number_not_verified', 'missing_street_number', 'street_number_not_verified'].includes(item.toLowerCase()),
+      )
+    ) {
+      return 'Street number still not verified';
+    }
+    if (strategy.includes('wrapper') && strategy.includes('single') && candidateCount === 1) {
+      return 'Wrapper text removed; one in-scope candidate found';
+    }
+    if (strategy.includes('wrapper')) {
+      return 'Wrapper text removed';
+    }
+    if (strategy.includes('trailing_house') || strategy.includes('house_number_recovered')) {
+      return 'Trailing house number recovered';
+    }
+    if (candidateCount === 1) {
+      if (strategy.includes('county_only') || tier === 'low_precision') return 'County-only candidate after rescue';
+      return 'One in-scope candidate found';
+    }
+    if (candidateCount !== null && candidateCount > 1) {
+      return 'Multiple in-scope candidates remain';
+    }
+    if (blocked.some((item) => item.toLowerCase() === 'multiple_viable_candidates')) {
+      return 'Multiple in-scope candidates remain';
+    }
+    if (tier === 'low_precision' || blocked.some((item) => item.toLowerCase() === 'low_precision_match')) {
+      return 'County-only candidate after rescue';
+    }
+    if (ambiguity) {
+      return ambiguity;
+    }
+  }
 
   if (strategy.includes('typo') || tier.includes('typo') || compareHint.includes('typo correction')) {
     return 'Unique in-scope typo correction';
@@ -413,7 +486,7 @@ export const getReviewDebugHint = (row: RowResult) => {
   if (compareHint) return compareHint;
   if (blocked.some((item) => item.toLowerCase().includes('directional'))) return 'Blocked by directional conflict';
   if (blocked.some((item) => item.toLowerCase().includes('core') || item.toLowerCase().includes('token'))) return 'Blocked by core token drop';
-  if (candidateCount !== null && candidateCount > 1) return `${candidateCount} in-scope candidates remain`; 
+  if (candidateCount !== null && candidateCount > 1) return `${candidateCount} in-scope candidates remain`;
   if (precision === 'county' || precision === 'county_only') return 'Candidate is county-level only';
   if (precision === 'route' || precision === 'route_only') return 'Candidate is route-level only';
   if (precision === 'locality' || precision === 'locality_only') return 'Candidate is locality-level only';
@@ -431,13 +504,24 @@ export const isSafeManualApprovalCandidate = (row: RowResult) => {
   const reason = getReasonCode(row);
   const ambiguity = getAmbiguityReason(row);
   const matchedAddress = getDisplaySafeMatchedAddress(row);
+  const tier = getDecisionTier(row);
 
   if (!matchedAddress) return false;
+  if (!hasResolverMetadata(row)) return false;
   if (candidateCount !== null && candidateCount !== 1) return false;
+  if (candidateCount === null) return false;
   if (competing.length > 1) return false;
+  if (
+    blocked.some((item) =>
+      ['house_number_mismatch', 'multiple_viable_candidates', 'low_precision_match'].includes(item.toLowerCase()),
+    )
+  ) {
+    return false;
+  }
   if (blocked.length > 0) return false;
   if (hasHouseNumberConflict(row)) return false;
   if (ambiguity) return false;
+  if (['low_precision', 'house_conflict'].includes(tier)) return false;
   if (['route', 'route_only', 'county', 'county_only', 'locality', 'locality_only', 'zip', 'postal_code'].includes(precision)) return false;
   if (reason.includes('LOW_PRECISION') || reason.includes('MISSING_STREET_NUMBER') || reason.includes('STREET_NUMBER_NOT_VERIFIED')) return false;
   return true;
@@ -453,20 +537,40 @@ export const getManualApprovalBlocker = (row: RowResult) => {
   const precision = getPrecision(row);
   const ambiguity = getAmbiguityReason(row);
   const competing = getCompetingPlaceIds(row);
+  const blocked = getBlockedByList(row);
+  const tier = getDecisionTier(row);
 
   if (!getDisplaySafeMatchedAddress(row)) return 'No street-level candidate was resolved';
-  if (candidateCount !== null && candidateCount > 1) return `Still ambiguous: ${candidateCount} in-scope candidates`;
+  if (!hasResolverMetadata(row)) return 'Approval requires backend resolver confirmation';
+  if (candidateCount === null) return 'Approval requires a confirmed in-scope candidate count';
+  if (candidateCount > 1) return 'Multiple in-scope candidates remain';
   if (competing.length > 1) return 'Multiple competing candidates remain';
+  if (blocked.length) return formatBlockedByReason(blocked[0]);
   if (hasHouseNumberConflict(row)) return getReviewExplanation(row);
   if (ambiguity) return ambiguity;
+  if (tier === 'low_precision') return 'County-only candidate after rescue';
+  if (tier === 'house_conflict') return 'House number conflict';
   if (['route', 'route_only'].includes(precision)) return 'Route-only candidate cannot be approved';
   if (['county', 'county_only'].includes(precision)) return 'County-only candidate cannot be approved';
   if (['locality', 'locality_only'].includes(precision)) return 'Locality-only candidate cannot be approved';
   return getReviewExplanation(row);
 };
 
+export const getCompareInputDisplay = (row: RowResult) => {
+  const original = asTrimmedString(row.address_raw) || asTrimmedString(row.detected_address);
+  const normalized = getNormalizedCompareInput(row);
+  return {
+    original,
+    normalized,
+    showNormalized: Boolean(normalized && normalized !== original),
+  };
+};
+
 export const getResolverDetails = (row: RowResult) => {
   const details: Array<{ label: string; value: string }> = [];
+  const compareInput = getCompareInputDisplay(row);
+  if (compareInput.original) details.push({ label: 'Original', value: compareInput.original });
+  if (compareInput.showNormalized) details.push({ label: 'Compared as', value: compareInput.normalized });
   if (asTrimmedString(row.resolver_strategy)) details.push({ label: 'Resolver', value: asTrimmedString(row.resolver_strategy) });
   if (asTrimmedString(row.decision_tier)) details.push({ label: 'Decision tier', value: asTrimmedString(row.decision_tier) });
   if (getCandidateCount(row) !== null) details.push({ label: 'In-scope candidates', value: String(getCandidateCount(row)) });
