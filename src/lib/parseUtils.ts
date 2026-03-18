@@ -369,6 +369,26 @@ export const stringifyPreview = (value: unknown, maxLength = 180) => {
   return `${text.slice(0, maxLength)}…`;
 };
 
+export const matchesSearch = (row: RowResult, query: string) => {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return true;
+  const haystack = [
+    row.detected_address,
+    row.formatted_address,
+    row.reason_code,
+    row.reason_detail,
+    row.status,
+    row.source_row_id,
+    row.canonical_id,
+    row.place_id,
+    row.raw_row ? JSON.stringify(row.raw_row) : '',
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  return haystack.includes(normalized);
+};
+
 export type ReviewReasonFilter = 'all' | 'route_alias' | 'house_number' | 'low_precision' | 'county_rescue' | 'missing_street_number';
 
 export const getReviewReasonBucket = (row: RowResult) => {
