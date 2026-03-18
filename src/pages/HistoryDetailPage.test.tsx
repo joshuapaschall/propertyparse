@@ -190,4 +190,44 @@ describe('HistoryDetailPage summary normalization', () => {
     expect(screen.getByText('$7.50')).toBeInTheDocument();
     expect(screen.queryByText('$999.00')).not.toBeInTheDocument();
   });
+
+  it('renders resolver metadata and one-candidate badge in history review tables', async () => {
+    const user = userEvent.setup();
+    getJobDetail.mockResolvedValue({
+      job: { job_id: 'job-1', spend_usd: 2.5 },
+      summary: { rows_received: 1, valid_total: 0, valid_unique: 0, needs_review: 1, skipped: 0, out_of_scope: 0, duplicates: 0 },
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 1, valid_total: 0, valid_unique: 0, needs_review: 1, skipped: 0, out_of_scope: 0, duplicates: 0 },
+      row_results: [
+        {
+          source_row_id: 'r1',
+          source_row_index: 1,
+          status: 'UNMATCHED_NEEDS_REVIEW',
+          detected_address: '123 Main',
+          matched_address: '123 Main St',
+          resolver_strategy: 'suffix_unique',
+          decision_tier: 'suffix',
+          candidate_count_in_scope: 1,
+          ambiguity_reason: 'Suffix normalization required manual confirmation',
+        },
+      ],
+      canonical_addresses: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/history/job-1']}>
+        <Routes>
+          <Route path="/history/:jobId" element={<HistoryDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Needs Review (1 issues · 1 rows)' }));
+    expect(screen.getByText('One candidate found')).toBeInTheDocument();
+    expect(screen.getByText('Resolver details')).toBeInTheDocument();
+    expect(screen.getByText(/suffix_unique/i)).toBeInTheDocument();
+    expect(screen.getByText(/Only unresolved or ambiguous candidates remain in review./i)).toBeInTheDocument();
+  });
+
 });

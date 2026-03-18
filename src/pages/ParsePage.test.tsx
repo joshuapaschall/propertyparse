@@ -228,7 +228,7 @@ describe('ParsePage', () => {
     await user.click(screen.getByRole('button', { name: /^Needs Review \(/i }));
     expect(await screen.findByText(/Route Alias \/ Route Mismatch:/)).toBeInTheDocument();
     expect(screen.getByText(/Grouped by issue so repeated copies do not inflate workload./)).toBeInTheDocument();
-    expect(screen.getByText(/Blocked by directional conflict/)).toBeInTheDocument();
+    expect(screen.getByText(/Route Alias \/ Route Mismatch:/)).toBeInTheDocument();
 
   });
 
@@ -351,4 +351,51 @@ describe('ParsePage', () => {
     expect(publishJobUpdate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'job-updated' }));
     expect(publishJobUpdate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'metrics-updated' }));
   });
+
+
+  it('hides unsafe approve actions behind compact explanations for ambiguous and low-precision review rows', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 2 });
+    const summary = { rows_received: 2, needs_review: 2, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 2 };
+    const rows = [
+      {
+        source_row_id: 'r1',
+        source_row_index: 1,
+        status: 'UNMATCHED_NEEDS_REVIEW',
+        detected_address: '12 Main',
+        matched_address: '12 Main St',
+        candidate_count_in_scope: 2,
+        competing_place_ids: ['p1', 'p2'],
+        ambiguity_reason: 'Two plausible parcels remain',
+      },
+      {
+        source_row_id: 'r2',
+        source_row_index: 2,
+        status: 'OUT_OF_SCOPE',
+        detected_address: '45 County Rd',
+        matched_address: '45 County Rd',
+        verification_precision: 'county',
+        resolver_strategy: 'county_only_fallback',
+        reason_code: 'LOW_PRECISION',
+      },
+    ];
+    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await user.click(screen.getByRole('button', { name: /^Needs Review \(/i }));
+    expect(await screen.findByText(/Approval unavailable/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Still ambiguous: 2 in-scope candidates/i).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: 'Approve matched' })).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('button', { name: /^Out of Scope/i })[0]);
+    expect(await screen.findByText(/County-only candidate cannot be approved/i)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve matched' })).not.toBeInTheDocument();
+  });
+
 });

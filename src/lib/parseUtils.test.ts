@@ -1,6 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import type { RowResult } from '../types/parse';
-import { buildLocalCsvForExport, computeParseSummaryFromRowResults, getDisplaySafeMatchedAddress, getReviewDebugHint, getReviewReasonBucket, isHeaderOnlyCsv, isNeedsReviewRow, isOutOfScopeRow, isSkippedRow, isValidRow } from './parseUtils';
+import {
+  buildLocalCsvForExport,
+  computeParseSummaryFromRowResults,
+  getDisplaySafeMatchedAddress,
+  getManualApprovalBlocker,
+  getResolverDetails,
+  getReviewDebugHint,
+  getReviewExplanation,
+  getReviewReasonBucket,
+  isHeaderOnlyCsv,
+  isNeedsReviewRow,
+  isOutOfScopeRow,
+  isSafeManualApprovalCandidate,
+  isSkippedRow,
+  isValidRow,
+  shouldShowOneCandidateBadge,
+} from './parseUtils';
 
 const buildRow = (overrides: Partial<RowResult>): RowResult => ({
   source_row_index: 1,
@@ -28,12 +44,10 @@ describe('parseUtils filters', () => {
     expect(isSkippedRow(buildRow({ status: 'VALID' }))).toBe(false);
   });
 
-
   it('keeps skipped non-address rows out of needs review', () => {
     expect(isNeedsReviewRow(buildRow({ status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'NON_ADDRESS_TEXT' }))).toBe(false);
     expect(isNeedsReviewRow(buildRow({ status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'PO_BOX' }))).toBe(false);
   });
-
 
   it('flags matched rows as valid', () => {
     expect(isValidRow(buildRow({ status: 'MATCHED' }))).toBe(true);
@@ -42,7 +56,6 @@ describe('parseUtils filters', () => {
   it('treats VALID_OVERRIDE rows as valid', () => {
     expect(isValidRow(buildRow({ status: 'VALID_OVERRIDE' }))).toBe(true);
   });
-
 
   it('treats duplicate rows as valid', () => {
     expect(isValidRow(buildRow({ status: 'DUPLICATE' }))).toBe(true);
@@ -66,8 +79,6 @@ describe('parseUtils filters', () => {
     expect(summary.attention_total).toBe(1);
   });
 
-
-
   it('prefers google display fields over matched_address for display-safe matched address text', () => {
     const row = buildRow({
       matched_address: '4785 Georgia, 5, Douglasville, Georgia 30135',
@@ -86,12 +97,10 @@ describe('parseUtils filters', () => {
     expect(isOutOfScopeRow(buildRow({ status: 'VALID' }))).toBe(false);
   });
 
-
   it('treats out-of-scope marker rows as out of scope', () => {
     expect(isOutOfScopeRow(buildRow({ status: 'OUT_OF_SCOPE_MARKER' }))).toBe(true);
     expect(isOutOfScopeRow(buildRow({ reason_code: 'OUT_OF_SCOPE_MARKER' }))).toBe(true);
   });
-
 
   it('maps review reason buckets and debug hints', () => {
     expect(getReviewReasonBucket(buildRow({ reason_code: 'ROUTE_ALIAS' }))).toBe('route_alias');
@@ -99,6 +108,58 @@ describe('parseUtils filters', () => {
     expect(getReviewReasonBucket(buildRow({ reason_code: 'LOW_PRECISION' }))).toBe('low_precision');
     expect(getReviewDebugHint(buildRow({ blocked_by: 'directional conflict' }))).toBe('Blocked by directional conflict');
     expect(getReviewDebugHint(buildRow({ verification_precision: 'county' }))).toBe('Candidate is county-level only');
+  });
+
+  it('prefers resolver metadata for explanations and approval gating while preserving legacy fallbacks', () => {
+    const resolverRow = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      resolver_strategy: 'typo_unique',
+      decision_tier: 'typo',
+      candidate_count_in_scope: 1,
+      matched_address: '12 Main St',
+      compare_debug: 'edit distance win',
+    });
+    const ambiguousRow = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      candidate_count_in_scope: 2,
+      ambiguity_reason: 'Two similar street names remain',
+      matched_address: '12 Main St',
+      competing_place_ids: ['p1', 'p2'],
+    });
+    const legacyRow = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      reason_code: 'LOW_PRECISION',
+      verification_precision: 'county',
+    });
+
+    expect(getReviewExplanation(resolverRow)).toBe('Unique in-scope typo correction');
+    expect(isSafeManualApprovalCandidate(resolverRow)).toBe(true);
+    expect(getReviewExplanation(ambiguousRow)).toBe('Still ambiguous: 2 in-scope candidates');
+    expect(getManualApprovalBlocker(ambiguousRow)).toBe('Still ambiguous: 2 in-scope candidates');
+    expect(getReviewExplanation(legacyRow)).toBe('Candidate was only verified at broad area precision');
+    expect(getReviewDebugHint(legacyRow)).toBe('Candidate is county-level only');
+  });
+
+  it('shows subtle badge and resolver details for single-candidate reviews that still need confirmation', () => {
+    const row = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      candidate_count_in_scope: 1,
+      resolver_strategy: 'route_only_fallback',
+      verification_precision: 'route',
+      ambiguity_reason: 'Second-pass rescue failed',
+      compare_debug: { candidate: 'route' },
+      blocked_by: ['missing street number'],
+    });
+
+    expect(shouldShowOneCandidateBadge(row)).toBe(true);
+    expect(isSafeManualApprovalCandidate(row)).toBe(false);
+    expect(getResolverDetails(row)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ label: 'Resolver', value: 'route_only_fallback' }),
+        expect.objectContaining({ label: 'In-scope candidates', value: '1' }),
+        expect.objectContaining({ label: 'Blocked by', value: 'missing street number' }),
+      ]),
+    );
   });
 
   it('builds local csv exports and detects header-only csv', async () => {
@@ -110,5 +171,4 @@ describe('parseUtils filters', () => {
     expect(isHeaderOnlyCsv('a,b\n')).toBe(true);
     expect(isHeaderOnlyCsv('a,b\n1,2')).toBe(false);
   });
-
 });
