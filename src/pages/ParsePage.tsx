@@ -25,6 +25,7 @@ import {
   isValidRow,
   stringifyPreview,
   getDisplaySafeMatchedAddress,
+  getCompareInputDisplay,
   getManualApprovalBlocker,
   getResolverDetails,
   getReviewDebugHint,
@@ -1804,6 +1805,23 @@ How to fix: ${fixHint}` : ''}`;
     );
   };
 
+  const renderOriginalAddressCell = (row: RowResult) => {
+    const compareInput = getCompareInputDisplay(row);
+    return (
+      <div className="space-y-1">
+        <div className="font-medium text-slate-700 dark:text-slate-200">
+          {compareInput.original || '--'}
+        </div>
+        {compareInput.showNormalized ? (
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            <span className="font-semibold text-slate-600 dark:text-slate-300">Compared as:</span>{' '}
+            {compareInput.normalized}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
+
 
   const renderApprovalAction = (row: RowResult, outOfScopeOverride: boolean) => {
     const approvalBlocker = getManualApprovalBlocker(row);
@@ -3288,9 +3306,10 @@ How to fix: ${fixHint}` : ''}`;
   };
 
   const reviewReason = reviewRow ? getReasonMetadata(reviewRow) : null;
+  const reviewCompareInput = reviewRow ? getCompareInputDisplay(reviewRow) : { original: '', normalized: '', showNormalized: false };
   const reviewRecordId = reviewRow ? getRecordId(reviewRow) : null;
   const reviewStatusLabel = reviewRow ? getStatusLabel(reviewRow) : '';
-  const reviewDetectedAddress = reviewRow?.detected_address ?? reviewRow?.formatted_address ?? '';
+  const reviewDetectedAddress = reviewCompareInput.original || reviewRow?.formatted_address || '';
   const reviewVerifiedAddress = reviewRow
     ? getMatchedAddress(reviewRow)
     : '';
@@ -4094,7 +4113,7 @@ How to fix: ${fixHint}` : ''}`;
                                         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{group.count} rows affected</p>
                                       ) : null}
                                     </td>
-                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row) || '--'}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{renderOriginalAddressCell(row)}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedAddress(row) || '--'}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
@@ -4315,7 +4334,7 @@ How to fix: ${fixHint}` : ''}`;
                                         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{group.count} rows affected</p>
                                       ) : null}
                                     </td>
-                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getInputAddress(row) || '--'}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{renderOriginalAddressCell(row)}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words">{getMatchedAddress(row) || '—'}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row) || '—'}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCity(row) || '—'}</td>
@@ -4512,6 +4531,16 @@ How to fix: ${fixHint}` : ''}`;
                     Copy
                   </button>
                 </div>
+                {reviewCompareInput.showNormalized ? (
+                  <>
+                    <p className="mt-3 text-xs uppercase text-slate-500 dark:text-slate-400">
+                      Compared as
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
+                      {reviewCompareInput.normalized}
+                    </p>
+                  </>
+                ) : null}
                 <p className="mt-3 text-xs uppercase text-slate-500 dark:text-slate-400">
                   Verified address
                 </p>

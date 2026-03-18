@@ -232,6 +232,54 @@ describe('HistoryDetailPage summary normalization', () => {
     expect(screen.getByText(/Only unresolved or ambiguous candidates remain in review./i)).toBeInTheDocument();
   });
 
+  it('shows original vs normalized compare input and preserves legacy review rows', async () => {
+    const user = userEvent.setup();
+    getJobDetail.mockResolvedValue({
+      job: { job_id: 'job-1', spend_usd: 2.5 },
+      summary: { rows_received: 2, valid_total: 0, valid_unique: 0, needs_review: 2, skipped: 0, out_of_scope: 0, duplicates: 0 },
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 2, valid_total: 0, valid_unique: 0, needs_review: 2, skipped: 0, out_of_scope: 0, duplicates: 0 },
+      row_results: [
+        {
+          source_row_id: 'r1',
+          source_row_index: 1,
+          status: 'UNMATCHED_NEEDS_REVIEW',
+          detected_address: 'R/W @ 3841 MONTICELLO ST',
+          normalized_compare_input: '3841 MONTICELLO ST',
+          matched_address: '3841 Monticello St',
+          resolver_strategy: 'wrapper_text_single_candidate',
+          ambiguity_reason: 'Wrapper text removed; one in-scope candidate found',
+          candidate_count_in_scope: 1,
+        },
+        {
+          source_row_id: 'r2',
+          source_row_index: 2,
+          status: 'UNMATCHED_NEEDS_REVIEW',
+          detected_address: 'Legacy Review Row',
+          reason_code: 'LOW_PRECISION',
+        },
+      ],
+      canonical_addresses: [],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/history/job-1']}>
+        <Routes>
+          <Route path="/history/:jobId" element={<HistoryDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await user.click(await screen.findByRole('button', { name: 'Needs Review (2 issues · 2 rows)' }));
+    expect(screen.getAllByText('R/W @ 3841 MONTICELLO ST').length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText((_, element) => element?.textContent?.includes('Compared as:') ?? false).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getAllByText('3841 MONTICELLO ST').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Wrapper text removed; one in-scope candidate found/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Legacy Review Row').length).toBeGreaterThan(0);
+  });
+
 
 });
-

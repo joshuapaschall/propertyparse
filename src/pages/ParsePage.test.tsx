@@ -253,6 +253,53 @@ describe('ParsePage', () => {
     expect(await screen.findByText(/Saved export rows are unavailable for this run/i)).toBeInTheDocument();
   });
 
+  it('shows normalized compare input, resolver details, badge, and approval blocker in needs review rows', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 2 });
+    const summary = { rows_received: 2, needs_review: 2, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 2 };
+    const rows = [
+      {
+        source_row_id: 'r1',
+        source_row_index: 1,
+        status: 'UNMATCHED_NEEDS_REVIEW',
+        detected_address: 'R/W @ 3841 MONTICELLO ST',
+        normalized_compare_input: '3841 MONTICELLO ST',
+        matched_address: '3841 Monticello St, Austin, TX 78721',
+        resolver_strategy: 'wrapper_text_single_candidate',
+        ambiguity_reason: 'Wrapper text removed; one in-scope candidate found',
+        candidate_count_in_scope: 1,
+        blocked_by: ['house_number_mismatch'],
+      },
+      {
+        source_row_id: 'r2',
+        source_row_index: 2,
+        status: 'UNMATCHED_NEEDS_REVIEW',
+        detected_address: '789 Legacy Ln',
+        reason_code: 'LOW_PRECISION',
+      },
+    ];
+    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+    await user.click(await screen.findByRole('button', { name: /Needs Review \(2 issues · 2 rows\)/i }));
+
+    expect(screen.getAllByText('R/W @ 3841 MONTICELLO ST').length).toBeGreaterThan(0);
+    expect(
+      screen.getAllByText((_, element) => element?.textContent?.includes('3841 MONTICELLO ST') ?? false).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText('One candidate found')).toBeInTheDocument();
+    expect(screen.getAllByText('Resolver details').length).toBeGreaterThan(0);
+    expect(screen.getByText(/wrapper_text_single_candidate/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/Approval unavailable/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('House number conflict').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('789 Legacy Ln').length).toBeGreaterThan(0);
+  });
+
   it('uses local export fallback when backend export is header-only', async () => {
     const user = userEvent.setup();
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
@@ -456,11 +503,11 @@ describe('ParsePage', () => {
 
     await user.click(screen.getByRole('button', { name: /^Needs Review \(/i }));
     expect(await screen.findByText(/Approval unavailable/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Still ambiguous: 2 in-scope candidates/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Multiple in-scope candidates remain/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Approve matched' })).not.toBeInTheDocument();
 
     await user.click(screen.getAllByRole('button', { name: /^Out of Scope/i })[0]);
-    expect(await screen.findByText(/County-only candidate cannot be approved/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Approval requires a confirmed in-scope candidate count/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve matched' })).not.toBeInTheDocument();
   });
 
