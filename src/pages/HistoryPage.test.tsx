@@ -5,14 +5,18 @@ import userEvent from '@testing-library/user-event';
 import HistoryPage from './HistoryPage';
 
 const getJobs = vi.fn();
+const updateJobMetadata = vi.fn();
 const readLocalParsePersistenceState = vi.fn();
 const subscribeJobUpdates = vi.fn();
+const authState = { role: 'admin' };
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
+vi.mock('../App', () => ({ useAuthControls: () => authState }));
 const showToast = vi.fn();
 vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast }) }));
 vi.mock('../lib/api', () => ({
   getJobs: (...args: unknown[]) => getJobs(...args),
+  updateJobMetadata: (...args: unknown[]) => updateJobMetadata(...args),
   getJobExportCatalog: vi.fn(async () => []),
   downloadJobExport: vi.fn(async () => ({ blob: new Blob(['x']), filename: 'x.csv' })),
 }));
@@ -26,8 +30,10 @@ vi.mock('../lib/liveUpdates', () => ({
 describe('HistoryPage refresh behavior', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.role = 'admin';
     readLocalParsePersistenceState.mockReturnValue(null);
     getJobs.mockResolvedValue([{ job_id: 'j1', status: 'DONE', display_name: 'Done Job', file_name: 'a.csv' }]);
+    updateJobMetadata.mockResolvedValue({});
     subscribeJobUpdates.mockImplementation(() => () => undefined);
   });
 
@@ -95,5 +101,18 @@ describe('HistoryPage refresh behavior', () => {
 
     expect(screen.queryByText('Refreshing…')).not.toBeInTheDocument();
   });
-});
 
+  it('edits campaign name from history', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><HistoryPage /></MemoryRouter>);
+    expect(await screen.findByText('Done Job')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Edit name' }));
+    await user.clear(screen.getByLabelText('Campaign name'));
+    await user.type(screen.getByLabelText('Campaign name'), 'Spring Buyers');
+    await user.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(updateJobMetadata).toHaveBeenCalledWith('j1', { campaignName: 'Spring Buyers' }));
+    expect(screen.getByText('Spring Buyers')).toBeInTheDocument();
+  });
+});

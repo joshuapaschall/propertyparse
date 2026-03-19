@@ -54,13 +54,13 @@ const REASON_METADATA: Record<string, ReasonMetadata> = {
     fix_hint: 'Confirm the street number and include unit, building, or suffix details.',
   },
   LOW_PRECISION_MATCH: {
-    label: 'Match too broad (ZIP/route/county-only)',
-    description: 'We could only match the address at a broad ZIP, route, or county level.',
+    label: 'We could not confirm a full street address',
+    description: 'We could only confirm this address at a broad area level.',
     fix_hint: 'Provide the full street address for a precise match.',
   },
   LOW_PRECISION: {
-    label: 'Match too broad (ZIP/route/county-only)',
-    description: 'We could only match the address at a broad ZIP, route, or county level.',
+    label: 'We could not confirm a full street address',
+    description: 'We could only confirm this address at a broad area level.',
     fix_hint: 'Provide the full street address for a precise match.',
   },
   OUT_OF_SCOPE: {
@@ -105,19 +105,54 @@ const REASON_METADATA: Record<string, ReasonMetadata> = {
     fix_hint: 'Add the city or select one before retrying.',
   },
   OUT_OF_SCOPE_STATE: {
-    label: 'Out of scope for selected state',
-    description: 'The detected state does not match the selected state.',
+    label: 'Outside your selected state',
+    description: 'This record appears outside your selected area.',
     fix_hint: 'Update the state filter or rerun the job for the detected state.',
   },
   OUT_OF_SCOPE_COUNTY: {
-    label: 'Out of scope for selected county',
-    description: 'The detected county does not match the selected county.',
+    label: 'Outside your selected county',
+    description: 'This record appears outside your selected area.',
     fix_hint: 'Update the county filter or rerun the job for the detected county.',
   },
   OUT_OF_SCOPE_CITY: {
     label: 'Out of scope for selected city',
     description: 'The detected city does not match the selected city.',
     fix_hint: 'Update the city filter or rerun the job for the detected city.',
+  },
+};
+
+const PUBLIC_REASON_METADATA: Record<string, ReasonMetadata> = {
+  ROUTE_MISMATCH: {
+    label: 'Street details need confirmation',
+    description: 'We found part of the address, but the street details still need confirmation.',
+    fix_hint: 'Confirm the street name and number, then retry.',
+  },
+  COUNTY_MISMATCH: {
+    label: 'Outside your selected county',
+    description: 'This record appears outside your selected area.',
+    fix_hint: 'Review the county selection or move this record to the correct area.',
+  },
+  STATE_MISMATCH: {
+    label: 'Outside your selected state',
+    description: 'This record appears outside your selected area.',
+    fix_hint: 'Review the state selection or move this record to the correct area.',
+  },
+  LOW_PRECISION_MATCH: REASON_METADATA.LOW_PRECISION_MATCH,
+  LOW_PRECISION: REASON_METADATA.LOW_PRECISION,
+  GOOGLE_ERROR: {
+    label: 'We could not verify this address automatically',
+    description: 'This address could not be verified automatically.',
+    fix_hint: 'Confirm the address details and retry.',
+  },
+  OUT_OF_COUNTY: {
+    label: 'This record appears outside your selected area',
+    description: 'This record appears outside your selected area.',
+    fix_hint: 'Review the selected location or move this record to the correct area.',
+  },
+  OUT_OF_STATE: {
+    label: 'This record appears outside your selected area',
+    description: 'This record appears outside your selected area.',
+    fix_hint: 'Review the selected location or move this record to the correct area.',
   },
 };
 
@@ -320,10 +355,10 @@ export const getReviewExplanation = (row: RowResult) => {
     return 'Street number still not verified';
   }
   if (reason.includes('LOW_PRECISION')) {
-    return 'Candidate was only verified at broad area precision';
+    return 'We could not confirm a full street address';
   }
   if (reason.includes('ROUTE') || reason.includes('ALIAS')) {
-    return candidateCount === 1 ? 'Unique in-scope route alias candidate' : 'Route alias still needs confirmation';
+    return 'Street details need confirmation';
   }
   return row.reason_detail?.trim() || (reason ? humanizeReasonCode(reason) : 'Needs review');
 };
@@ -331,15 +366,34 @@ export const getReviewExplanation = (row: RowResult) => {
 export const getReasonMetadata = (row: RowResult) => {
   const normalized = getReasonCode(row);
   const detail = row.reason_detail?.trim() ?? '';
+  const publicLabel = asTrimmedString(row.public_reason_label);
+  const publicMessage = asTrimmedString(row.public_reason_message);
+  const publicActionHint = asTrimmedString(row.public_action_hint);
   let metadata = normalized ? REASON_METADATA[normalized] : undefined;
+  let publicMetadata = normalized ? PUBLIC_REASON_METADATA[normalized] : undefined;
   if (!metadata && normalized.startsWith('OUT_OF_SCOPE')) {
     metadata = REASON_METADATA.OUT_OF_SCOPE;
+    publicMetadata = {
+      label: 'This record appears outside your selected area',
+      description: 'This record appears outside your selected area.',
+      fix_hint: 'Review the selected location and retry if needed.',
+    };
   }
 
   const resolverExplanation = getReviewExplanation(row);
-  const label = metadata?.label || detail || resolverExplanation || (normalized ? humanizeReasonCode(normalized) : 'Needs review');
-  const description = metadata?.description || detail || resolverExplanation || 'Review the row for more context.';
-  const fixHint = metadata?.fix_hint || 'Update the address and retry if needed.';
+  const safeMetadata = publicMetadata || metadata;
+  const label =
+    publicLabel ||
+    safeMetadata?.label ||
+    resolverExplanation ||
+    (detail && !/google|resolver|county_mismatch|state_mismatch|route_mismatch/i.test(detail) ? detail : '') ||
+    (normalized ? humanizeReasonCode(normalized) : 'Needs review');
+  const description =
+    publicMessage ||
+    safeMetadata?.description ||
+    resolverExplanation ||
+    'Review the row for more context.';
+  const fixHint = publicActionHint || safeMetadata?.fix_hint || 'Update the address and retry if needed.';
   return {
     label,
     description,

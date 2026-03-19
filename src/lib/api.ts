@@ -5,7 +5,7 @@ import type {
   ParseSummary,
   RowResult,
 } from '../types/parse';
-import { getAuthHeaderState } from './authState';
+import { getAuthHeaderState, mergeAuthHeaderState } from './authState';
 import { supabase } from './supabase';
 import type { ExportCatalogResponseItem } from '../types/exports';
 
@@ -158,6 +158,89 @@ const createApiError = (info: ApiErrorInfo): ApiError => {
   return error;
 };
 
+const AUTH_FAILURE_STATUSES = new Set([401, 403]);
+const AUTH_FAILURE_MESSAGE = 'We couldn’t verify your session. Sign in again.';
+const AUTH_RETRY_MESSAGE = 'Your session refreshed. Please retry.';
+
+const toFriendlyAuthMessage = (status: number, detail: string) => {
+  const lowered = detail.toLowerCase();
+  if (
+    AUTH_FAILURE_STATUSES.has(status) &&
+    ['jwt', 'token', 'session', 'expired', 'refresh', 'signature', 'unauthorized', 'forbidden'].some((term) =>
+      lowered.includes(term),
+    )
+  ) {
+    return AUTH_FAILURE_MESSAGE;
+  }
+  return `HTTP ${status}: ${detail}`;
+};
+
+const refreshAuthHeadersFromSession = async () => {
+  const { data, error } = await supabase.auth.getSession();
+  if (error || !data.session?.access_token) {
+    throw createApiError({
+      message: AUTH_FAILURE_MESSAGE,
+      endpoint: 'session-refresh',
+      status: 401,
+    });
+  }
+
+  mergeAuthHeaderState({
+    accessToken: data.session.access_token,
+    userId: data.session.user?.id ?? getAuthHeaderState().userId,
+  });
+
+  return getAuthHeaders();
+};
+
+const performAuthedFetch = async (path: string, options: RequestInit, retryOnAuthFailure = true): Promise<Response> => {
+  const execute = async (headers: Record<string, string>) =>
+    fetch(joinUrl(path), {
+      ...options,
+      headers: { ...(options.headers ?? {}), ...headers },
+    });
+
+  let res: Response;
+  try {
+    res = await execute(getAuthHeaders());
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw createApiError({
+        message: `Network error (CORS or connectivity). Endpoint: ${path}. Check ALLOWED_ORIGINS on API.`,
+        endpoint: path,
+        isNetworkError: true,
+      });
+    }
+    throw error;
+  }
+
+  if (retryOnAuthFailure && AUTH_FAILURE_STATUSES.has(res.status)) {
+    try {
+      const refreshedHeaders = await refreshAuthHeadersFromSession();
+      res = await execute(refreshedHeaders);
+    } catch (error) {
+      if (error && typeof error === 'object' && 'apiErrorInfo' in error) {
+        throw error;
+      }
+      throw createApiError({
+        message: AUTH_RETRY_MESSAGE,
+        endpoint: path,
+        status: res.status,
+      });
+    }
+
+    if (AUTH_FAILURE_STATUSES.has(res.status)) {
+      throw createApiError({
+        message: AUTH_FAILURE_MESSAGE,
+        endpoint: path,
+        status: res.status,
+      });
+    }
+  }
+
+  return res;
+};
+
 export const getApiErrorInfo = (error: unknown): ApiErrorInfo | null => {
   if (error && typeof error === 'object' && 'apiErrorInfo' in error) {
     const info = (error as ApiError).apiErrorInfo;
@@ -172,26 +255,11 @@ export const getApiErrorInfo = (error: unknown): ApiErrorInfo | null => {
 };
 
 async function requestJson<T>(path: string, options: RequestInit) {
-  let res: Response;
-  try {
-    res = await fetch(joinUrl(path), {
-      ...options,
-      headers: { ...getAuthHeaders(), ...(options.headers ?? {}) },
-    });
-  } catch (error) {
-    if (error instanceof TypeError) {
-      throw createApiError({
-        message: `Network error (CORS or connectivity). Endpoint: ${path}. Check ALLOWED_ORIGINS on API.`,
-        endpoint: path,
-        isNetworkError: true,
-      });
-    }
-    throw error;
-  }
+  const res = await performAuthedFetch(path, options);
   if (!res.ok) {
     const detail = await getErrorMessage(res);
     throw createApiError({
-      message: `HTTP ${res.status}: ${detail}`,
+      message: toFriendlyAuthMessage(res.status, detail),
       endpoint: path,
       status: res.status,
     });
@@ -572,12 +640,16 @@ export async function resetOrgMemberPassword(userId: string) {
 }
 
 export async function removeOrgMember(userId: string) {
-  const res = await fetch(joinUrl(`/org/members/${userId}`), {
+  const path = `/org/members/${userId}`;
+  const res = await performAuthedFetch(path, {
     method: 'DELETE',
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    throw new Error(await getErrorMessage(res));
+    throw createApiError({
+      message: toFriendlyAuthMessage(res.status, await getErrorMessage(res)),
+      endpoint: path,
+      status: res.status,
+    });
   }
 }
 
@@ -590,15 +662,19 @@ export async function getJob(jobId: string) {
 }
 
 export async function getJobWithStatus(jobId: string) {
-  const res = await fetch(joinUrl(`/jobs/${jobId}`), {
+  const path = `/jobs/${jobId}`;
+  const res = await performAuthedFetch(path, {
     method: 'GET',
-    headers: getAuthHeaders(),
   });
   if (import.meta.env.DEV) {
     console.info(`[poll] GET /jobs/${jobId} -> ${res.status}`);
   }
   if (!res.ok) {
-    throw new Error(await getErrorMessage(res));
+    throw createApiError({
+      message: toFriendlyAuthMessage(res.status, await getErrorMessage(res)),
+      endpoint: path,
+      status: res.status,
+    });
   }
   const contentType = res.headers.get('content-type') || '';
   if (!contentType.includes('application/json')) {
@@ -680,18 +756,47 @@ export async function getAllJobRows(jobId: string) {
   return rows;
 }
 
+export async function updateJobMetadata(jobId: string, payload: { campaignName: string }) {
+  return requestJson<JsonValue>(`/jobs/${jobId}/metadata`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json', ...getAuthHeaders() },
+    body: JSON.stringify({ campaign_name: payload.campaignName }),
+  });
+}
+
 export async function downloadJobExport(jobId: string, type: JobExportType) {
-  const res = await fetch(joinUrl(`/jobs/${jobId}/export?type=${type}`), {
+  const path = `/jobs/${jobId}/export?type=${type}`;
+  const res = await performAuthedFetch(path, {
     method: 'GET',
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
-    throw new Error(await getErrorMessage(res));
+    const detail = await getErrorMessage(res);
+    throw createApiError({
+      message:
+        type === 'original_file' && res.status === 404
+          ? 'The original upload is unavailable for this job.'
+          : toFriendlyAuthMessage(res.status, detail),
+      endpoint: path,
+      status: res.status,
+    });
   }
+  const blob = await res.blob();
+  const contentType = res.headers.get('content-type') || blob.type || null;
+  const sizeBytesHeader = res.headers.get('content-length');
   const filename =
     getFilenameFromDisposition(res.headers.get('content-disposition')) ??
-    `job-${jobId}-${type}.csv`;
-  return { blob: await res.blob(), filename };
+    `job-${jobId}-${type}.${type === 'original_file' ? 'bin' : 'csv'}`;
+  return {
+    blob,
+    filename,
+    contentType,
+    sizeBytes:
+      typeof blob.size === 'number' && blob.size > 0
+        ? blob.size
+        : sizeBytesHeader && Number.isFinite(Number(sizeBytesHeader))
+          ? Number(sizeBytesHeader)
+          : null,
+  };
 }
 
 export async function getJobExportCatalog(jobId: string) {

@@ -6,8 +6,10 @@ import DashboardPage from './DashboardPage';
 
 const getMetricsSummary = vi.fn();
 const readLocalParsePersistenceState = vi.fn();
+const authState = { role: 'member' };
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
+vi.mock('../App', () => ({ useAuthControls: () => authState }));
 vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
 vi.mock('../lib/api', () => ({
   getMetricsSummary: (...args: unknown[]) => getMetricsSummary(...args),
@@ -24,6 +26,7 @@ vi.mock('../lib/liveUpdates', () => ({
 describe('DashboardPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.role = 'member';
     readLocalParsePersistenceState.mockReturnValue(null);
     subscribeJobUpdates.mockImplementation(() => () => undefined);
     getMetricsSummary.mockResolvedValue({
@@ -87,5 +90,19 @@ describe('DashboardPage', () => {
     expect(getMetricsSummary.mock.calls.length).toBeGreaterThan(before);
   });
 
-});
+  it('shows internal cost transparency only for admin and owner roles', async () => {
+    authState.role = 'admin';
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>);
+    expect(await screen.findByText('Internal cost transparency')).toBeInTheDocument();
+    expect(screen.getByText('Estimated job cost')).toBeInTheDocument();
+  });
 
+  it('keeps cost copy product-safe for member roles', async () => {
+    authState.role = 'member';
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>);
+    expect(await screen.findByText('Usage estimate')).toBeInTheDocument();
+    expect(screen.queryByText('Geocoding calls')).not.toBeInTheDocument();
+    expect(screen.getByText('Estimated cost')).toBeInTheDocument();
+  });
+
+});

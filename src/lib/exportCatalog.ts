@@ -128,6 +128,9 @@ export const normalizeExportCatalog = (catalog: ExportCatalogResponseItem[] | nu
             ? item.row_count
             : fallback.rowCount,
       available: typeof item.available === 'boolean' ? item.available : true,
+      contentType: item.content_type || fallback.contentType,
+      sizeBytes: typeof item.size_bytes === 'number' ? item.size_bytes : fallback.sizeBytes,
+      unavailableMessage: item.unavailable_message || fallback.unavailableMessage,
     });
   }
 

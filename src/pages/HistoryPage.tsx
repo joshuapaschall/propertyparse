@@ -1,11 +1,12 @@
 import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
 import Badge, { getBadgeVariant } from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
-import { downloadJobExport, getJobExportCatalog, JobExportType, JobRecord, getJobs } from '../lib/api';
+import { downloadJobExport, getJobExportCatalog, JobExportType, JobRecord, getJobs, updateJobMetadata } from '../lib/api';
 import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
@@ -67,6 +68,8 @@ const triggerDownload = (blob: Blob, filename: string) => {
 
 export default function HistoryPage() {
   const navigate = useNavigate();
+  const { role } = useAuthControls();
+  const isPrivileged = role === 'admin' || role === 'owner';
   const { showToast } = useToast();
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -77,6 +80,9 @@ export default function HistoryPage() {
   const [catalogByJobId, setCatalogByJobId] = useState<Record<string, ExportCatalogItem[]>>({});
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [localParsePersistenceWarning, setLocalParsePersistenceWarning] = useState(false);
+  const [editingJobId, setEditingJobId] = useState<string | null>(null);
+  const [campaignDraft, setCampaignDraft] = useState('');
+  const [savingCampaign, setSavingCampaign] = useState(false);
   const hasLoadedJobsRef = useRef(false);
 
   const loadJobs = useCallback(async () => {
@@ -156,6 +162,7 @@ export default function HistoryPage() {
           skipped: summary.skipped,
           duplicates: summary.duplicates,
           spendUsd: summary.spendUsd ?? null,
+          estimatedJobCost: pickString(job, ['estimated_job_cost_usd', 'estimatedJobCostUsd']),
         };
       }),
     [jobs],
@@ -214,6 +221,35 @@ export default function HistoryPage() {
       showToast({ title: (err as Error).message ?? 'Export failed.', variant: 'error' });
     } finally {
       setDownloading((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const beginEditCampaign = (jobId: string, currentName: string) => {
+    setEditingJobId(jobId);
+    setCampaignDraft(currentName === 'Untitled job' ? '' : currentName);
+  };
+
+  const saveCampaignName = async () => {
+    if (!editingJobId) return;
+    const nextName = campaignDraft.trim();
+    setSavingCampaign(true);
+    const previousJobs = jobs;
+    setJobs((prev) =>
+      prev.map((job) =>
+        pickString(job, ['job_id', 'jobId', 'id']) === editingJobId
+          ? { ...job, campaign_name: nextName, display_name: nextName || 'Untitled job' }
+          : job,
+      ),
+    );
+    try {
+      await updateJobMetadata(editingJobId, { campaignName: nextName });
+      showToast({ title: 'Campaign name updated', variant: 'success' });
+      setEditingJobId(null);
+    } catch (err) {
+      setJobs(previousJobs);
+      showToast({ title: (err as Error).message ?? 'Unable to update campaign name.', variant: 'error' });
+    } finally {
+      setSavingCampaign(false);
     }
   };
 
@@ -289,6 +325,7 @@ export default function HistoryPage() {
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3 text-right">Cost</th>
                     <th className="px-4 py-3 text-right">Export</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -307,7 +344,12 @@ export default function HistoryPage() {
                       <td className="px-4 py-2.5 text-right">{row.skipped}</td>
                       <td className="px-4 py-2.5 text-right">{row.duplicates}</td>
                       <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(row.status)}>{row.status}</Badge></td>
-                      <td className="px-4 py-2.5 text-right">{formatCurrency(row.spendUsd)}</td>
+                      <td className="px-4 py-2.5 text-right">
+                        <div>{formatCurrency(row.spendUsd)}</div>
+                        {isPrivileged && row.estimatedJobCost ? (
+                          <div className="text-[11px] text-slate-400">Est. {formatCurrency(Number(row.estimatedJobCost))}</div>
+                        ) : null}
+                      </td>
                       <td className="px-4 py-2.5 text-right" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.id); }}>
                         <ExportPanel
                           triggerLabel="Export"
@@ -318,14 +360,39 @@ export default function HistoryPage() {
                           disabled={!row.hasId}
                         />
                       </td>
+                      <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(row.id, row.name)} disabled={!row.hasId}>
+                          Edit name
+                        </Button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           </div>
-          </>
-        )}
+          {editingJobId ? (
+            <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 p-4">
+              <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-slate-950">
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Edit campaign name</h3>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Update the product-facing name shown in History.</p>
+                <input
+                  aria-label="Campaign name"
+                  value={campaignDraft}
+                  onChange={(event) => setCampaignDraft(event.target.value)}
+                  className="mt-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                />
+                <div className="mt-4 flex justify-end gap-2">
+                  <Button type="button" variant="ghost" onClick={() => setEditingJobId(null)} disabled={savingCampaign}>Cancel</Button>
+                  <Button type="button" onClick={() => void saveCampaignName()} disabled={savingCampaign}>
+                    {savingCampaign ? 'Saving…' : 'Save'}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
       </Card>
     </AppShell>
   );

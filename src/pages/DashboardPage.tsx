@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
+import InternalCostPanel from '../components/InternalCostPanel';
 import { getApiErrorInfo, getMetricsSummary, MetricsRange, MetricsSummary } from '../lib/api';
 import { useToast } from '../components/ui/ToastProvider';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
@@ -16,8 +18,15 @@ const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
 ];
 
 const toNumber = (value: unknown) => (typeof value === 'number' ? value : Number(value ?? 0) || 0);
+const formatCurrency = (value: unknown) => {
+  const amount = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(amount)) return null;
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(amount);
+};
 
 export default function DashboardPage() {
+  const { role } = useAuthControls();
+  const isPrivileged = role === 'admin' || role === 'owner';
   const { showToast } = useToast();
   const [range, setRange] = useState<MetricsRange | 'custom'>('today');
   const [customStart, setCustomStart] = useState('');
@@ -131,6 +140,26 @@ export default function DashboardPage() {
     );
   }, [metrics]);
 
+  const costPanelItems = useMemo(
+    () =>
+      isPrivileged
+        ? [
+            { label: 'Estimated monthly total', value: formatCurrency(metrics?.estimated_monthly_total_usd ?? metrics?.estimated_monthly_cost_usd) },
+            { label: 'Estimated job cost', value: formatCurrency(metrics?.estimated_job_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd) },
+            { label: 'Geocoding calls', value: toNumber(metrics?.geocoding_calls ?? metrics?.googleCalls) || null },
+            { label: 'Autocomplete calls', value: toNumber(metrics?.autocomplete_calls) || null },
+            { label: 'Place details calls', value: toNumber(metrics?.place_details_calls) || null },
+            { label: 'OCR/AI token usage', value: toNumber(metrics?.ai_token_usage ?? metrics?.input_tokens ?? metrics?.output_tokens) || null },
+            { label: 'Remaining free-cap estimate', value: formatCurrency(metrics?.remaining_free_cap_estimate_usd ?? metrics?.remaining_free_cap_estimate) },
+            { label: 'Reconciliation status', value: (metrics?.reconciliation_status as string | undefined) ?? null },
+          ]
+        : [
+            { label: 'Estimated cost', value: formatCurrency(metrics?.estimated_job_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd) },
+            { label: 'Credits used', value: toNumber(metrics?.credits_used ?? metrics?.exports) || null },
+          ],
+    [isPrivileged, metrics],
+  );
+
   return (
     <AppShell title="Dashboard" subtitle="Workflow-first metrics across your parsing pipeline.">
       <Card>
@@ -196,6 +225,18 @@ export default function DashboardPage() {
                 Dashboard metrics only include saved jobs. Your last run may be missing until backend persistence is restored.
               </p>
             ) : null}
+            <div className="mt-6">
+              <InternalCostPanel
+                title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
+                subtitle={
+                  isPrivileged
+                    ? 'Visible to admin and owner roles only.'
+                    : 'A product-safe estimate without internal vendor details.'
+                }
+                items={costPanelItems}
+                isPrivileged={isPrivileged}
+              />
+            </div>
           </>
         )}
       </Card>

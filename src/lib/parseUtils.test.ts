@@ -5,6 +5,7 @@ import {
   computeParseSummaryFromRowResults,
   getDisplaySafeMatchedAddress,
   getManualApprovalBlocker,
+  getReasonMetadata,
   getResolverDetails,
   getReviewDebugHint,
   getReviewExplanation,
@@ -145,7 +146,7 @@ describe('parseUtils filters', () => {
     expect(getManualApprovalBlocker(ambiguousRow)).toBe('Multiple in-scope candidates remain');
     expect(getReviewExplanation(blockedLowPrecisionRow)).toBe('County-only candidate after rescue');
     expect(getManualApprovalBlocker(blockedLowPrecisionRow)).toBe('County-only candidate after rescue');
-    expect(getReviewExplanation(legacyRow)).toBe('Candidate was only verified at broad area precision');
+    expect(getReviewExplanation(legacyRow)).toBe('We could not confirm a full street address');
     expect(getReviewDebugHint(legacyRow)).toBe('Candidate is county-level only');
   });
 
@@ -182,7 +183,7 @@ describe('parseUtils filters', () => {
       reason_code: 'ROUTE_ALIAS',
     });
 
-    expect(getReviewExplanation(row)).toBe('Route alias still needs confirmation');
+    expect(getReviewExplanation(row)).toBe('Street details need confirmation');
     expect(getResolverDetails(row)).toEqual([{ label: 'Original', value: '789 Oak Ave' }]);
     expect(getManualApprovalBlocker(row)).toBe('No street-level candidate was resolved');
   });
@@ -195,5 +196,26 @@ describe('parseUtils filters', () => {
     expect(blob).toBeDefined();
     expect(isHeaderOnlyCsv('a,b\n')).toBe(true);
     expect(isHeaderOnlyCsv('a,b\n1,2')).toBe(false);
+  });
+
+  it('hides provider jargon in public review and out-of-scope wording', () => {
+    const googleErrorRow = buildRow({ status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'GOOGLE_ERROR', reason_detail: 'Google error: bad token' });
+    const countyMismatchRow = buildRow({ status: 'OUT_OF_SCOPE', reason_code: 'county_mismatch', reason_detail: 'county_mismatch' });
+    const publicFieldRow = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      reason_code: 'LOW_PRECISION_MATCH',
+      public_reason_label: 'Street details need confirmation',
+      public_reason_message: 'We could not confirm this address automatically.',
+      public_action_hint: 'Check the full street address and retry.',
+    });
+
+    expect(getReasonMetadata(googleErrorRow).label).toBe('We could not verify this address automatically');
+    expect(getReasonMetadata(countyMismatchRow).label).toBe('Outside your selected county');
+    expect(getReasonMetadata(countyMismatchRow).description).toBe('This record appears outside your selected area.');
+    expect(getReasonMetadata(publicFieldRow)).toEqual({
+      label: 'Street details need confirmation',
+      description: 'We could not confirm this address automatically.',
+      fix_hint: 'Check the full street address and retry.',
+    });
   });
 });
