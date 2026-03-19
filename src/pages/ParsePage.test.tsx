@@ -18,8 +18,10 @@ const getJobExportCatalog = vi.fn();
 const publishJobUpdate = vi.fn();
 const showToast = vi.fn();
 const selectedFileFactory = vi.fn(() => new File(['a'], 'sample.csv', { type: 'text/csv' }));
+const authState = { role: 'admin' };
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
+vi.mock('../App', () => ({ useAuthControls: () => authState }));
 vi.mock('../components/AccountedRowsIndicator', () => ({ default: () => <div>accounted</div> }));
 vi.mock('../components/FileUploadCard', () => ({
   default: ({ onChange }: { onChange: (file: File) => void }) => (
@@ -86,6 +88,7 @@ vi.mock('../lib/api', () => ({
 describe('ParsePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    authState.role = 'admin';
     Element.prototype.scrollIntoView = vi.fn();
     getApiErrorInfo.mockImplementation(() => null);
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
@@ -293,7 +296,7 @@ describe('ParsePage', () => {
       screen.getAllByText((_, element) => element?.textContent?.includes('3841 MONTICELLO ST') ?? false).length,
     ).toBeGreaterThan(0);
     expect(screen.getByText('One candidate found')).toBeInTheDocument();
-    expect(screen.getAllByText('Resolver details').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Internal diagnostics').length).toBeGreaterThan(0);
     expect(screen.getByText(/wrapper_text_single_candidate/i)).toBeInTheDocument();
     expect(screen.getAllByText(/Approval unavailable/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText('House number conflict').length).toBeGreaterThan(0);
@@ -509,6 +512,37 @@ describe('ParsePage', () => {
     await user.click(screen.getAllByRole('button', { name: /^Out of Scope/i })[0]);
     expect(await screen.findByText(/Approval requires a confirmed in-scope candidate count/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve matched' })).not.toBeInTheDocument();
+  });
+
+  it('shows product-safe session copy instead of raw token wording', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
+    parseFile.mockRejectedValue(new Error('We couldn’t verify your session. Sign in again.'));
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    expect(await screen.findByText(/we couldn’t verify your session\. sign in again\./i)).toBeInTheDocument();
+    expect(screen.queryByText(/token/i)).not.toBeInTheDocument();
+  });
+
+  it('shows internal cost transparency only for admin roles', async () => {
+    const user = userEvent.setup();
+    const summary = { rows_received: 1, needs_review: 0, valid_total: 1, valid_unique: 1, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 1, attention_total: 0, spend_usd: 4.25, geocoding_calls: 3 };
+    parseFile.mockResolvedValue({ summary, row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1', formatted_address: '1 Main St' }], canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St', city: 'Austin', state: 'TX', zip: '78701' }], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1', formatted_address: '1 Main St' }], canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St', city: 'Austin', state: 'TX', zip: '78701' }], duplicate_groups: [] });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    expect(await screen.findByText('Internal cost transparency')).toBeInTheDocument();
+    expect(screen.getByText('Internal cost transparency')).toBeInTheDocument();
   });
 
 });

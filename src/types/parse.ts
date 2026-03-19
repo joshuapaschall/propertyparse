@@ -9,6 +9,19 @@ export type ParseSummary = {
   matched: number;
   attention_total: number;
   google_calls_used?: number;
+  geocoding_calls?: number;
+  autocomplete_calls?: number;
+  place_details_calls?: number;
+  ai_token_usage?: number;
+  input_tokens?: number;
+  output_tokens?: number;
+  estimated_job_cost_usd?: number;
+  estimated_monthly_total_usd?: number;
+  estimated_monthly_cost_usd?: number;
+  remaining_free_cap_estimate?: number;
+  remaining_free_cap_estimate_usd?: number;
+  credits_used?: number;
+  reconciliation_status?: string;
   openai_ocr_calls_used?: number;
   spend_usd?: number;
   unmatched?: number;
@@ -56,6 +69,9 @@ export type RowResult = {
   ambiguity_reason?: string;
   compare_debug?: unknown;
   blocked_by?: string | string[];
+  public_reason_label?: string;
+  public_reason_message?: string;
+  public_action_hint?: string;
 };
 
 export type DuplicateGroup = {

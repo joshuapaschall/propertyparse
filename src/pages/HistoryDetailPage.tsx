@@ -1,8 +1,10 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
 import TablePagination from '../components/TablePagination';
-import { downloadJobExport, getJobDetail, getJobExportCatalog, getJobResults, JobExportType, JobRecord } from '../lib/api';
+import InternalCostPanel from '../components/InternalCostPanel';
+import { downloadJobExport, getJobDetail, getJobExportCatalog, getJobResults, JobExportType, JobRecord, updateJobMetadata } from '../lib/api';
 
 import { groupRows, GroupedRow } from '../lib/groupRows';
 import {
@@ -127,7 +129,14 @@ const renderOriginalAddressCell = (row: RowResult) => {
   );
 };
 
+const formatCount = (value: unknown) => {
+  const amount = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount.toLocaleString() : null;
+};
+
 export default function HistoryDetailPage() {
+  const { role } = useAuthControls();
+  const isPrivileged = role === 'admin' || role === 'owner';
   const { showToast } = useToast();
   const { jobId } = useParams();
 
@@ -142,6 +151,8 @@ export default function HistoryDetailPage() {
   const [resultsPage, setResultsPage] = useState(1);
   const [resultsPageSize, setResultsPageSize] = useState(10);
   const [reviewReasonFilter, setReviewReasonFilter] = useState<ReviewReasonFilter>('all');
+  const [campaignDraft, setCampaignDraft] = useState('');
+  const [savingCampaign, setSavingCampaign] = useState(false);
 
   const [jobMeta, setJobMeta] = useState<JobSummaryMeta | null>(null);
   const [mergedJobSummary, setMergedJobSummary] = useState<JobRecord | null>(null);
@@ -189,6 +200,7 @@ export default function HistoryDetailPage() {
         filename: pickString(mergedJob, ['display_name', 'displayName', 'campaign_name', 'file_name', 'original_filename']),
         createdAt: pickString(mergedJob, ['created_at', 'createdAt', 'created', 'timestamp']),
       });
+      setCampaignDraft(pickString(mergedJob, ['campaign_name', 'display_name', 'displayName']) ?? '');
       setExportCatalog(normalizeExportCatalog(catalog));
       setResultsFinalizing(true);
       setInitialLoading(false);
@@ -267,6 +279,26 @@ export default function HistoryDetailPage() {
     const fromJobSummary = pickNumber((mergedJobSummary ?? {}) as JobRecord, ['spend_usd', 'spendUsd']);
     return fromParseSummary ?? fromResultsSummary ?? fromJobSummary;
   }, [mergedJobSummary, parseSummary, results?.summary]);
+
+  const costPanelItems = useMemo(
+    () =>
+      isPrivileged
+        ? [
+            { label: 'Estimated job cost', value: formatCurrency(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['estimated_job_cost_usd']) ?? totalCost) },
+            { label: 'Estimated monthly total', value: formatCurrency(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['estimated_monthly_total_usd', 'estimated_monthly_cost_usd'])) },
+            { label: 'Geocoding calls', value: formatCount(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['geocoding_calls', 'google_calls_used'])) },
+            { label: 'Autocomplete calls', value: formatCount(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['autocomplete_calls'])) },
+            { label: 'Place details calls', value: formatCount(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['place_details_calls'])) },
+            { label: 'OCR/AI token usage', value: formatCount(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['ai_token_usage', 'input_tokens', 'output_tokens'])) },
+            { label: 'Remaining free-cap estimate', value: formatCurrency(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['remaining_free_cap_estimate_usd', 'remaining_free_cap_estimate'])) },
+            { label: 'Reconciliation status', value: pickString((mergedJobSummary ?? {}) as JobRecord, ['reconciliation_status']) },
+          ]
+        : [
+            { label: 'Estimated cost', value: formatCurrency(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['estimated_job_cost_usd']) ?? totalCost) },
+            { label: 'Credits used', value: formatCount(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['credits_used'])) },
+          ],
+    [isPrivileged, mergedJobSummary, totalCost],
+  );
 
   const canonicalAddresses = useMemo(
     () => (results?.canonical_addresses ?? []).map(normalizeCanonicalAddress),
@@ -354,13 +386,34 @@ export default function HistoryDetailPage() {
       } else {
         triggerDownload(result.blob, result.filename);
       }
-      showToast({ title: `${label} downloaded`, variant: 'success' });
+      showToast({
+        title: type === 'original_file' ? 'Original upload downloaded' : `${label} downloaded`,
+        variant: 'success',
+      });
     } catch (err) {
       const message = (err as Error).message ?? 'Export failed.';
       setError(message);
       showToast({ title: message, variant: 'error' });
     } finally {
       setDownloading((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const saveCampaignName = async () => {
+    if (!jobId) return;
+    const nextName = campaignDraft.trim();
+    const previousSummary = mergedJobSummary;
+    setSavingCampaign(true);
+    setMergedJobSummary((prev) => ({ ...(prev ?? {}), campaign_name: nextName, display_name: nextName || 'Untitled job' }));
+    setJobMeta((prev) => (prev ? { ...prev, filename: nextName || prev.filename } : prev));
+    try {
+      await updateJobMetadata(jobId, { campaignName: nextName });
+      showToast({ title: 'Campaign name updated', variant: 'success' });
+    } catch (err) {
+      setMergedJobSummary(previousSummary);
+      showToast({ title: (err as Error).message ?? 'Unable to update campaign name.', variant: 'error' });
+    } finally {
+      setSavingCampaign(false);
     }
   };
 
@@ -401,7 +454,7 @@ export default function HistoryDetailPage() {
                       ) : null}
                       {getResolverDetails(row).length ? (
                         <details className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-2.5 py-2 text-[11px] text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/80 dark:text-slate-300">
-                          <summary className="cursor-pointer list-none font-medium text-slate-600 marker:hidden dark:text-slate-200">Resolver details</summary>
+                          <summary className="cursor-pointer list-none font-medium text-slate-600 marker:hidden dark:text-slate-200">Internal diagnostics</summary>
                           <div className="mt-2 grid gap-1.5">
                             {getResolverDetails(row).map((detail) => (
                               <div key={`${detail.label}-${detail.value}`} className="flex flex-wrap gap-1">
@@ -459,6 +512,33 @@ export default function HistoryDetailPage() {
               disabled={!jobId}
             />
           </div>
+        </div>
+        <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
+          <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Campaign name</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              <input
+                aria-label="Edit campaign name"
+                value={campaignDraft}
+                onChange={(event) => setCampaignDraft(event.target.value)}
+                className="min-w-[240px] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+              />
+              <button
+                type="button"
+                className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white"
+                onClick={() => void saveCampaignName()}
+                disabled={savingCampaign}
+              >
+                {savingCampaign ? 'Saving…' : 'Save name'}
+              </button>
+            </div>
+          </div>
+          <InternalCostPanel
+            title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
+            subtitle={isPrivileged ? 'Internal-only testing and reconciliation fields.' : 'Product-safe estimate only.'}
+            items={costPanelItems}
+            isPrivileged={isPrivileged}
+          />
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">

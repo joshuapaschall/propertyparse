@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
 import AccountedRowsIndicator from '../components/AccountedRowsIndicator';
 import FileUploadCard from '../components/FileUploadCard';
@@ -15,6 +16,7 @@ import Card from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import Skeleton from '../components/ui/Skeleton';
 import ExportPanel from '../components/exports/ExportPanel';
+import InternalCostPanel from '../components/InternalCostPanel';
 import { useToast } from '../components/ui/ToastProvider';
 import {
   getReasonMetadata,
@@ -250,6 +252,17 @@ const normalizeNumber = (value: unknown) => {
     return Number.isNaN(parsed) ? null : parsed;
   }
   return null;
+};
+
+const formatCurrency = (value: unknown) => {
+  const amount = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(amount)) return null;
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(amount);
+};
+
+const formatCount = (value: unknown) => {
+  const amount = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(amount) && amount > 0 ? amount.toLocaleString() : null;
 };
 
 const normalizeStatus = (value?: string) => (value ?? '').toUpperCase();
@@ -668,6 +681,8 @@ const clearLastJobState = () => {
 };
 
 export default function ParsePage() {
+  const { role } = useAuthControls();
+  const isPrivileged = role === 'admin' || role === 'owner';
   const location = useLocation();
   const navigate = useNavigate();
   const [stateValue, setStateValue] = useState('');
@@ -1227,6 +1242,26 @@ export default function ParsePage() {
     [parseSummary, rowResults],
   );
 
+  const costPanelItems = useMemo(
+    () =>
+      isPrivileged
+        ? [
+            { label: 'Estimated job cost', value: formatCurrency((computedParseSummary as ParseSummary | null)?.estimated_job_cost_usd ?? computedParseSummary?.spend_usd) },
+            { label: 'Estimated monthly total', value: formatCurrency((computedParseSummary as ParseSummary | null)?.estimated_monthly_total_usd ?? computedParseSummary?.estimated_monthly_cost_usd) },
+            { label: 'Geocoding calls', value: formatCount((computedParseSummary as ParseSummary | null)?.geocoding_calls ?? googleCallsUsed) },
+            { label: 'Autocomplete calls', value: formatCount((computedParseSummary as ParseSummary | null)?.autocomplete_calls) },
+            { label: 'Place details calls', value: formatCount((computedParseSummary as ParseSummary | null)?.place_details_calls) },
+            { label: 'OCR/AI token usage', value: formatCount((computedParseSummary as ParseSummary | null)?.ai_token_usage ?? computedParseSummary?.input_tokens ?? computedParseSummary?.output_tokens) },
+            { label: 'Remaining free-cap estimate', value: formatCurrency((computedParseSummary as ParseSummary | null)?.remaining_free_cap_estimate_usd ?? computedParseSummary?.remaining_free_cap_estimate) },
+            { label: 'Reconciliation status', value: (computedParseSummary as ParseSummary | null)?.reconciliation_status ?? null },
+          ]
+        : [
+            { label: 'Estimated cost', value: formatCurrency((computedParseSummary as ParseSummary | null)?.estimated_job_cost_usd ?? computedParseSummary?.spend_usd) },
+            { label: 'Credits used', value: formatCount((computedParseSummary as ParseSummary | null)?.credits_used) },
+          ],
+    [computedParseSummary, googleCallsUsed, isPrivileged],
+  );
+
   const canonicalAddressesForDisplay = useMemo(
     () => canonicalAddresses.filter(isRenderableCanonicalAddress),
     [canonicalAddresses],
@@ -1557,12 +1592,13 @@ export default function ParsePage() {
   };
 
   const getReasonSummary = (row: RowResult) => {
+    if (row.public_reason_message?.trim()) return row.public_reason_message.trim();
     const reasonCode = row.reason_code?.toLowerCase() ?? '';
     const summaryByReason: Record<string, string> = {
       out_of_scope: 'The matched location falls outside your selected area.',
-      city_mismatch: 'The matched city does not match your selected city filter.',
-      county_mismatch: 'The matched county does not match your selected county filter.',
-      state_mismatch: 'The matched state does not match your selected state filter.',
+      city_mismatch: 'This record appears outside your selected area.',
+      county_mismatch: 'This record appears outside your selected area.',
+      state_mismatch: 'This record appears outside your selected area.',
       no_match: 'We could not confidently verify this as a complete property address.',
       low_confidence: 'The verifier returned a low-confidence result and needs your review.',
       po_box: 'This row was skipped because it appears to be a PO Box, not a property address.',
@@ -1728,6 +1764,7 @@ export default function ParsePage() {
   };
 
   const getReasonDetailText = (row: RowResult) => {
+    if (row.public_action_hint?.trim()) return row.public_action_hint.trim();
     if (isOutOfScopeRow(row) && showDebugMode && row.scope_debug) {
       const scopeDetail = formatOutOfScopeDetail(row.scope_debug);
       if (scopeDetail) return scopeDetail;
@@ -1779,7 +1816,7 @@ How to fix: ${fixHint}` : ''}`;
         ) : null}
         {!isMarkerVerificationFailure && detailText ? (
           <div className="text-xs text-slate-500 dark:text-slate-400">
-            {isOutOfScopeRow(row) ? `Why? ${detailText}` : detailText}
+            {detailText}
           </div>
         ) : null}
         {debugHint ? (
@@ -1790,7 +1827,7 @@ How to fix: ${fixHint}` : ''}`;
         ) : null}
         {resolverDetails.length ? (
           <details className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-2.5 py-2 text-[11px] text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/80 dark:text-slate-300">
-            <summary className="cursor-pointer list-none font-medium text-slate-600 marker:hidden dark:text-slate-200">Resolver details</summary>
+            <summary className="cursor-pointer list-none font-medium text-slate-600 marker:hidden dark:text-slate-200">Internal diagnostics</summary>
             <div className="mt-2 grid gap-1.5">
               {resolverDetails.map((detail) => (
                 <div key={`${detail.label}-${detail.value}`} className="flex flex-wrap gap-1">
@@ -3886,6 +3923,14 @@ How to fix: ${fixHint}` : ''}`;
               ) : null}
             </div>
           )}
+          <div className="mt-6">
+            <InternalCostPanel
+              title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
+              subtitle={isPrivileged ? 'Internal-only usage and reconciliation fields.' : 'Product-safe estimate only.'}
+              items={costPanelItems}
+              isPrivileged={isPrivileged}
+            />
+          </div>
           {parseSummary ? (
             <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
               Unique valid addresses are deduped. Use Processing Report to see every input row’s

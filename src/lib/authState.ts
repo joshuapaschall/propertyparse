@@ -21,3 +21,10 @@ export const clearAuthHeaderState = () => {
 };
 
 export const getAuthHeaderState = () => authHeaderState;
+
+export const mergeAuthHeaderState = (next: Partial<AuthHeaderState>) => {
+  authHeaderState = {
+    ...authHeaderState,
+    ...next,
+  };
+};

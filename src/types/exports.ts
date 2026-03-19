@@ -13,6 +13,9 @@ export type ExportCatalogItem = {
   headers?: string[];
   rowCount?: number | null;
   available?: boolean;
+  contentType?: string;
+  sizeBytes?: number | null;
+  unavailableMessage?: string;
 };
 
 export type ExportCatalogResponseItem = {
@@ -27,4 +30,7 @@ export type ExportCatalogResponseItem = {
   row_count?: number;
   row_count_estimate?: number;
   available?: boolean;
+  content_type?: string;
+  size_bytes?: number;
+  unavailable_message?: string;
 };
