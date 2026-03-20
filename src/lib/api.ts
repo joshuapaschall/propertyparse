@@ -86,6 +86,35 @@ export type SystemDiagnostics = {
   [key: string]: JsonValue | undefined;
 };
 
+export type ProviderUsageGoogleStatus = {
+  sync_status?: string | null;
+  pricing_source?: string | null;
+  pricing_confidence?: string | null;
+  billing_snapshot_as_of?: string | null;
+  snapshot_rows_count?: number | null;
+  remaining_free_cap_status_mode?: string | null;
+  billing_snapshot_missing?: boolean;
+  missing_env_vars?: string[];
+  google_billing_sync_configured?: boolean;
+  last_sync_timestamp?: string | null;
+  [key: string]: JsonValue | undefined;
+};
+
+export type ProviderUsageOpenAiSummary = {
+  sync_status?: string | null;
+  last_sync_timestamp?: string | null;
+  project_id?: string | null;
+  [key: string]: JsonValue | undefined;
+};
+
+export type ProviderUsageSyncResponse = {
+  ok?: boolean;
+  message?: string;
+  sync_status?: string | null;
+  last_sync_timestamp?: string | null;
+  [key: string]: JsonValue | undefined;
+};
+
 export type ApiErrorInfo = {
   message: string;
   endpoint: string;
@@ -618,6 +647,32 @@ export async function getSystemDiagnostics() {
     headers: getAuthHeaders(),
   });
   return (res.data ?? res.items ?? res) as SystemDiagnostics;
+}
+
+export async function getGoogleProviderUsageStatus() {
+  const res = await requestJson<ApiResponse<ProviderUsageGoogleStatus>>('/admin/provider-usage/google/status', {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+  return (res.data ?? res.items ?? res) as ProviderUsageGoogleStatus;
+}
+
+export async function syncGoogleProviderUsage() {
+  const res = await postJson<ApiResponse<ProviderUsageSyncResponse>>('/admin/provider-usage/google/sync', {});
+  return (res.data ?? res.items ?? res) as ProviderUsageSyncResponse;
+}
+
+export async function getOpenAiProviderUsageSummary() {
+  const res = await requestJson<ApiResponse<ProviderUsageOpenAiSummary>>('/admin/provider-usage/openai/summary', {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
+  return (res.data ?? res.items ?? res) as ProviderUsageOpenAiSummary;
+}
+
+export async function syncOpenAiProviderUsage() {
+  const res = await postJson<ApiResponse<ProviderUsageSyncResponse>>('/admin/provider-usage/openai/sync', {});
+  return (res.data ?? res.items ?? res) as ProviderUsageSyncResponse;
 }
 
 export type InviteOrgMemberResponse = {

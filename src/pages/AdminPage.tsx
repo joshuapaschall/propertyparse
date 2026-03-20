@@ -8,17 +8,48 @@ import EmptyState from '../components/ui/EmptyState';
 import {
   ApiErrorInfo,
   getApiErrorInfo,
+  getGoogleProviderUsageStatus,
+  getOpenAiProviderUsageSummary,
   getOrgMembers,
   getSystemDiagnostics,
   inviteOrgMember,
   OrgMember,
+  ProviderUsageGoogleStatus,
+  ProviderUsageOpenAiSummary,
   removeOrgMember,
   resetOrgMemberPassword,
+  syncGoogleProviderUsage,
+  syncOpenAiProviderUsage,
   SystemDiagnostics,
   updateOrgMember,
 } from '../lib/api';
 
 const roleOptions = ['member', 'manager', 'admin', 'owner'];
+
+const formatDisplayValue = (value: string | number | boolean | null | undefined, fallback = '—') => {
+  if (value === null || value === undefined || value === '') return fallback;
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  return String(value);
+};
+
+const formatDateTime = (value: string | null | undefined, fallback = '—') => {
+  if (!value) return fallback;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString();
+};
+
+const LOCAL_ONLY_EXPLANATION =
+  'Project-local request logging is working, but billing-account sync has not populated provider snapshots yet. Remaining free cap and monthly cost are not billing-truth yet.';
+
+function ProviderDetailRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
+      <p className="mt-1 text-sm text-slate-800 dark:text-slate-100">{value}</p>
+    </div>
+  );
+}
 
 type SetupGuidance = {
   title: string;
@@ -189,6 +220,31 @@ export default function AdminPage() {
   const [removingByUserId, setRemovingByUserId] = useState<Record<string, boolean>>({});
   const [resettingByUserId, setResettingByUserId] = useState<Record<string, boolean>>({});
 
+  const [googleUsageStatus, setGoogleUsageStatus] = useState<ProviderUsageGoogleStatus | null>(null);
+  const [openAiUsageSummary, setOpenAiUsageSummary] = useState<ProviderUsageOpenAiSummary | null>(null);
+  const [providerUsageLoading, setProviderUsageLoading] = useState(false);
+  const [providerUsageError, setProviderUsageError] = useState<ApiErrorInfo | null>(null);
+  const [googleSyncLoading, setGoogleSyncLoading] = useState(false);
+  const [openAiSyncLoading, setOpenAiSyncLoading] = useState(false);
+
+  const loadProviderUsage = async () => {
+    setProviderUsageLoading(true);
+    setProviderUsageError(null);
+    try {
+      const [googleStatus, openAiSummary] = await Promise.all([
+        getGoogleProviderUsageStatus(),
+        getOpenAiProviderUsageSummary(),
+      ]);
+      setGoogleUsageStatus(googleStatus ?? null);
+      setOpenAiUsageSummary(openAiSummary ?? null);
+    } catch (err) {
+      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to load provider usage sync status.', endpoint: '/admin/provider-usage' };
+      setProviderUsageError(errorInfo);
+    } finally {
+      setProviderUsageLoading(false);
+    }
+  };
+
   const loadMembers = async () => {
     setTeamLoading(true);
     setTeamError(null);
@@ -212,7 +268,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!canAccessAdmin) return;
-    void loadMembers();
+    void Promise.all([loadMembers(), loadProviderUsage()]);
   }, [canAccessAdmin]);
 
   const sendInvite = async ({ resend = false }: { resend?: boolean } = {}) => {
@@ -385,6 +441,45 @@ export default function AdminPage() {
     }
   };
 
+  const handleRefreshProviderUsage = async () => {
+    await loadProviderUsage();
+  };
+
+  const handleGoogleSync = async () => {
+    setGoogleSyncLoading(true);
+    setProviderUsageError(null);
+    try {
+      const response = await syncGoogleProviderUsage();
+      showToast({ title: response.message ?? 'Google billing sync started.', variant: 'success' });
+      await loadProviderUsage();
+    } catch (err) {
+      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to sync Google billing usage.', endpoint: '/admin/provider-usage/google/sync' };
+      setProviderUsageError(errorInfo);
+      showToast({ title: errorInfo.message, variant: 'error' });
+    } finally {
+      setGoogleSyncLoading(false);
+    }
+  };
+
+  const handleOpenAiSync = async () => {
+    setOpenAiSyncLoading(true);
+    setProviderUsageError(null);
+    try {
+      const response = await syncOpenAiProviderUsage();
+      showToast({ title: response.message ?? 'OpenAI usage sync started.', variant: 'success' });
+      await loadProviderUsage();
+    } catch (err) {
+      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to sync OpenAI usage.', endpoint: '/admin/provider-usage/openai/sync' };
+      setProviderUsageError(errorInfo);
+      showToast({ title: errorInfo.message, variant: 'error' });
+    } finally {
+      setOpenAiSyncLoading(false);
+    }
+  };
+
+  const missingGoogleEnvVars = Array.isArray(googleUsageStatus?.missing_env_vars) ? googleUsageStatus?.missing_env_vars ?? [] : [];
+  const showLocalOnlyExplanation = googleUsageStatus?.billing_snapshot_missing === true;
+
   return (
     <AppShell title="Admin" subtitle="Manage your organization team.">
       {!hasRoleInfo || !canAccessAdmin ? (
@@ -396,6 +491,98 @@ export default function AdminPage() {
         </Card>
       ) : (
         <div className="space-y-6">
+          <Card>
+            <SectionHeader
+              title="Provider Usage"
+              subtitle="Review provider sync health and trigger billing/usage refreshes without rerunning parse jobs."
+              action={
+                <Button type="button" variant="secondary" onClick={() => void handleRefreshProviderUsage()} disabled={providerUsageLoading || googleSyncLoading || openAiSyncLoading}>
+                  {providerUsageLoading ? 'Refreshing...' : 'Refresh'}
+                </Button>
+              }
+            />
+
+            {providerUsageError ? (
+              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-100">
+                <p className="font-semibold">Provider usage status could not be loaded.</p>
+                <p className="mt-1">{providerUsageError.message}</p>
+              </div>
+            ) : null}
+
+            {providerUsageLoading && !googleUsageStatus && !openAiUsageSummary ? (
+              <EmptyState className="mt-6 py-8" title="Loading provider usage" description="Fetching Google billing and OpenAI usage sync status..." />
+            ) : (
+              <div className="mt-6 grid gap-4 xl:grid-cols-2">
+                <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">Google</h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Billing-account sync and snapshot status.</p>
+                    </div>
+                    <Button type="button" variant="primary" onClick={() => void handleGoogleSync()} disabled={googleSyncLoading || providerUsageLoading}>
+                      {googleSyncLoading ? 'Syncing...' : 'Sync Google billing now'}
+                    </Button>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <ProviderDetailRow label="Sync status" value={formatDisplayValue(googleUsageStatus?.sync_status)} />
+                    <ProviderDetailRow
+                      label="Pricing source/confidence"
+                      value={
+                        googleUsageStatus?.pricing_source || googleUsageStatus?.pricing_confidence
+                          ? `${formatDisplayValue(googleUsageStatus?.pricing_source, 'Unknown source')} / ${formatDisplayValue(googleUsageStatus?.pricing_confidence, 'Unknown confidence')}`
+                          : 'Unknown source / Unknown confidence'
+                      }
+                    />
+                    <ProviderDetailRow
+                      label="Billing snapshot as of"
+                      value={googleUsageStatus?.billing_snapshot_as_of ? formatDateTime(googleUsageStatus.billing_snapshot_as_of) : 'Billing snapshot missing.'}
+                    />
+                    <ProviderDetailRow label="Snapshot rows count" value={formatDisplayValue(googleUsageStatus?.snapshot_rows_count, '0')} />
+                    <ProviderDetailRow
+                      label="Remaining free cap status mode"
+                      value={formatDisplayValue(googleUsageStatus?.remaining_free_cap_status_mode)}
+                    />
+                    <ProviderDetailRow
+                      label="Config status"
+                      value={
+                        missingGoogleEnvVars.length > 0
+                          ? `Missing env vars: ${missingGoogleEnvVars.join(', ')}`
+                          : googleUsageStatus?.google_billing_sync_configured === false
+                            ? 'Billing sync config is incomplete.'
+                            : 'Configured'
+                      }
+                    />
+                  </div>
+
+                  {showLocalOnlyExplanation ? (
+                    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">
+                      {LOCAL_ONLY_EXPLANATION}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">OpenAI</h3>
+                      <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Project usage sync status.</p>
+                    </div>
+                    <Button type="button" variant="primary" onClick={() => void handleOpenAiSync()} disabled={openAiSyncLoading || providerUsageLoading}>
+                      {openAiSyncLoading ? 'Syncing...' : 'Sync OpenAI usage now'}
+                    </Button>
+                  </div>
+
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    <ProviderDetailRow label="Sync status" value={formatDisplayValue(openAiUsageSummary?.sync_status)} />
+                    <ProviderDetailRow label="Last sync timestamp" value={formatDateTime(openAiUsageSummary?.last_sync_timestamp)} />
+                    <ProviderDetailRow label="Project id" value={formatDisplayValue(openAiUsageSummary?.project_id)} />
+                  </div>
+                </div>
+              </div>
+            )}
+          </Card>
+
           <Card>
             <SectionHeader title="Team" subtitle="Manage members and organization access." />
 
