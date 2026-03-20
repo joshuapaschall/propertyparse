@@ -30,7 +30,7 @@ export default function ExportCard({ item, onDownload, disabled = false, loading
             {item.fileType ? <span>{item.fileType}</span> : null}
             {item.contentType ? <span>{item.contentType}</span> : null}
             {sizeLabel ? <span>{sizeLabel}</span> : null}
-            {item.filename ? <span>Example: {item.filename}</span> : null}
+            {item.filename ? <span>{item.type === 'original_file' ? `Filename: ${item.filename}` : `Example: ${item.filename}`}</span> : null}
             {typeof item.rowCount === 'number' ? <span>{item.rowCount.toLocaleString()} rows</span> : null}
             {!item.filename && item.headers?.length ? <span>Includes {item.headers.length} columns</span> : null}
             {unavailable ? (

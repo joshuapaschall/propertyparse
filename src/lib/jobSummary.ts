@@ -1,7 +1,8 @@
-import type { ParseSummary, RowResult } from '../types/parse';
+import type { ParseSummary, RowResult, UsageSummaryFlatFields, UsageSummaryNestedFields } from '../types/parse';
 import { computeParseSummaryFromRowResults } from './parseUtils';
+import { flattenUsageSummary, mergeUsageSummary } from './usageSummary';
 
-export type NormalizedJobSummary = {
+export type NormalizedJobSummary = UsageSummaryFlatFields & UsageSummaryNestedFields & {
   rowsReceived: number;
   validTotal: number;
   validUnique: number;
@@ -19,6 +20,9 @@ export type NormalizedJobSummary = {
 const toRecord = (input: unknown): Record<string, unknown> =>
   input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
 
+const toObjectRecord = (input: unknown): Record<string, unknown> | null =>
+  input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
+
 const pick = (record: Record<string, unknown>, keys: string[]) => {
   for (const key of keys) {
     const value = record[key];
@@ -30,7 +34,7 @@ const pick = (record: Record<string, unknown>, keys: string[]) => {
 };
 
 const toNumber = (value: unknown, fallback = 0) => {
-  if (typeof value === 'number') return Number.isFinite(value) ? value : fallback;
+  if (typeof value === 'number') return (Number.isFinite(value) ? value : fallback);
   if (typeof value === 'string') {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
@@ -68,6 +72,10 @@ export const normalizeJobSummary = (input: unknown): NormalizedJobSummary => {
     googleCallsUsed: toNumber(pick(record, ['google_calls_used', 'googleCallsUsed']), 0),
     openAIOcrCallsUsed: toNumber(pick(record, ['openai_ocr_calls_used', 'openAIOcrCallsUsed']), 0),
     spendUsd: toNumber(pick(record, ['spend_usd', 'spendUsd']), 0),
+    customer_safe_usage: toObjectRecord(record.customer_safe_usage) ?? undefined,
+    internal_admin_usage: toObjectRecord(record.internal_admin_usage) ?? undefined,
+    reconciliation: toObjectRecord(record.reconciliation) ?? undefined,
+    ...flattenUsageSummary(record),
   };
 };
 
@@ -84,6 +92,10 @@ export const toParseSummary = (summary: NormalizedJobSummary): ParseSummary => (
   google_calls_used: summary.googleCallsUsed,
   openai_ocr_calls_used: summary.openAIOcrCallsUsed,
   spend_usd: summary.spendUsd,
+  customer_safe_usage: summary.customer_safe_usage,
+  internal_admin_usage: summary.internal_admin_usage,
+  reconciliation: summary.reconciliation,
+  ...flattenUsageSummary(summary),
 });
 
 type JobSummaryEnvelope = {
@@ -91,20 +103,17 @@ type JobSummaryEnvelope = {
   summary?: unknown;
 };
 
-const toObjectRecord = (input: unknown): Record<string, unknown> | null =>
-  input && typeof input === 'object' && !Array.isArray(input) ? (input as Record<string, unknown>) : null;
-
 export const normalizeUpdatedJobPayload = (input: unknown) => {
   const envelope = toObjectRecord(input) as JobSummaryEnvelope | null;
   const nestedJob = toObjectRecord(envelope?.job);
   const nestedSummary = toObjectRecord(envelope?.summary);
   const flatRecord = toObjectRecord(input);
 
-  const mergedJob = {
+  const mergedJob = mergeUsageSummary({
     ...(nestedSummary ?? {}),
     ...(nestedJob ?? {}),
     ...((nestedJob || nestedSummary) ? {} : (flatRecord ?? {})),
-  };
+  });
 
   return {
     job: Object.keys(mergedJob).length > 0 ? mergedJob : null,
@@ -130,22 +139,24 @@ export const deriveDisplayedParseSummary = (
   }
 
   const rowSummary = computeParseSummaryFromRowResults(rowResults);
-  const backendCounters = summaryCandidates.reduce(
-    (acc, summary) => ({
-      google_calls_used: summary?.google_calls_used ?? acc.google_calls_used,
-      openai_ocr_calls_used: summary?.openai_ocr_calls_used ?? acc.openai_ocr_calls_used,
-      spend_usd: summary?.spend_usd ?? acc.spend_usd,
-    }),
-    {
-      google_calls_used: 0,
-      openai_ocr_calls_used: 0,
-      spend_usd: 0,
-    },
+  const backendSummary = summaryCandidates.reduce<Partial<ParseSummary>>(
+    (acc, summary) =>
+      summary
+        ? {
+            ...acc,
+            ...summary,
+            ...flattenUsageSummary(summary as Record<string, unknown>),
+          }
+        : acc,
+    {},
   );
 
   return {
+    ...backendSummary,
     ...rowSummary,
-    ...backendCounters,
+    google_calls_used: backendSummary.google_calls_used ?? 0,
+    openai_ocr_calls_used: backendSummary.openai_ocr_calls_used ?? 0,
+    spend_usd: backendSummary.spend_usd ?? 0,
     rows_received: Math.max(rowSummary.rows_received, firstSummary?.rows_received ?? 0),
-  };
+  } as ParseSummary;
 };

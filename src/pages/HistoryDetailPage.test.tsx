@@ -350,4 +350,46 @@ describe('HistoryDetailPage summary normalization', () => {
   });
 
 
+
+  it('renders remaining free cap and reconciliation details from nested pricing data', async () => {
+    getJobDetail.mockResolvedValue({
+      job: {
+        job_id: 'job-1',
+        customer_safe_usage: { estimated_job_cost_usd: 4.5, credits_used: 2 },
+        internal_admin_usage: {
+          estimated_monthly_total_usd: 40,
+          geocoding_calls: 3,
+          autocomplete_calls: 2,
+          place_details_calls: 1,
+          input_tokens: 10,
+          output_tokens: 5,
+        },
+        reconciliation: {
+          status: 'settled',
+          remaining_free_cap: { geocoding: 11, autocomplete: 22, place_details: 33 },
+        },
+      },
+      summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, out_of_scope: 0, duplicates: 0 },
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, out_of_scope: 0, duplicates: 0 },
+      row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1' }],
+      canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St' }],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/history/job-1']}>
+        <Routes>
+          <Route path="/history/:jobId" element={<HistoryDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Rows Received')).toBeInTheDocument();
+    expect(screen.getByText('Remaining free cap (Geocoding)')).toBeInTheDocument();
+    expect(screen.getByText('11')).toBeInTheDocument();
+    expect(screen.getByText('Reconciliation status')).toBeInTheDocument();
+    expect(screen.getByText('settled')).toBeInTheDocument();
+  });
+
 });

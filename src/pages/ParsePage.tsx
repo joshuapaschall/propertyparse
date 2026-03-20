@@ -73,6 +73,7 @@ import type {
   RowResult,
 } from '../types/parse';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
+import { flattenUsageSummary, mergeUsageSummary } from '../lib/usageSummary';
 import JobWarnings from '../components/JobWarnings';
 import { deriveDisplayedParseSummary, deriveDisplayedRowsReceived, normalizeJobSummary, normalizeUpdatedJobPayload, toParseSummary } from '../lib/jobSummary';
 import { writeLocalParsePersistenceState } from '../lib/persistenceStatus';
@@ -262,7 +263,7 @@ const formatCurrency = (value: unknown) => {
 
 const formatCount = (value: unknown) => {
   const amount = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(amount) && amount > 0 ? amount.toLocaleString() : null;
+  return Number.isFinite(amount) && amount >= 0 ? amount.toLocaleString() : null;
 };
 
 const normalizeStatus = (value?: string) => (value ?? '').toUpperCase();
@@ -294,7 +295,7 @@ const pickNumber = (record: JobRecord, keys: string[]) => {
 
 const buildParseSummaryFromJob = (record: JobRecord | null) => {
   if (!record) return null;
-  return toParseSummary(normalizeJobSummary(record));
+  return toParseSummary(normalizeJobSummary(mergeUsageSummary(record)));
 };
 
 const getRowIdValue = (row: JobRecord, index: number) => {
@@ -1242,24 +1243,32 @@ export default function ParsePage() {
     [parseSummary, rowResults],
   );
 
+  const usageSummary = useMemo(
+    () => flattenUsageSummary((computedParseSummary ?? parseSummary ?? {}) as Record<string, unknown>),
+    [computedParseSummary, parseSummary],
+  );
+
   const costPanelItems = useMemo(
     () =>
       isPrivileged
         ? [
-            { label: 'Estimated job cost', value: formatCurrency((computedParseSummary as ParseSummary | null)?.estimated_job_cost_usd ?? computedParseSummary?.spend_usd) },
-            { label: 'Estimated monthly total', value: formatCurrency((computedParseSummary as ParseSummary | null)?.estimated_monthly_total_usd ?? computedParseSummary?.estimated_monthly_cost_usd) },
-            { label: 'Geocoding calls', value: formatCount((computedParseSummary as ParseSummary | null)?.geocoding_calls ?? googleCallsUsed) },
-            { label: 'Autocomplete calls', value: formatCount((computedParseSummary as ParseSummary | null)?.autocomplete_calls) },
-            { label: 'Place details calls', value: formatCount((computedParseSummary as ParseSummary | null)?.place_details_calls) },
-            { label: 'OCR/AI token usage', value: formatCount((computedParseSummary as ParseSummary | null)?.ai_token_usage ?? computedParseSummary?.input_tokens ?? computedParseSummary?.output_tokens) },
-            { label: 'Remaining free-cap estimate', value: formatCurrency((computedParseSummary as ParseSummary | null)?.remaining_free_cap_estimate_usd ?? computedParseSummary?.remaining_free_cap_estimate) },
-            { label: 'Reconciliation status', value: (computedParseSummary as ParseSummary | null)?.reconciliation_status ?? null },
+            { label: 'Estimated job cost', value: formatCurrency(usageSummary.estimated_job_cost_usd ?? computedParseSummary?.spend_usd) },
+            { label: 'Estimated monthly total', value: formatCurrency(usageSummary.estimated_monthly_total_usd ?? computedParseSummary?.estimated_monthly_cost_usd) },
+            { label: 'Geocoding calls', value: formatCount(usageSummary.geocoding_calls ?? googleCallsUsed) },
+            { label: 'Autocomplete calls', value: formatCount(usageSummary.autocomplete_calls) },
+            { label: 'Place details calls', value: formatCount(usageSummary.place_details_calls) },
+            { label: 'Input tokens', value: formatCount(usageSummary.input_tokens) },
+            { label: 'Output tokens', value: formatCount(usageSummary.output_tokens) },
+            { label: 'Remaining free cap (Geocoding)', value: formatCount(usageSummary.remaining_free_cap_geocoding) },
+            { label: 'Remaining free cap (Autocomplete)', value: formatCount(usageSummary.remaining_free_cap_autocomplete) },
+            { label: 'Remaining free cap (Place Details)', value: formatCount(usageSummary.remaining_free_cap_place_details) },
+            { label: 'Reconciliation status', value: usageSummary.reconciliation_status ?? null },
           ]
         : [
-            { label: 'Estimated cost', value: formatCurrency((computedParseSummary as ParseSummary | null)?.estimated_job_cost_usd ?? computedParseSummary?.spend_usd) },
-            { label: 'Credits used', value: formatCount((computedParseSummary as ParseSummary | null)?.credits_used) },
+            { label: 'Estimated cost', value: formatCurrency(usageSummary.estimated_job_cost_usd ?? computedParseSummary?.spend_usd) },
+            { label: 'Credits used', value: formatCount(usageSummary.credits_used) },
           ],
-    [computedParseSummary, googleCallsUsed, isPrivileged],
+    [computedParseSummary, googleCallsUsed, isPrivileged, usageSummary],
   );
 
   const canonicalAddressesForDisplay = useMemo(
@@ -3058,6 +3067,7 @@ How to fix: ${fixHint}` : ''}`;
 
 
   const exportCatalogByType = useMemo(() => new Map(exportCatalog.map((item) => [item.type, item])), [exportCatalog]);
+  const originalUploadItem = exportCatalogByType.get('original_file');
   const hasVisibleRows = rowResults.length > 0 || canonicalAddressesForDisplay.length > 0;
   const exportIntegrityWarningVisible = useMemo(() => {
     if (!hasVisibleRows) return false;
@@ -3629,7 +3639,21 @@ How to fix: ${fixHint}` : ''}`;
                         Saved export rows are unavailable for this run. Downloads may be incomplete until backend persistence is repaired.
                       </p>
                     ) : null}
-                  <ExportPanel
+                  {originalUploadItem ? (
+              <div className="max-w-sm rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                <p className="font-semibold text-slate-700 dark:text-slate-100">Original Upload</p>
+                {originalUploadItem.available === false ? (
+                  <p className="mt-1">{originalUploadItem.unavailableMessage || 'The original upload is unavailable for this job.'}</p>
+                ) : (
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                    {originalUploadItem.filename ? <span>Filename: {originalUploadItem.filename}</span> : null}
+                    {originalUploadItem.contentType ? <span>Content type: {originalUploadItem.contentType}</span> : null}
+                    {typeof originalUploadItem.sizeBytes === 'number' ? <span>Size: {originalUploadItem.sizeBytes.toLocaleString()} bytes</span> : null}
+                  </div>
+                )}
+              </div>
+            ) : null}
+            <ExportPanel
                     triggerLabel="Export"
                     catalog={exportCatalog}
                     onDownload={(type, label) => {

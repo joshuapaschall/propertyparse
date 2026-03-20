@@ -545,4 +545,45 @@ describe('ParsePage', () => {
     expect(screen.getByText('Internal cost transparency')).toBeInTheDocument();
   });
 
+
+  it('displays flattened pricing after rehydrating a completed job', async () => {
+    getJobDetail.mockResolvedValue({
+      job: {
+        job_id: 'job-1',
+        customer_safe_usage: { estimated_job_cost_usd: 4.25, credits_used: 2 },
+        internal_admin_usage: {
+          estimated_monthly_total_usd: 91.2,
+          geocoding_calls: 3,
+          autocomplete_calls: 2,
+          place_details_calls: 1,
+          input_tokens: 120,
+          output_tokens: 45,
+        },
+        reconciliation: {
+          status: 'settled',
+          remaining_free_cap: { geocoding: 9, autocomplete: 8, place_details: 7 },
+        },
+      },
+      summary: { rows_received: 1, needs_review: 0, valid_total: 1, valid_unique: 1, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 1, attention_total: 0, spend_usd: 4.25 },
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 1, needs_review: 0, valid_total: 1, valid_unique: 1, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 1, attention_total: 0 },
+      row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1', formatted_address: '1 Main St' }],
+      canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St', city: 'Austin', state: 'TX', zip: '78701' }],
+      duplicate_groups: [],
+    });
+
+    render(<MemoryRouter initialEntries={['/parse?job=job-1']}><ParsePage /></MemoryRouter>);
+
+    expect(await screen.findByText('Internal cost transparency')).toBeInTheDocument();
+    expect(screen.getByText('Estimated job cost')).toBeInTheDocument();
+    expect(screen.getByText('$4.25')).toBeInTheDocument();
+    expect(screen.getByText('Estimated monthly total')).toBeInTheDocument();
+    expect(screen.getByText('$91.20')).toBeInTheDocument();
+    expect(screen.getByText('Remaining free cap (Geocoding)')).toBeInTheDocument();
+    expect(screen.getByText('9')).toBeInTheDocument();
+    expect(screen.getByText('Reconciliation status')).toBeInTheDocument();
+    expect(screen.getByText('settled')).toBeInTheDocument();
+  });
+
 });

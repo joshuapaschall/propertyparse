@@ -55,6 +55,9 @@ export type MeResponse = {
 export type MetricsRange = 'today' | 'week' | 'month' | 'year';
 
 export type MetricsSummary = {
+  customer_safe_usage?: Record<string, JsonValue>;
+  internal_admin_usage?: Record<string, JsonValue>;
+  reconciliation?: Record<string, JsonValue>;
   uploads: number;
   leads: number;
   matched: number;
@@ -289,6 +292,47 @@ const getFilenameFromDisposition = (value: string | null) => {
   const match = /filename\*?=(?:UTF-8'')?["']?([^"';\n]+)["']?/i.exec(value);
   if (!match) return null;
   return decodeURIComponent(match[1]);
+};
+
+
+const pickKnownFilename = (...values: Array<unknown>) => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+  return null;
+};
+
+const getOriginalUploadFilenameFallback = async (jobId: string) => {
+  const [catalogResult, detailResult] = await Promise.allSettled([
+    getJobExportCatalog(jobId),
+    getJobDetail(jobId),
+  ]);
+
+  const catalogFilename =
+    catalogResult.status === 'fulfilled'
+      ? pickKnownFilename(catalogResult.value.find((item) => item.type === 'original_file')?.filename)
+      : null;
+
+  const detailRecord =
+    detailResult.status === 'fulfilled'
+      ? ((detailResult.value.job ?? detailResult.value.summary ?? {}) as JobRecord)
+      : null;
+  const originalFileRecord =
+    detailRecord && typeof detailRecord.original_file === 'object' && !Array.isArray(detailRecord.original_file)
+      ? (detailRecord.original_file as JobRecord)
+      : null;
+
+  return pickKnownFilename(
+    catalogFilename,
+    originalFileRecord?.original_filename,
+    originalFileRecord?.file_name,
+    originalFileRecord?.filename,
+    detailRecord?.original_filename,
+    detailRecord?.file_name,
+    detailRecord?.filename,
+  );
 };
 
 export type UploadResponse = {
@@ -783,8 +827,12 @@ export async function downloadJobExport(jobId: string, type: JobExportType) {
   const blob = await res.blob();
   const contentType = res.headers.get('content-type') || blob.type || null;
   const sizeBytesHeader = res.headers.get('content-length');
+  const filenameFromHeader = getFilenameFromDisposition(res.headers.get('content-disposition'));
+  const filenameFromMetadata =
+    type === 'original_file' && !filenameFromHeader ? await getOriginalUploadFilenameFallback(jobId) : null;
   const filename =
-    getFilenameFromDisposition(res.headers.get('content-disposition')) ??
+    filenameFromHeader ??
+    filenameFromMetadata ??
     `job-${jobId}-${type}.${type === 'original_file' ? 'bin' : 'csv'}`;
   return {
     blob,

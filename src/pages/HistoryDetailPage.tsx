@@ -28,6 +28,7 @@ import {
 import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
+import { flattenUsageSummary, mergeUsageSummary } from '../lib/usageSummary';
 import { deriveDisplayedParseSummary, normalizeJobSummary, toParseSummary } from '../lib/jobSummary';
 import type { ExportCatalogItem } from '../types/exports';
 import type { CanonicalAddress, RowResult } from '../types/parse';
@@ -131,7 +132,7 @@ const renderOriginalAddressCell = (row: RowResult) => {
 
 const formatCount = (value: unknown) => {
   const amount = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(amount) && amount > 0 ? amount.toLocaleString() : null;
+  return Number.isFinite(amount) && amount >= 0 ? amount.toLocaleString() : null;
 };
 
 export default function HistoryDetailPage() {
@@ -166,7 +167,7 @@ export default function HistoryDetailPage() {
       try {
         const jobResults = await getJobResults(jobId, { fresh: true });
         setResults(jobResults);
-        setMergedJobSummary((prev) => ({ ...(prev ?? {}), ...((jobResults.summary ?? {}) as JobRecord) }));
+        setMergedJobSummary((prev) => mergeUsageSummary({ ...(prev ?? {}), ...((jobResults.summary ?? {}) as JobRecord) } as JobRecord));
         setResultsFinalizing(false);
         return;
       } catch (err) {
@@ -190,10 +191,10 @@ export default function HistoryDetailPage() {
     setError(null);
     try {
       const [jobDetail, catalog] = await Promise.all([getJobDetail(jobId), getJobExportCatalog(jobId)]);
-      const mergedJob = {
+      const mergedJob = mergeUsageSummary({
         ...(jobDetail.summary ?? {}),
         ...(jobDetail.job ?? {}),
-      } as JobRecord;
+      } as JobRecord);
       setMergedJobSummary(mergedJob);
       hasLoadedDetailRef.current = true;
       setJobMeta({
@@ -273,6 +274,8 @@ export default function HistoryDetailPage() {
     return deriveDisplayedParseSummary(rowResults, backendSummary);
   }, [mergedJobSummary, rowResults]);
 
+  const usageSummary = useMemo(() => flattenUsageSummary((mergedJobSummary ?? parseSummary ?? {}) as Record<string, unknown>), [mergedJobSummary, parseSummary]);
+
   const totalCost = useMemo(() => {
     const fromParseSummary = parseSummary?.spend_usd;
     const fromResultsSummary = pickNumber((results?.summary ?? {}) as JobRecord, ['spend_usd', 'spendUsd']);
@@ -284,20 +287,23 @@ export default function HistoryDetailPage() {
     () =>
       isPrivileged
         ? [
-            { label: 'Estimated job cost', value: formatCurrency(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['estimated_job_cost_usd']) ?? totalCost) },
-            { label: 'Estimated monthly total', value: formatCurrency(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['estimated_monthly_total_usd', 'estimated_monthly_cost_usd'])) },
-            { label: 'Geocoding calls', value: formatCount(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['geocoding_calls', 'google_calls_used'])) },
-            { label: 'Autocomplete calls', value: formatCount(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['autocomplete_calls'])) },
-            { label: 'Place details calls', value: formatCount(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['place_details_calls'])) },
-            { label: 'OCR/AI token usage', value: formatCount(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['ai_token_usage', 'input_tokens', 'output_tokens'])) },
-            { label: 'Remaining free-cap estimate', value: formatCurrency(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['remaining_free_cap_estimate_usd', 'remaining_free_cap_estimate'])) },
-            { label: 'Reconciliation status', value: pickString((mergedJobSummary ?? {}) as JobRecord, ['reconciliation_status']) },
+            { label: 'Estimated job cost', value: formatCurrency(usageSummary.estimated_job_cost_usd ?? totalCost) },
+            { label: 'Estimated monthly total', value: formatCurrency(usageSummary.estimated_monthly_total_usd ?? pickNumber((mergedJobSummary ?? {}) as JobRecord, ['estimated_monthly_cost_usd'])) },
+            { label: 'Geocoding calls', value: formatCount(usageSummary.geocoding_calls ?? pickNumber((mergedJobSummary ?? {}) as JobRecord, ['google_calls_used'])) },
+            { label: 'Autocomplete calls', value: formatCount(usageSummary.autocomplete_calls) },
+            { label: 'Place details calls', value: formatCount(usageSummary.place_details_calls) },
+            { label: 'Input tokens', value: formatCount(usageSummary.input_tokens) },
+            { label: 'Output tokens', value: formatCount(usageSummary.output_tokens) },
+            { label: 'Remaining free cap (Geocoding)', value: formatCount(usageSummary.remaining_free_cap_geocoding) },
+            { label: 'Remaining free cap (Autocomplete)', value: formatCount(usageSummary.remaining_free_cap_autocomplete) },
+            { label: 'Remaining free cap (Place Details)', value: formatCount(usageSummary.remaining_free_cap_place_details) },
+            { label: 'Reconciliation status', value: usageSummary.reconciliation_status ?? null },
           ]
         : [
-            { label: 'Estimated cost', value: formatCurrency(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['estimated_job_cost_usd']) ?? totalCost) },
-            { label: 'Credits used', value: formatCount(pickNumber((mergedJobSummary ?? {}) as JobRecord, ['credits_used'])) },
+            { label: 'Estimated cost', value: formatCurrency(usageSummary.estimated_job_cost_usd ?? totalCost) },
+            { label: 'Credits used', value: formatCount(usageSummary.credits_used) },
           ],
-    [isPrivileged, mergedJobSummary, totalCost],
+    [isPrivileged, mergedJobSummary, totalCost, usageSummary],
   );
 
   const canonicalAddresses = useMemo(
@@ -347,6 +353,7 @@ export default function HistoryDetailPage() {
   const paginate = <T,>(rows: T[]) => rows.slice((resultsPage - 1) * resultsPageSize, resultsPage * resultsPageSize);
 
   const exportCatalogByType = useMemo(() => new Map(exportCatalog.map((item) => [item.type, item])), [exportCatalog]);
+  const originalUploadItem = exportCatalogByType.get('original_file');
   const hasVisibleRows = rowResults.length > 0 || canonicalAddresses.length > 0;
   const exportIntegrityWarningVisible = useMemo(() => {
     if (!hasVisibleRows) return false;
@@ -502,6 +509,20 @@ export default function HistoryDetailPage() {
               <p className="max-w-sm rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
                 Saved export rows are unavailable for this run. Downloads may be incomplete until backend persistence is repaired.
               </p>
+            ) : null}
+            {originalUploadItem ? (
+              <div className="max-w-sm rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                <p className="font-semibold text-slate-700 dark:text-slate-100">Original Upload</p>
+                {originalUploadItem.available === false ? (
+                  <p className="mt-1">{originalUploadItem.unavailableMessage || 'The original upload is unavailable for this job.'}</p>
+                ) : (
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                    {originalUploadItem.filename ? <span>Filename: {originalUploadItem.filename}</span> : null}
+                    {originalUploadItem.contentType ? <span>Content type: {originalUploadItem.contentType}</span> : null}
+                    {typeof originalUploadItem.sizeBytes === 'number' ? <span>Size: {originalUploadItem.sizeBytes.toLocaleString()} bytes</span> : null}
+                  </div>
+                )}
+              </div>
             ) : null}
             <ExportPanel
               catalog={exportCatalog}

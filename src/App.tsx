@@ -80,6 +80,39 @@ const joinUrl = (path: string) =>
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
+
+export const bootstrapAuthSessionRequest = async (currentSession: Session) => {
+  const executeBootstrap = async (accessToken: string) =>
+    fetch(joinUrl('/auth/bootstrap'), {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    });
+
+  let accessToken = currentSession.access_token;
+  let response = await executeBootstrap(accessToken);
+
+  if (response.status === 401 || response.status === 403) {
+    const { data, error } = await supabase.auth.getSession();
+    const refreshedToken = data.session?.access_token;
+    if (!error && refreshedToken && refreshedToken !== accessToken) {
+      accessToken = refreshedToken;
+      response = await executeBootstrap(accessToken);
+    }
+  }
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(message || `Bootstrap failed with ${response.status}`);
+  }
+
+  return {
+    data: (await response.json()) as BootstrapResponse,
+    accessToken,
+  };
+};
+
 function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) {
@@ -102,17 +135,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsBootstrapping(true);
     setBootstrapError(null);
     try {
-      const res = await fetch(joinUrl('/auth/bootstrap'), {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${currentSession.access_token}`,
-        },
-      });
-      if (!res.ok) {
-        const message = await res.text();
-        throw new Error(message || `Bootstrap failed with ${res.status}`);
-      }
-      const data = (await res.json()) as BootstrapResponse;
+      const { data, accessToken } = await bootstrapAuthSessionRequest(currentSession);
       if ('noMembership' in data && data.noMembership) {
         setOrgId(null);
         setUserId(null);
@@ -124,7 +147,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
             : 'No organization found for your account. Contact your admin or create an org.',
         );
         setAuthHeaderState({
-          accessToken: currentSession.access_token,
+          accessToken,
           orgId: null,
           userId: currentSession.user.id,
           role: null,
@@ -134,7 +157,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
 
       setPendingInvitation(null);
       setAuthHeaderState({
-        accessToken: currentSession.access_token,
+        accessToken,
         orgId: data.orgId,
         userId: data.userId,
         role: data.role,
@@ -144,7 +167,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       setUserId(me.userId);
       setRole(me.role);
       setAuthHeaderState({
-        accessToken: currentSession.access_token,
+        accessToken,
         orgId: me.orgId,
         userId: me.userId,
         role: me.role,
