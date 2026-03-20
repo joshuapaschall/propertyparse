@@ -10,6 +10,7 @@ import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
 import { flattenUsageSummary } from '../lib/usageSummary';
 import { buildAdminCostSections, buildProductSafeCostItems } from '../lib/costTelemetry';
+import { hasLocalOnlyBillingWarning, LOCAL_ONLY_BILLING_WARNING } from '../lib/telemetryWarnings';
 
 const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -154,11 +155,16 @@ export default function DashboardPage() {
         ? buildAdminCostSections({
             usage: usageMetrics ?? {},
             estimatedJobCost: metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd,
-            estimatedMonthlyTotal: metrics?.estimated_monthly_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd,
-            jobGeocodingCalls: metrics?.googleCalls,
+            estimatedMonthlyTotal: metrics?.google_month_to_date_actual_or_estimated_cost_usd ?? metrics?.estimated_monthly_total_usd ?? metrics?.estimated_monthly_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd,
+            jobGeocodingCalls: (metrics as Record<string, unknown>)?.job_geocoding_calls ?? metrics?.googleCalls,
           }).filter((section) => section.title === 'Month to date')
         : undefined,
     [isPrivileged, metrics, usageMetrics],
+  );
+
+  const showLocalOnlyBillingWarning = useMemo(
+    () => hasLocalOnlyBillingWarning(usageMetrics ?? {}),
+    [usageMetrics],
   );
 
   const costPanelItems = useMemo(
@@ -236,6 +242,11 @@ export default function DashboardPage() {
               </p>
             ) : null}
             <div className="mt-6">
+              {showLocalOnlyBillingWarning ? (
+                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-100">
+                  {LOCAL_ONLY_BILLING_WARNING}
+                </div>
+              ) : null}
               <InternalCostPanel
                 title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
                 subtitle={

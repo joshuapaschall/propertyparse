@@ -394,4 +394,54 @@ describe('HistoryDetailPage summary normalization', () => {
     expect(screen.getByText('settled')).toBeInTheDocument();
   });
 
+  it('renders job geocoding calls from job_geocoding_calls instead of google_calls_used', async () => {
+    getJobDetail.mockResolvedValue({
+      job: { job_id: 'job-1', spend_usd: 2.5, job_geocoding_calls: 9, google_calls_used: 41 },
+      summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, out_of_scope: 0, duplicates: 0 },
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, out_of_scope: 0, duplicates: 0 },
+      row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1' }],
+      canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St' }],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/history/job-1']}>
+        <Routes>
+          <Route path="/history/:jobId" element={<HistoryDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Job geocoding calls')).toBeInTheDocument();
+    expect(screen.getByText('9')).toBeInTheDocument();
+    expect(screen.queryByText('41')).not.toBeInTheDocument();
+  });
+
+  it('shows the local-only warning when billing snapshot data is missing', async () => {
+    getJobDetail.mockResolvedValue({
+      job: {
+        job_id: 'job-1',
+        billing_snapshot_missing: true,
+        month_to_date_geocoding_calls: 3,
+      },
+      summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, out_of_scope: 0, duplicates: 0 },
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, out_of_scope: 0, duplicates: 0 },
+      row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1' }],
+      canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St' }],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/history/job-1']}>
+        <Routes>
+          <Route path="/history/:jobId" element={<HistoryDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Local estimate only/i)).toBeInTheDocument();
+  });
+
 });
