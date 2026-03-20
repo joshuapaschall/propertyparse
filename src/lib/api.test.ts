@@ -236,3 +236,84 @@ describe('export APIs', () => {
     expect(result.filename).toBe('catalog-source.xlsx');
   });
 });
+
+
+describe('provider usage admin APIs', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.restoreAllMocks();
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://supabase.example.com');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+
+    const { setAuthHeaderState } = await import('./authState');
+    setAuthHeaderState({
+      accessToken: 'token-123',
+      orgId: 'org-123',
+      userId: 'user-123',
+      role: 'owner',
+    });
+  });
+
+  afterEach(async () => {
+    const { clearAuthHeaderState } = await import('./authState');
+    clearAuthHeaderState();
+    vi.unstubAllEnvs();
+  });
+
+  it('loads google and openai provider usage summaries from the admin endpoints', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ data: { sync_status: 'ready', snapshot_rows_count: 8 } }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ data: { sync_status: 'ready', project_id: 'proj_123' } }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+    );
+
+    const { getGoogleProviderUsageStatus, getOpenAiProviderUsageSummary } = await import('./api');
+
+    await expect(getGoogleProviderUsageStatus()).resolves.toEqual({ sync_status: 'ready', snapshot_rows_count: 8 });
+    await expect(getOpenAiProviderUsageSummary()).resolves.toEqual({ sync_status: 'ready', project_id: 'proj_123' });
+  });
+
+  it('posts to the google and openai sync endpoints', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ data: { ok: true, message: 'Google sync started' } }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ data: { ok: true, message: 'OpenAI sync started' } }), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        ),
+    );
+
+    const { syncGoogleProviderUsage, syncOpenAiProviderUsage } = await import('./api');
+
+    await expect(syncGoogleProviderUsage()).resolves.toEqual({ ok: true, message: 'Google sync started' });
+    await expect(syncOpenAiProviderUsage()).resolves.toEqual({ ok: true, message: 'OpenAI sync started' });
+
+    const fetchMock = vi.mocked(fetch);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.example.com/admin/provider-usage/google/sync');
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: 'POST' });
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('https://api.example.com/admin/provider-usage/openai/sync');
+    expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' });
+  });
+});
