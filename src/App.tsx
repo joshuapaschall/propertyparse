@@ -15,6 +15,7 @@ import LoadingSpinner from './LoadingSpinner';
 import { ToastProvider } from './components/ui/ToastProvider';
 import { acceptInvitation, getMe } from './lib/api';
 import { clearAuthHeaderState, setAuthHeaderState } from './lib/authState';
+import { AUTH_FAILURE_MESSAGE, AUTH_REFRESHING_MESSAGE, ensureFreshSession } from './lib/sessionRefresh';
 import { supabase } from './lib/supabase';
 import { getSiteUrl } from './lib/siteUrl';
 import './App.css';
@@ -94,12 +95,9 @@ export const bootstrapAuthSessionRequest = async (currentSession: Session) => {
   let response = await executeBootstrap(accessToken);
 
   if (response.status === 401 || response.status === 403) {
-    const { data, error } = await supabase.auth.getSession();
-    const refreshedToken = data.session?.access_token;
-    if (!error && refreshedToken && refreshedToken !== accessToken) {
-      accessToken = refreshedToken;
-      response = await executeBootstrap(accessToken);
-    }
+    const refreshed = await ensureFreshSession(accessToken);
+    accessToken = refreshed.accessToken;
+    response = await executeBootstrap(accessToken);
   }
 
   if (!response.ok) {
@@ -175,7 +173,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       setBootstrapError(null);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to bootstrap session.';
-      setBootstrapError(message);
+      setBootstrapError(message === AUTH_REFRESHING_MESSAGE ? AUTH_FAILURE_MESSAGE : message);
       setOrgId(null);
       setUserId(null);
       setRole(null);

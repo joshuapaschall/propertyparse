@@ -5,8 +5,8 @@ import type {
   ParseSummary,
   RowResult,
 } from '../types/parse';
-import { getAuthHeaderState, mergeAuthHeaderState } from './authState';
-import { supabase } from './supabase';
+import { getAuthHeaderState } from './authState';
+import { AUTH_FAILURE_MESSAGE, ensureFreshSession } from './sessionRefresh';
 import type { ExportCatalogResponseItem } from '../types/exports';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
@@ -162,8 +162,6 @@ const createApiError = (info: ApiErrorInfo): ApiError => {
 };
 
 const AUTH_FAILURE_STATUSES = new Set([401, 403]);
-const AUTH_FAILURE_MESSAGE = 'We couldn’t verify your session. Sign in again.';
-const AUTH_RETRY_MESSAGE = 'Your session refreshed. Please retry.';
 
 const toFriendlyAuthMessage = (status: number, detail: string) => {
   const lowered = detail.toLowerCase();
@@ -179,21 +177,12 @@ const toFriendlyAuthMessage = (status: number, detail: string) => {
 };
 
 const refreshAuthHeadersFromSession = async () => {
-  const { data, error } = await supabase.auth.getSession();
-  if (error || !data.session?.access_token) {
-    throw createApiError({
-      message: AUTH_FAILURE_MESSAGE,
-      endpoint: 'session-refresh',
-      status: 401,
-    });
-  }
-
-  mergeAuthHeaderState({
-    accessToken: data.session.access_token,
-    userId: data.session.user?.id ?? getAuthHeaderState().userId,
-  });
-
-  return getAuthHeaders();
+  const refreshed = await ensureFreshSession(getAuthHeaderState().accessToken);
+  return {
+    Authorization: `Bearer ${refreshed.accessToken}`,
+    ...(getAuthHeaderState().orgId ? { 'X-Org-Id': getAuthHeaderState().orgId } : {}),
+    ...(getAuthHeaderState().userId ? { 'X-User-Id': getAuthHeaderState().userId } : {}),
+  };
 };
 
 const performAuthedFetch = async (path: string, options: RequestInit, retryOnAuthFailure = true): Promise<Response> => {
@@ -226,7 +215,7 @@ const performAuthedFetch = async (path: string, options: RequestInit, retryOnAut
         throw error;
       }
       throw createApiError({
-        message: AUTH_RETRY_MESSAGE,
+        message: AUTH_FAILURE_MESSAGE,
         endpoint: path,
         status: res.status,
       });

@@ -94,7 +94,8 @@ describe('DashboardPage', () => {
     authState.role = 'admin';
     render(<MemoryRouter><DashboardPage /></MemoryRouter>);
     expect(await screen.findByText('Internal cost transparency')).toBeInTheDocument();
-    expect(screen.getByText('Estimated job cost')).toBeInTheDocument();
+    expect(screen.getByText('Month to date')).toBeInTheDocument();
+    expect(screen.getByText('Estimated monthly total')).toBeInTheDocument();
   });
 
   it('keeps cost copy product-safe for member roles', async () => {
@@ -132,9 +133,11 @@ describe('DashboardPage', () => {
 
     render(<MemoryRouter><DashboardPage /></MemoryRouter>);
     expect(await screen.findByText('Internal cost transparency')).toBeInTheDocument();
+    expect(screen.getByText('Month to date')).toBeInTheDocument();
     expect(screen.getByText('$45.50')).toBeInTheDocument();
     expect(screen.getByText('Remaining free cap (Geocoding)')).toBeInTheDocument();
     expect(screen.getByText('100')).toBeInTheDocument();
+    expect(screen.getByText('Reconciliation / sync status')).toBeInTheDocument();
     expect(screen.getByText('matched')).toBeInTheDocument();
   });
 

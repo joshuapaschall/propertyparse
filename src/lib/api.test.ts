@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getSession = vi.fn();
+const refreshSession = vi.fn();
 
 vi.mock('./supabase', () => ({
   supabase: {
     auth: {
       getSession: (...args: unknown[]) => getSession(...args),
+      refreshSession: (...args: unknown[]) => refreshSession(...args),
     },
   },
 }));
@@ -17,7 +19,7 @@ describe('API error handling', () => {
     vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com');
     vi.stubEnv('VITE_SUPABASE_URL', 'https://supabase.example.com');
     vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
-    getSession.mockResolvedValue({ data: { session: { access_token: 'refreshed-token', user: { id: 'user-123' } } }, error: null });
+    refreshSession.mockResolvedValue({ data: { session: { access_token: 'refreshed-token', user: { id: 'user-123' } } }, error: null });
 
     const { setAuthHeaderState } = await import('./authState');
     setAuthHeaderState({
@@ -97,7 +99,7 @@ describe('API error handling', () => {
     const result = await getMetricsSummary('today');
 
     expect(result).toEqual({ ok: true });
-    expect(getSession).toHaveBeenCalledTimes(1);
+    expect(refreshSession).toHaveBeenCalledTimes(1);
     const fetchMock = vi.mocked(fetch);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({

@@ -576,13 +576,15 @@ describe('ParsePage', () => {
     render(<MemoryRouter initialEntries={['/parse?job=job-1']}><ParsePage /></MemoryRouter>);
 
     expect(await screen.findByText('Internal cost transparency')).toBeInTheDocument();
-    expect(screen.getByText('Estimated job cost')).toBeInTheDocument();
+    expect(await screen.findByText('This job')).toBeInTheDocument();
+    expect(await screen.findByText('Estimated job cost')).toBeInTheDocument();
     expect(screen.getByText('$4.25')).toBeInTheDocument();
+    expect(screen.getByText('Month to date')).toBeInTheDocument();
     expect(screen.getByText('Estimated monthly total')).toBeInTheDocument();
     expect(screen.getByText('$91.20')).toBeInTheDocument();
     expect(screen.getByText('Remaining free cap (Geocoding)')).toBeInTheDocument();
     expect(screen.getByText('9')).toBeInTheDocument();
-    expect(screen.getByText('Reconciliation status')).toBeInTheDocument();
+    expect(screen.getByText('Reconciliation / sync status')).toBeInTheDocument();
     expect(screen.getByText('settled')).toBeInTheDocument();
   });
 

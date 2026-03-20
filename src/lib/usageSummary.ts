@@ -102,6 +102,34 @@ export const flattenUsageSummary = (input: Record<string, unknown>): UsageSummar
   );
   assignNumber('credits_used', record.credits_used, customerSafeUsage.credits_used, internalAdminUsage.credits_used);
   assignString('reconciliation_status', record.reconciliation_status, reconciliation.status, reconciliation.reconciliation_status);
+  assignString(
+    'pricing_accuracy',
+    record.pricing_accuracy,
+    internalAdminUsage.pricing_accuracy,
+    customerSafeUsage.pricing_accuracy,
+    reconciliation.pricing_accuracy,
+  );
+  assignString(
+    'provider_usage_source',
+    record.provider_usage_source,
+    internalAdminUsage.provider_usage_source,
+    customerSafeUsage.provider_usage_source,
+    reconciliation.provider_usage_source,
+  );
+  assignString(
+    'billing_snapshot_as_of',
+    record.billing_snapshot_as_of,
+    internalAdminUsage.billing_snapshot_as_of,
+    customerSafeUsage.billing_snapshot_as_of,
+    reconciliation.billing_snapshot_as_of,
+  );
+  assignNumber(
+    'sync_lag_seconds',
+    record.sync_lag_seconds,
+    internalAdminUsage.sync_lag_seconds,
+    customerSafeUsage.sync_lag_seconds,
+    reconciliation.sync_lag_seconds,
+  );
   assignNumber('remaining_free_cap_geocoding', record.remaining_free_cap_geocoding, remainingFreeCap.geocoding, internalAdminUsage.remaining_free_cap_geocoding, customerSafeUsage.remaining_free_cap_geocoding);
   assignNumber('remaining_free_cap_autocomplete', record.remaining_free_cap_autocomplete, remainingFreeCap.autocomplete, internalAdminUsage.remaining_free_cap_autocomplete, customerSafeUsage.remaining_free_cap_autocomplete);
   assignNumber('remaining_free_cap_place_details', record.remaining_free_cap_place_details, remainingFreeCap.place_details, remainingFreeCap.placeDetails, internalAdminUsage.remaining_free_cap_place_details, customerSafeUsage.remaining_free_cap_place_details);
