@@ -1,50 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { deriveDisplayedParseSummary, normalizeJobSummary, normalizeUpdatedJobPayload } from './jobSummary';
-import { flattenUsageSummary } from './usageSummary';
-
-describe('flattenUsageSummary', () => {
-  it('flattens nested backend pricing fields into stable UI values', () => {
-    expect(
-      flattenUsageSummary({
-        customer_safe_usage: {
-          estimated_job_cost_usd: 1.25,
-          credits_used: 3,
-        },
-        internal_admin_usage: {
-          estimated_monthly_total_usd: 88.5,
-          geocoding_calls: 12,
-          autocomplete_calls: 7,
-          place_details_calls: 5,
-          input_tokens: 100,
-          output_tokens: 40,
-        },
-        reconciliation: {
-          status: 'pending_review',
-          remaining_free_cap: {
-            geocoding: 25,
-            autocomplete: 30,
-            place_details: 35,
-          },
-        },
-      }),
-    ).toEqual({
-      estimated_job_cost_usd: 1.25,
-      estimated_monthly_total_usd: 88.5,
-      geocoding_calls: 12,
-      autocomplete_calls: 7,
-      place_details_calls: 5,
-      input_tokens: 100,
-      output_tokens: 40,
-      ai_token_usage: 140,
-      credits_used: 3,
-      reconciliation_status: 'pending_review',
-      remaining_free_cap_geocoding: 25,
-      remaining_free_cap_autocomplete: 30,
-      remaining_free_cap_place_details: 35,
-    });
-  });
-});
-
 describe('normalizeJobSummary', () => {
   it('prefers needs_review over unmatched', () => {
     const summary = normalizeJobSummary({ needs_review: 3, unmatched: 9 });
@@ -64,6 +19,9 @@ describe('normalizeJobSummary', () => {
   it('preserves pricing/admin metadata from nested usage blocks', () => {
     const summary = normalizeJobSummary({
       rows_received: 9,
+      job_geocoding_calls: 4,
+      month_to_date_geocoding_calls: 42,
+      billing_snapshot_missing: true,
       internal_admin_usage: { geocoding_calls: 12, input_tokens: 30, output_tokens: 10 },
       customer_safe_usage: { estimated_job_cost_usd: 4.5, credits_used: 2 },
       reconciliation: { reconciliation_status: 'settled', remaining_free_cap: { geocoding: 88 } },
@@ -71,9 +29,12 @@ describe('normalizeJobSummary', () => {
 
     expect(summary.estimated_job_cost_usd).toBe(4.5);
     expect(summary.geocoding_calls).toBe(12);
+    expect(summary.job_geocoding_calls).toBe(4);
+    expect(summary.month_to_date_geocoding_calls).toBe(42);
     expect(summary.ai_token_usage).toBe(40);
     expect(summary.credits_used).toBe(2);
     expect(summary.reconciliation_status).toBe('settled');
+    expect(summary.billing_snapshot_missing).toBe(true);
     expect(summary.remaining_free_cap_geocoding).toBe(88);
   });
 

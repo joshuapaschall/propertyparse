@@ -125,6 +125,9 @@ describe('DashboardPage', () => {
         input_tokens: 200,
         output_tokens: 50,
       },
+      month_to_date_geocoding_calls: 14,
+      month_to_date_autocomplete_calls: 7,
+      month_to_date_place_details_calls: 5,
       reconciliation: {
         status: 'matched',
         remaining_free_cap: { geocoding: 100, autocomplete: 90, place_details: 80 },
@@ -139,6 +142,49 @@ describe('DashboardPage', () => {
     expect(screen.getByText('100')).toBeInTheDocument();
     expect(screen.getByText('Reconciliation / sync status')).toBeInTheDocument();
     expect(screen.getByText('matched')).toBeInTheDocument();
+  });
+
+  it('renders explicit month-to-date values instead of defaulting month cards to zero', async () => {
+    authState.role = 'admin';
+    getMetricsSummary.mockResolvedValue({
+      files_uploaded: 1,
+      potential_properties: 2,
+      valid_unique: 1,
+      review_queue_total: 0,
+      exports: 0,
+      month_to_date_geocoding_calls: 19,
+      month_to_date_autocomplete_calls: 8,
+      month_to_date_place_details_calls: 6,
+      google_month_to_date_actual_or_estimated_cost_usd: 27.4,
+      geocoding_calls: 0,
+      autocomplete_calls: 0,
+      place_details_calls: 0,
+    });
+
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>);
+
+    expect(await screen.findByText('Month-to-date geocoding usage')).toBeInTheDocument();
+    expect(screen.getByText('19')).toBeInTheDocument();
+    expect(screen.getByText('8')).toBeInTheDocument();
+    expect(screen.getByText('6')).toBeInTheDocument();
+    expect(screen.queryAllByText(/^0$/).length).toBeLessThan(3);
+  });
+
+  it('shows the local-only warning when billing snapshot data is missing', async () => {
+    authState.role = 'admin';
+    getMetricsSummary.mockResolvedValue({
+      files_uploaded: 1,
+      potential_properties: 1,
+      valid_unique: 1,
+      review_queue_total: 0,
+      exports: 0,
+      billing_snapshot_missing: true,
+      month_to_date_geocoding_calls: 5,
+    });
+
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>);
+
+    expect(await screen.findByText(/Local estimate only/i)).toBeInTheDocument();
   });
 
 });

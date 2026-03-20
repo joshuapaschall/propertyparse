@@ -34,6 +34,7 @@ import type { ExportCatalogItem } from '../types/exports';
 import type { CanonicalAddress, RowResult } from '../types/parse';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
 import { buildAdminCostSections, buildProductSafeCostItems } from '../lib/costTelemetry';
+import { hasLocalOnlyBillingWarning, LOCAL_ONLY_BILLING_WARNING } from '../lib/telemetryWarnings';
 
 const RESULTS_RETRY_MAX_ATTEMPTS = 6;
 const RESULTS_RETRY_BASE_DELAY_MS = 800;
@@ -290,11 +291,16 @@ export default function HistoryDetailPage() {
         ? buildAdminCostSections({
             usage: usageSummary,
             estimatedJobCost: totalCost,
-            estimatedMonthlyTotal: pickNumber((mergedJobSummary ?? {}) as JobRecord, ['estimated_monthly_cost_usd']),
-            jobGeocodingCalls: pickNumber((mergedJobSummary ?? {}) as JobRecord, ['google_calls_used']),
+            estimatedMonthlyTotal: pickNumber((mergedJobSummary ?? {}) as JobRecord, ['google_month_to_date_actual_or_estimated_cost_usd', 'estimated_monthly_total_usd', 'estimated_monthly_cost_usd']),
+            jobGeocodingCalls: pickNumber((mergedJobSummary ?? {}) as JobRecord, ['job_geocoding_calls', 'google_calls_used']),
           })
         : undefined,
     [isPrivileged, mergedJobSummary, totalCost, usageSummary],
+  );
+
+  const showLocalOnlyBillingWarning = useMemo(
+    () => hasLocalOnlyBillingWarning(usageSummary),
+    [usageSummary],
   );
 
   const costPanelItems = useMemo(
@@ -550,13 +556,20 @@ export default function HistoryDetailPage() {
               </button>
             </div>
           </div>
-          <InternalCostPanel
+          <div className="space-y-3">
+            {showLocalOnlyBillingWarning ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-100">
+                {LOCAL_ONLY_BILLING_WARNING}
+              </div>
+            ) : null}
+            <InternalCostPanel
             title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
             subtitle={isPrivileged ? 'Internal-only testing and reconciliation fields.' : 'Product-safe estimate only.'}
             items={costPanelItems}
             sections={costPanelSections}
             isPrivileged={isPrivileged}
-          />
+            />
+          </div>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">

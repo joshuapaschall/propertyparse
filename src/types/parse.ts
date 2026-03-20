@@ -2,12 +2,23 @@ export type UsageSummaryFlatFields = {
   geocoding_calls?: number;
   autocomplete_calls?: number;
   place_details_calls?: number;
+  job_geocoding_calls?: number;
+  job_autocomplete_calls?: number;
+  job_place_details_calls?: number;
   ai_token_usage?: number;
   input_tokens?: number;
   output_tokens?: number;
+  job_input_tokens?: number;
+  job_output_tokens?: number;
+  month_to_date_geocoding_calls?: number;
+  month_to_date_autocomplete_calls?: number;
+  month_to_date_place_details_calls?: number;
+  month_to_date_input_tokens?: number;
+  month_to_date_output_tokens?: number;
   estimated_job_cost_usd?: number;
   estimated_monthly_total_usd?: number;
   estimated_monthly_cost_usd?: number;
+  google_month_to_date_actual_or_estimated_cost_usd?: number;
   remaining_free_cap_estimate?: number;
   remaining_free_cap_estimate_usd?: number;
   remaining_free_cap_geocoding?: number;
@@ -18,6 +29,9 @@ export type UsageSummaryFlatFields = {
   pricing_accuracy?: string;
   provider_usage_source?: string;
   billing_snapshot_as_of?: string;
+  billing_snapshot_missing?: boolean;
+  google_snapshot_rows_count?: number;
+  google_billing_sync_configured?: boolean;
   sync_lag_seconds?: number;
 };
 

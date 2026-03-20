@@ -78,6 +78,7 @@ import JobWarnings from '../components/JobWarnings';
 import { deriveDisplayedParseSummary, deriveDisplayedRowsReceived, normalizeJobSummary, normalizeUpdatedJobPayload, toParseSummary } from '../lib/jobSummary';
 import { writeLocalParsePersistenceState } from '../lib/persistenceStatus';
 import { buildAdminCostSections, buildProductSafeCostItems } from '../lib/costTelemetry';
+import { hasLocalOnlyBillingWarning, LOCAL_ONLY_BILLING_WARNING } from '../lib/telemetryWarnings';
 import type { ExportCatalogItem } from '../types/exports';
 import { publishJobUpdate } from '../lib/liveUpdates';
 
@@ -1245,8 +1246,13 @@ export default function ParsePage() {
   );
 
   const usageSummary = useMemo(
-    () => flattenUsageSummary((computedParseSummary ?? parseSummary ?? {}) as Record<string, unknown>),
-    [computedParseSummary, parseSummary],
+    () =>
+      flattenUsageSummary({
+        ...((((parsePayload as { summary?: Record<string, unknown> } | null)?.summary ?? {}) as Record<string, unknown>)),
+        ...(((parseSummary ?? {}) as Record<string, unknown>)),
+        ...(((computedParseSummary ?? {}) as Record<string, unknown>)),
+      }),
+    [computedParseSummary, parsePayload, parseSummary],
   );
 
   const costPanelSections = useMemo(
@@ -1256,10 +1262,15 @@ export default function ParsePage() {
             usage: usageSummary,
             estimatedJobCost: computedParseSummary?.spend_usd,
             estimatedMonthlyTotal: computedParseSummary?.estimated_monthly_cost_usd,
-            jobGeocodingCalls: googleCallsUsed,
+            jobGeocodingCalls: computedParseSummary?.job_geocoding_calls ?? googleCallsUsed,
           })
         : undefined,
     [computedParseSummary, googleCallsUsed, isPrivileged, usageSummary],
+  );
+
+  const showLocalOnlyBillingWarning = useMemo(
+    () => hasLocalOnlyBillingWarning(usageSummary),
+    [usageSummary],
   );
 
   const costPanelItems = useMemo(
@@ -1363,13 +1374,13 @@ export default function ParsePage() {
   }, [allNeedsReviewRowIds]);
 
   const rowAccountingMismatch = useMemo(() => {
-    if (!parseSummary) return false;
+    if (!parseSummary || resultsFinalizing) return false;
     const responseRows =
       (metadata?.rows_received as number) ||
       (metadata?.rowsReceived as number) ||
       parseSummary.rows_received;
     return rowResults.length !== responseRows;
-  }, [metadata, parseSummary, rowResults.length]);
+  }, [metadata, parseSummary, resultsFinalizing, rowResults.length]);
 
   const accountedRowsFromSummary = useMemo(() => {
     const accountedRows =
@@ -2199,6 +2210,7 @@ How to fix: ${fixHint}` : ''}`;
             })
             .catch((resultsError) => {
               if (isCompletionLikePhase(status) || isCompletionLikePhase(phase)) {
+                setResultsFinalizing(false);
                 throw resultsError;
               }
               return false;
@@ -3944,6 +3956,11 @@ How to fix: ${fixHint}` : ''}`;
             </div>
           )}
           <div className="mt-6">
+            {showLocalOnlyBillingWarning ? (
+              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-100">
+                {LOCAL_ONLY_BILLING_WARNING}
+              </div>
+            ) : null}
             <InternalCostPanel
               title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
               subtitle={isPrivileged ? 'Internal-only usage and reconciliation fields.' : 'Product-safe estimate only.'}
