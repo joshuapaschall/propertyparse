@@ -105,4 +105,37 @@ describe('DashboardPage', () => {
     expect(screen.getByText('Estimated cost')).toBeInTheDocument();
   });
 
+
+  it('renders admin pricing transparency from nested usage data', async () => {
+    authState.role = 'admin';
+    getMetricsSummary.mockResolvedValue({
+      files_uploaded: 4,
+      potential_properties: 20,
+      valid_unique: 10,
+      review_queue_total: 3,
+      exports: 2,
+      total_cost_usd: 12.25,
+      customer_safe_usage: { estimated_job_cost_usd: 3.75, credits_used: 6 },
+      internal_admin_usage: {
+        estimated_monthly_total_usd: 45.5,
+        geocoding_calls: 14,
+        autocomplete_calls: 7,
+        place_details_calls: 5,
+        input_tokens: 200,
+        output_tokens: 50,
+      },
+      reconciliation: {
+        status: 'matched',
+        remaining_free_cap: { geocoding: 100, autocomplete: 90, place_details: 80 },
+      },
+    });
+
+    render(<MemoryRouter><DashboardPage /></MemoryRouter>);
+    expect(await screen.findByText('Internal cost transparency')).toBeInTheDocument();
+    expect(screen.getByText('$45.50')).toBeInTheDocument();
+    expect(screen.getByText('Remaining free cap (Geocoding)')).toBeInTheDocument();
+    expect(screen.getByText('100')).toBeInTheDocument();
+    expect(screen.getByText('matched')).toBeInTheDocument();
+  });
+
 });

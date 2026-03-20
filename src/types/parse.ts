@@ -1,14 +1,4 @@
-export type ParseSummary = {
-  rows_received: number;
-  valid_total: number;
-  valid_unique: number;
-  needs_review: number;
-  out_of_scope: number;
-  skipped: number;
-  duplicates: number;
-  matched: number;
-  attention_total: number;
-  google_calls_used?: number;
+export type UsageSummaryFlatFields = {
   geocoding_calls?: number;
   autocomplete_calls?: number;
   place_details_calls?: number;
@@ -20,8 +10,30 @@ export type ParseSummary = {
   estimated_monthly_cost_usd?: number;
   remaining_free_cap_estimate?: number;
   remaining_free_cap_estimate_usd?: number;
+  remaining_free_cap_geocoding?: number;
+  remaining_free_cap_autocomplete?: number;
+  remaining_free_cap_place_details?: number;
   credits_used?: number;
   reconciliation_status?: string;
+};
+
+export type UsageSummaryNestedFields = {
+  customer_safe_usage?: Record<string, unknown>;
+  internal_admin_usage?: Record<string, unknown>;
+  reconciliation?: Record<string, unknown>;
+};
+
+export type ParseSummary = UsageSummaryFlatFields & UsageSummaryNestedFields & {
+  rows_received: number;
+  valid_total: number;
+  valid_unique: number;
+  needs_review: number;
+  out_of_scope: number;
+  skipped: number;
+  duplicates: number;
+  matched: number;
+  attention_total: number;
+  google_calls_used?: number;
   openai_ocr_calls_used?: number;
   spend_usd?: number;
   unmatched?: number;

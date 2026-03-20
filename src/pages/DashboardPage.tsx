@@ -8,6 +8,7 @@ import { getApiErrorInfo, getMetricsSummary, MetricsRange, MetricsSummary } from
 import { useToast } from '../components/ui/ToastProvider';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
+import { flattenUsageSummary } from '../lib/usageSummary';
 
 const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -22,6 +23,10 @@ const formatCurrency = (value: unknown) => {
   const amount = typeof value === 'number' ? value : Number(value);
   if (!Number.isFinite(amount)) return null;
   return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(amount);
+};
+const formatCount = (value: unknown) => {
+  const amount = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(amount) ? amount.toLocaleString() : null;
 };
 
 export default function DashboardPage() {
@@ -106,6 +111,8 @@ export default function DashboardPage() {
     return () => window.clearInterval(timer);
   }, [loadMetrics]);
 
+  const usageMetrics = useMemo(() => (metrics ? flattenUsageSummary(metrics as Record<string, unknown>) : null), [metrics]);
+
   const kpis = useMemo(() => {
     const spend = toNumber(metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd);
     return [
@@ -144,20 +151,23 @@ export default function DashboardPage() {
     () =>
       isPrivileged
         ? [
-            { label: 'Estimated monthly total', value: formatCurrency(metrics?.estimated_monthly_total_usd ?? metrics?.estimated_monthly_cost_usd) },
-            { label: 'Estimated job cost', value: formatCurrency(metrics?.estimated_job_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd) },
-            { label: 'Geocoding calls', value: toNumber(metrics?.geocoding_calls ?? metrics?.googleCalls) || null },
-            { label: 'Autocomplete calls', value: toNumber(metrics?.autocomplete_calls) || null },
-            { label: 'Place details calls', value: toNumber(metrics?.place_details_calls) || null },
-            { label: 'OCR/AI token usage', value: toNumber(metrics?.ai_token_usage ?? metrics?.input_tokens ?? metrics?.output_tokens) || null },
-            { label: 'Remaining free-cap estimate', value: formatCurrency(metrics?.remaining_free_cap_estimate_usd ?? metrics?.remaining_free_cap_estimate) },
-            { label: 'Reconciliation status', value: (metrics?.reconciliation_status as string | undefined) ?? null },
+            { label: 'Estimated monthly total', value: formatCurrency(usageMetrics?.estimated_monthly_total_usd ?? metrics?.estimated_monthly_cost_usd) },
+            { label: 'Estimated job cost', value: formatCurrency(usageMetrics?.estimated_job_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd) },
+            { label: 'Geocoding calls', value: formatCount(usageMetrics?.geocoding_calls ?? metrics?.googleCalls) },
+            { label: 'Autocomplete calls', value: formatCount(usageMetrics?.autocomplete_calls) },
+            { label: 'Place details calls', value: formatCount(usageMetrics?.place_details_calls) },
+            { label: 'Input tokens', value: formatCount(usageMetrics?.input_tokens) },
+            { label: 'Output tokens', value: formatCount(usageMetrics?.output_tokens) },
+            { label: 'Remaining free cap (Geocoding)', value: formatCount(usageMetrics?.remaining_free_cap_geocoding) },
+            { label: 'Remaining free cap (Autocomplete)', value: formatCount(usageMetrics?.remaining_free_cap_autocomplete) },
+            { label: 'Remaining free cap (Place Details)', value: formatCount(usageMetrics?.remaining_free_cap_place_details) },
+            { label: 'Reconciliation status', value: usageMetrics?.reconciliation_status ?? null },
           ]
         : [
-            { label: 'Estimated cost', value: formatCurrency(metrics?.estimated_job_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd) },
-            { label: 'Credits used', value: toNumber(metrics?.credits_used ?? metrics?.exports) || null },
+            { label: 'Estimated cost', value: formatCurrency(usageMetrics?.estimated_job_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd) },
+            { label: 'Credits used', value: formatCount(usageMetrics?.credits_used ?? metrics?.exports) },
           ],
-    [isPrivileged, metrics],
+    [isPrivileged, metrics, usageMetrics],
   );
 
   return (

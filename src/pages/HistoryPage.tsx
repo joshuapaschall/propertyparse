@@ -11,6 +11,7 @@ import { useToast } from '../components/ui/ToastProvider';
 import ExportPanel from '../components/exports/ExportPanel';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
 import { normalizeJobSummary } from '../lib/jobSummary';
+import { flattenUsageSummary } from '../lib/usageSummary';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import type { ExportCatalogItem } from '../types/exports';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
@@ -144,6 +145,7 @@ export default function HistoryPage() {
     () =>
       jobs.map((job) => {
         const summary = normalizeJobSummary(job);
+        const usageSummary = flattenUsageSummary(job);
         const state = pickString(job, ['state']);
         const county = pickString(job, ['county']);
         const city = pickString(job, ['city']);
@@ -162,7 +164,7 @@ export default function HistoryPage() {
           skipped: summary.skipped,
           duplicates: summary.duplicates,
           spendUsd: summary.spendUsd ?? null,
-          estimatedJobCost: pickString(job, ['estimated_job_cost_usd', 'estimatedJobCostUsd']),
+          estimatedJobCost: usageSummary.estimated_job_cost_usd ?? pick(job, ['estimated_job_cost_usd', 'estimatedJobCostUsd']) ?? null,
         };
       }),
     [jobs],
@@ -346,7 +348,7 @@ export default function HistoryPage() {
                       <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(row.status)}>{row.status}</Badge></td>
                       <td className="px-4 py-2.5 text-right">
                         <div>{formatCurrency(row.spendUsd)}</div>
-                        {isPrivileged && row.estimatedJobCost ? (
+                        {isPrivileged && row.estimatedJobCost !== null ? (
                           <div className="text-[11px] text-slate-400">Est. {formatCurrency(Number(row.estimatedJobCost))}</div>
                         ) : null}
                       </td>

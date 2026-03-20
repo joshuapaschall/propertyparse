@@ -121,7 +121,6 @@ describe('API error handling', () => {
   });
 });
 
-
 describe('export APIs', () => {
   beforeEach(async () => {
     vi.resetModules();
@@ -195,5 +194,43 @@ describe('export APIs', () => {
     expect(result.filename).toBe('source-upload.xlsx');
     expect(result.contentType).toBe('application/vnd.ms-excel');
     expect(result.sizeBytes).toBe(9);
+  });
+
+  it('uses catalog metadata before job metadata when the header is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce(
+          new Response('raw-bytes', {
+            status: 200,
+            headers: {
+              'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            },
+          }),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              catalog: [{ type: 'original_file', filename: 'catalog-source.xlsx' }],
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              job: {
+                original_file: { filename: 'job-source.xlsx' },
+              },
+            }),
+            { status: 200, headers: { 'content-type': 'application/json' } },
+          ),
+        ),
+    );
+
+    const { downloadJobExport } = await import('./api');
+    const result = await downloadJobExport('job-123', 'original_file');
+
+    expect(result.filename).toBe('catalog-source.xlsx');
   });
 });

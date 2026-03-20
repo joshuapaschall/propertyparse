@@ -115,4 +115,22 @@ describe('HistoryPage refresh behavior', () => {
     await waitFor(() => expect(updateJobMetadata).toHaveBeenCalledWith('j1', { campaignName: 'Spring Buyers' }));
     expect(screen.getByText('Spring Buyers')).toBeInTheDocument();
   });
+
+  it('shows estimated job cost from nested usage data per row', async () => {
+    getJobs.mockResolvedValue([
+      {
+        job_id: 'j1',
+        status: 'DONE',
+        display_name: 'Done Job',
+        file_name: 'a.csv',
+        spend_usd: 1.25,
+        customer_safe_usage: { estimated_job_cost_usd: 2.5 },
+      },
+    ]);
+
+    render(<MemoryRouter><HistoryPage /></MemoryRouter>);
+    expect(await screen.findByText('Done Job')).toBeInTheDocument();
+    expect(screen.getByText('Est. $2.50')).toBeInTheDocument();
+  });
+
 });
