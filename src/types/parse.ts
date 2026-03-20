@@ -15,6 +15,10 @@ export type UsageSummaryFlatFields = {
   remaining_free_cap_place_details?: number;
   credits_used?: number;
   reconciliation_status?: string;
+  pricing_accuracy?: string;
+  provider_usage_source?: string;
+  billing_snapshot_as_of?: string;
+  sync_lag_seconds?: number;
 };
 
 export type UsageSummaryNestedFields = {

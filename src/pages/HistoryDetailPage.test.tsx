@@ -386,9 +386,11 @@ describe('HistoryDetailPage summary normalization', () => {
     );
 
     expect(await screen.findByText('Rows Received')).toBeInTheDocument();
+    expect(screen.getByText('This job')).toBeInTheDocument();
+    expect(screen.getByText('Month to date')).toBeInTheDocument();
     expect(screen.getByText('Remaining free cap (Geocoding)')).toBeInTheDocument();
     expect(screen.getByText('11')).toBeInTheDocument();
-    expect(screen.getByText('Reconciliation status')).toBeInTheDocument();
+    expect(screen.getByText('Reconciliation / sync status')).toBeInTheDocument();
     expect(screen.getByText('settled')).toBeInTheDocument();
   });
 

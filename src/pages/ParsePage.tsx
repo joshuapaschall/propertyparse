@@ -77,6 +77,7 @@ import { flattenUsageSummary, mergeUsageSummary } from '../lib/usageSummary';
 import JobWarnings from '../components/JobWarnings';
 import { deriveDisplayedParseSummary, deriveDisplayedRowsReceived, normalizeJobSummary, normalizeUpdatedJobPayload, toParseSummary } from '../lib/jobSummary';
 import { writeLocalParsePersistenceState } from '../lib/persistenceStatus';
+import { buildAdminCostSections, buildProductSafeCostItems } from '../lib/costTelemetry';
 import type { ExportCatalogItem } from '../types/exports';
 import { publishJobUpdate } from '../lib/liveUpdates';
 
@@ -1248,27 +1249,22 @@ export default function ParsePage() {
     [computedParseSummary, parseSummary],
   );
 
-  const costPanelItems = useMemo(
+  const costPanelSections = useMemo(
     () =>
       isPrivileged
-        ? [
-            { label: 'Estimated job cost', value: formatCurrency(usageSummary.estimated_job_cost_usd ?? computedParseSummary?.spend_usd) },
-            { label: 'Estimated monthly total', value: formatCurrency(usageSummary.estimated_monthly_total_usd ?? computedParseSummary?.estimated_monthly_cost_usd) },
-            { label: 'Geocoding calls', value: formatCount(usageSummary.geocoding_calls ?? googleCallsUsed) },
-            { label: 'Autocomplete calls', value: formatCount(usageSummary.autocomplete_calls) },
-            { label: 'Place details calls', value: formatCount(usageSummary.place_details_calls) },
-            { label: 'Input tokens', value: formatCount(usageSummary.input_tokens) },
-            { label: 'Output tokens', value: formatCount(usageSummary.output_tokens) },
-            { label: 'Remaining free cap (Geocoding)', value: formatCount(usageSummary.remaining_free_cap_geocoding) },
-            { label: 'Remaining free cap (Autocomplete)', value: formatCount(usageSummary.remaining_free_cap_autocomplete) },
-            { label: 'Remaining free cap (Place Details)', value: formatCount(usageSummary.remaining_free_cap_place_details) },
-            { label: 'Reconciliation status', value: usageSummary.reconciliation_status ?? null },
-          ]
-        : [
-            { label: 'Estimated cost', value: formatCurrency(usageSummary.estimated_job_cost_usd ?? computedParseSummary?.spend_usd) },
-            { label: 'Credits used', value: formatCount(usageSummary.credits_used) },
-          ],
+        ? buildAdminCostSections({
+            usage: usageSummary,
+            estimatedJobCost: computedParseSummary?.spend_usd,
+            estimatedMonthlyTotal: computedParseSummary?.estimated_monthly_cost_usd,
+            jobGeocodingCalls: googleCallsUsed,
+          })
+        : undefined,
     [computedParseSummary, googleCallsUsed, isPrivileged, usageSummary],
+  );
+
+  const costPanelItems = useMemo(
+    () => buildProductSafeCostItems({ usage: usageSummary, estimatedJobCost: computedParseSummary?.spend_usd }),
+    [computedParseSummary?.spend_usd, usageSummary],
   );
 
   const canonicalAddressesForDisplay = useMemo(
@@ -3952,6 +3948,7 @@ How to fix: ${fixHint}` : ''}`;
               title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
               subtitle={isPrivileged ? 'Internal-only usage and reconciliation fields.' : 'Product-safe estimate only.'}
               items={costPanelItems}
+              sections={costPanelSections}
               isPrivileged={isPrivileged}
             />
           </div>

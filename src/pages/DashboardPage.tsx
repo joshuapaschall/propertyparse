@@ -9,6 +9,7 @@ import { useToast } from '../components/ui/ToastProvider';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
 import { flattenUsageSummary } from '../lib/usageSummary';
+import { buildAdminCostSections, buildProductSafeCostItems } from '../lib/costTelemetry';
 
 const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -147,27 +148,26 @@ export default function DashboardPage() {
     );
   }, [metrics]);
 
-  const costPanelItems = useMemo(
+  const costPanelSections = useMemo(
     () =>
       isPrivileged
-        ? [
-            { label: 'Estimated monthly total', value: formatCurrency(usageMetrics?.estimated_monthly_total_usd ?? metrics?.estimated_monthly_cost_usd) },
-            { label: 'Estimated job cost', value: formatCurrency(usageMetrics?.estimated_job_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd) },
-            { label: 'Geocoding calls', value: formatCount(usageMetrics?.geocoding_calls ?? metrics?.googleCalls) },
-            { label: 'Autocomplete calls', value: formatCount(usageMetrics?.autocomplete_calls) },
-            { label: 'Place details calls', value: formatCount(usageMetrics?.place_details_calls) },
-            { label: 'Input tokens', value: formatCount(usageMetrics?.input_tokens) },
-            { label: 'Output tokens', value: formatCount(usageMetrics?.output_tokens) },
-            { label: 'Remaining free cap (Geocoding)', value: formatCount(usageMetrics?.remaining_free_cap_geocoding) },
-            { label: 'Remaining free cap (Autocomplete)', value: formatCount(usageMetrics?.remaining_free_cap_autocomplete) },
-            { label: 'Remaining free cap (Place Details)', value: formatCount(usageMetrics?.remaining_free_cap_place_details) },
-            { label: 'Reconciliation status', value: usageMetrics?.reconciliation_status ?? null },
-          ]
-        : [
-            { label: 'Estimated cost', value: formatCurrency(usageMetrics?.estimated_job_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd) },
-            { label: 'Credits used', value: formatCount(usageMetrics?.credits_used ?? metrics?.exports) },
-          ],
+        ? buildAdminCostSections({
+            usage: usageMetrics ?? {},
+            estimatedJobCost: metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd,
+            estimatedMonthlyTotal: metrics?.estimated_monthly_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd,
+            jobGeocodingCalls: metrics?.googleCalls,
+          }).filter((section) => section.title === 'Month to date')
+        : undefined,
     [isPrivileged, metrics, usageMetrics],
+  );
+
+  const costPanelItems = useMemo(
+    () => buildProductSafeCostItems({
+      usage: usageMetrics ?? {},
+      estimatedJobCost: metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd,
+      creditsUsed: metrics?.exports,
+    }),
+    [metrics, usageMetrics],
   );
 
   return (
@@ -244,6 +244,7 @@ export default function DashboardPage() {
                     : 'A product-safe estimate without internal vendor details.'
                 }
                 items={costPanelItems}
+                sections={costPanelSections}
                 isPrivileged={isPrivileged}
               />
             </div>

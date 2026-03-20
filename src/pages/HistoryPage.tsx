@@ -15,6 +15,7 @@ import { flattenUsageSummary } from '../lib/usageSummary';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import type { ExportCatalogItem } from '../types/exports';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
+import { formatHistoryRowCost } from '../lib/costTelemetry';
 
 type StatusFilter = 'ALL' | 'DONE' | 'RUNNING' | 'FAILED';
 
@@ -45,10 +46,6 @@ const formatDateTime = (value: string | null) => {
   return date.toLocaleString();
 };
 
-const formatCurrency = (value: number | null) => {
-  if (value === null || Number.isNaN(value)) return '--';
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(value);
-};
 
 const normalizeStatus = (raw: string | null): 'RUNNING' | 'DONE' | 'FAILED' => {
   if (!raw) return 'RUNNING';
@@ -347,9 +344,9 @@ export default function HistoryPage() {
                       <td className="px-4 py-2.5 text-right">{row.duplicates}</td>
                       <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(row.status)}>{row.status}</Badge></td>
                       <td className="px-4 py-2.5 text-right">
-                        <div>{formatCurrency(row.spendUsd)}</div>
-                        {isPrivileged && row.estimatedJobCost !== null ? (
-                          <div className="text-[11px] text-slate-400">Est. {formatCurrency(Number(row.estimatedJobCost))}</div>
+                        <div>{formatHistoryRowCost(row.estimatedJobCost ?? row.spendUsd)}</div>
+                        {isPrivileged && row.estimatedJobCost !== null && row.spendUsd !== row.estimatedJobCost ? (
+                          <div className="text-[11px] text-slate-400">Actual {formatHistoryRowCost(row.spendUsd)}</div>
                         ) : null}
                       </td>
                       <td className="px-4 py-2.5 text-right" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.id); }}>

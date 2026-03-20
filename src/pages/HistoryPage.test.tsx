@@ -130,7 +130,7 @@ describe('HistoryPage refresh behavior', () => {
 
     render(<MemoryRouter><HistoryPage /></MemoryRouter>);
     expect(await screen.findByText('Done Job')).toBeInTheDocument();
-    expect(screen.getByText('Est. $2.50')).toBeInTheDocument();
+    expect(screen.getByText('$2.50')).toBeInTheDocument();
   });
 
 });

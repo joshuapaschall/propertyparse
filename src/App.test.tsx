@@ -1,11 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const getSession = vi.fn();
+const refreshSession = vi.fn();
 
 vi.mock('./lib/supabase', () => ({
   supabase: {
     auth: {
       getSession: (...args: unknown[]) => getSession(...args),
+      refreshSession: (...args: unknown[]) => refreshSession(...args),
     },
   },
 }));
@@ -33,7 +35,7 @@ describe('bootstrapAuthSessionRequest', () => {
   });
 
   it('retries auth bootstrap once with a refreshed session token', async () => {
-    getSession.mockResolvedValue({ data: { session: { access_token: 'fresh-token' } }, error: null });
+    refreshSession.mockResolvedValue({ data: { session: { access_token: 'fresh-token', user: { id: 'user-1' } } }, error: null });
     vi.stubGlobal(
       'fetch',
       vi
@@ -51,7 +53,7 @@ describe('bootstrapAuthSessionRequest', () => {
     const result = await bootstrapAuthSessionRequest({ access_token: 'stale-token', user: { id: 'user-1' } } as any);
 
     expect(result.accessToken).toBe('fresh-token');
-    expect(getSession).toHaveBeenCalledTimes(1);
+    expect(refreshSession).toHaveBeenCalledTimes(1);
     expect(vi.mocked(fetch).mock.calls[1]?.[1]).toMatchObject({
       headers: expect.objectContaining({ Authorization: 'Bearer fresh-token' }),
     });
