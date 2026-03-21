@@ -42,6 +42,35 @@ const formatDateTime = (value: string | null | undefined, fallback = '—') => {
 const LOCAL_ONLY_EXPLANATION =
   'Project-local request logging is working, but billing-account sync has not populated provider snapshots yet. Remaining free cap and monthly cost are not billing-truth yet.';
 
+const getMissingGoogleConfigEnvVars = (status: ProviderUsageGoogleStatus | null) => {
+  if (!status) return [] as string[];
+  if (Array.isArray(status.missing_env_vars)) return status.missing_env_vars;
+  if (Array.isArray(status.missing_config_env_vars)) return status.missing_config_env_vars;
+  return [] as string[];
+};
+
+const getGoogleBillingSyncConfigured = (status: ProviderUsageGoogleStatus | null) => {
+  if (!status) return undefined;
+  if (typeof status.google_billing_sync_configured === 'boolean') return status.google_billing_sync_configured;
+  if (typeof status.billing_sync_configured === 'boolean') return status.billing_sync_configured;
+  return undefined;
+};
+
+const getGoogleConfigStatusMessage = (status: ProviderUsageGoogleStatus | null) => {
+  const missingEnvVars = getMissingGoogleConfigEnvVars(status);
+  if (missingEnvVars.length > 0) {
+    return `Missing env vars: ${missingEnvVars.join(', ')}`;
+  }
+  const billingSyncConfigured = getGoogleBillingSyncConfigured(status);
+  if (billingSyncConfigured === false) {
+    return 'Billing sync config is incomplete.';
+  }
+  if (billingSyncConfigured && status?.billing_snapshot_missing === true) {
+    return 'Billing export configured, awaiting current provider data.';
+  }
+  return 'Configured';
+};
+
 function ProviderDetailRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
@@ -223,26 +252,37 @@ export default function AdminPage() {
   const [googleUsageStatus, setGoogleUsageStatus] = useState<ProviderUsageGoogleStatus | null>(null);
   const [openAiUsageSummary, setOpenAiUsageSummary] = useState<ProviderUsageOpenAiSummary | null>(null);
   const [providerUsageLoading, setProviderUsageLoading] = useState(false);
-  const [providerUsageError, setProviderUsageError] = useState<ApiErrorInfo | null>(null);
+  const [googleUsageError, setGoogleUsageError] = useState<ApiErrorInfo | null>(null);
+  const [openAiUsageError, setOpenAiUsageError] = useState<ApiErrorInfo | null>(null);
   const [googleSyncLoading, setGoogleSyncLoading] = useState(false);
   const [openAiSyncLoading, setOpenAiSyncLoading] = useState(false);
 
   const loadProviderUsage = async () => {
     setProviderUsageLoading(true);
-    setProviderUsageError(null);
-    try {
-      const [googleStatus, openAiSummary] = await Promise.all([
-        getGoogleProviderUsageStatus(),
-        getOpenAiProviderUsageSummary(),
-      ]);
-      setGoogleUsageStatus(googleStatus ?? null);
-      setOpenAiUsageSummary(openAiSummary ?? null);
-    } catch (err) {
-      const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to load provider usage sync status.', endpoint: '/admin/provider-usage' };
-      setProviderUsageError(errorInfo);
-    } finally {
-      setProviderUsageLoading(false);
+    setOpenAiUsageError(null);
+    setOpenAiUsageError(null);
+    const [googleResult, openAiResult] = await Promise.allSettled([
+      getGoogleProviderUsageStatus(),
+      getOpenAiProviderUsageSummary(),
+    ]);
+
+    if (googleResult.status === 'fulfilled') {
+      setGoogleUsageStatus(googleResult.value ?? null);
+    } else {
+      const errorInfo = getApiErrorInfo(googleResult.reason) ?? { message: 'Unable to load Google provider usage sync status.', endpoint: '/admin/provider-usage/google/status' };
+      setGoogleUsageStatus(null);
+      setGoogleUsageError(errorInfo);
     }
+
+    if (openAiResult.status === 'fulfilled') {
+      setOpenAiUsageSummary(openAiResult.value ?? null);
+    } else {
+      const errorInfo = getApiErrorInfo(openAiResult.reason) ?? { message: 'Unable to load OpenAI provider usage sync status.', endpoint: '/admin/provider-usage/openai/summary' };
+      setOpenAiUsageSummary(null);
+      setOpenAiUsageError(errorInfo);
+    }
+
+    setProviderUsageLoading(false);
   };
 
   const loadMembers = async () => {
@@ -447,14 +487,14 @@ export default function AdminPage() {
 
   const handleGoogleSync = async () => {
     setGoogleSyncLoading(true);
-    setProviderUsageError(null);
+    setGoogleUsageError(null);
     try {
       const response = await syncGoogleProviderUsage();
       showToast({ title: response.message ?? 'Google billing sync started.', variant: 'success' });
       await loadProviderUsage();
     } catch (err) {
       const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to sync Google billing usage.', endpoint: '/admin/provider-usage/google/sync' };
-      setProviderUsageError(errorInfo);
+      setGoogleUsageError(errorInfo);
       showToast({ title: errorInfo.message, variant: 'error' });
     } finally {
       setGoogleSyncLoading(false);
@@ -463,22 +503,22 @@ export default function AdminPage() {
 
   const handleOpenAiSync = async () => {
     setOpenAiSyncLoading(true);
-    setProviderUsageError(null);
+    setOpenAiUsageError(null);
     try {
       const response = await syncOpenAiProviderUsage();
       showToast({ title: response.message ?? 'OpenAI usage sync started.', variant: 'success' });
       await loadProviderUsage();
     } catch (err) {
       const errorInfo = getApiErrorInfo(err) ?? { message: 'Unable to sync OpenAI usage.', endpoint: '/admin/provider-usage/openai/sync' };
-      setProviderUsageError(errorInfo);
+      setOpenAiUsageError(errorInfo);
       showToast({ title: errorInfo.message, variant: 'error' });
     } finally {
       setOpenAiSyncLoading(false);
     }
   };
 
-  const missingGoogleEnvVars = Array.isArray(googleUsageStatus?.missing_env_vars) ? googleUsageStatus?.missing_env_vars ?? [] : [];
-  const showLocalOnlyExplanation = googleUsageStatus?.billing_snapshot_missing === true;
+  const googleBillingSyncConfigured = getGoogleBillingSyncConfigured(googleUsageStatus);
+  const showLocalOnlyExplanation = googleUsageStatus?.billing_snapshot_missing === true && googleBillingSyncConfigured !== true;
 
   return (
     <AppShell title="Admin" subtitle="Manage your organization team.">
@@ -502,13 +542,6 @@ export default function AdminPage() {
               }
             />
 
-            {providerUsageError ? (
-              <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-100">
-                <p className="font-semibold">Provider usage status could not be loaded.</p>
-                <p className="mt-1">{providerUsageError.message}</p>
-              </div>
-            ) : null}
-
             {providerUsageLoading && !googleUsageStatus && !openAiUsageSummary ? (
               <EmptyState className="mt-6 py-8" title="Loading provider usage" description="Fetching Google billing and OpenAI usage sync status..." />
             ) : (
@@ -523,6 +556,13 @@ export default function AdminPage() {
                       {googleSyncLoading ? 'Syncing...' : 'Sync Google billing now'}
                     </Button>
                   </div>
+
+                  {googleUsageError ? (
+                    <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-100">
+                      <p className="font-semibold">Google provider usage status could not be loaded.</p>
+                      <p className="mt-1">{googleUsageError.message}</p>
+                    </div>
+                  ) : null}
 
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     <ProviderDetailRow label="Sync status" value={formatDisplayValue(googleUsageStatus?.sync_status)} />
@@ -545,13 +585,7 @@ export default function AdminPage() {
                     />
                     <ProviderDetailRow
                       label="Config status"
-                      value={
-                        missingGoogleEnvVars.length > 0
-                          ? `Missing env vars: ${missingGoogleEnvVars.join(', ')}`
-                          : googleUsageStatus?.google_billing_sync_configured === false
-                            ? 'Billing sync config is incomplete.'
-                            : 'Configured'
-                      }
+                      value={getGoogleConfigStatusMessage(googleUsageStatus)}
                     />
                   </div>
 
@@ -572,6 +606,13 @@ export default function AdminPage() {
                       {openAiSyncLoading ? 'Syncing...' : 'Sync OpenAI usage now'}
                     </Button>
                   </div>
+
+                  {openAiUsageError ? (
+                    <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-100">
+                      <p className="font-semibold">OpenAI provider usage status could not be loaded.</p>
+                      <p className="mt-1">{openAiUsageError.message}</p>
+                    </div>
+                  ) : null}
 
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     <ProviderDetailRow label="Sync status" value={formatDisplayValue(openAiUsageSummary?.sync_status)} />

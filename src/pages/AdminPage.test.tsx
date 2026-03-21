@@ -82,6 +82,39 @@ describe('AdminPage provider usage sync section', () => {
     expect(screen.getByText('proj_123')).toBeInTheDocument();
   });
 
+
+  it('accepts alias config fields and shows awaiting data when billing export is configured without a snapshot', async () => {
+    getGoogleProviderUsageStatus.mockResolvedValueOnce({
+      sync_status: 'awaiting_snapshot',
+      pricing_source: 'billing_export',
+      pricing_confidence: 'high',
+      billing_snapshot_as_of: null,
+      snapshot_rows_count: 0,
+      remaining_free_cap_status_mode: 'local_only',
+      missing_config_env_vars: [],
+      billing_snapshot_missing: true,
+      billing_sync_configured: true,
+    });
+
+    render(<MemoryRouter><AdminPage /></MemoryRouter>);
+
+    expect(await screen.findByText('Provider Usage')).toBeInTheDocument();
+    expect(await screen.findByText('Billing export configured, awaiting current provider data.')).toBeInTheDocument();
+    expect(screen.queryByText(/Project-local request logging is working/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps provider cards independent when one provider status request fails', async () => {
+    getGoogleProviderUsageStatus.mockRejectedValueOnce({
+      apiErrorInfo: { message: 'Google failed', endpoint: '/admin/provider-usage/google/status', status: 503 },
+    });
+
+    render(<MemoryRouter><AdminPage /></MemoryRouter>);
+
+    expect(await screen.findByText('Google provider usage status could not be loaded.')).toBeInTheDocument();
+    expect(screen.getByText('Google failed')).toBeInTheDocument();
+    expect(screen.getByText('proj_123')).toBeInTheDocument();
+  });
+
   it('refreshes provider usage and triggers both sync buttons with loading-safe handlers', async () => {
     const user = userEvent.setup();
 

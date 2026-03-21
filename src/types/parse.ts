@@ -32,6 +32,7 @@ export type UsageSummaryFlatFields = {
   billing_snapshot_missing?: boolean;
   google_snapshot_rows_count?: number;
   google_billing_sync_configured?: boolean;
+  billing_sync_configured?: boolean;
   sync_lag_seconds?: number;
 };
 
