@@ -317,3 +317,53 @@ describe('provider usage admin APIs', () => {
     expect(fetchMock.mock.calls[1]?.[1]).toMatchObject({ method: 'POST' });
   });
 });
+
+
+describe('jobs API', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.restoreAllMocks();
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://supabase.example.com');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+
+    const { setAuthHeaderState } = await import('./authState');
+    setAuthHeaderState({
+      accessToken: 'token-123',
+      orgId: 'org-123',
+      userId: 'user-123',
+      role: 'admin',
+    });
+  });
+
+  afterEach(async () => {
+    const { clearAuthHeaderState } = await import('./authState');
+    clearAuthHeaderState();
+    vi.unstubAllEnvs();
+  });
+
+  it('passes pagination and filters to /jobs and returns total count', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          items: [{ job_id: 'job-21', display_name: 'Job 21' }],
+          total_count: 55,
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { getJobs } = await import('./api');
+    const result = await getJobs({ limit: 20, offset: 20, search: 'march', status: 'DONE' });
+
+    expect(result).toEqual({
+      items: [{ job_id: 'job-21', display_name: 'Job 21' }],
+      totalCount: 55,
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.com/jobs?limit=20&offset=20&search=march&status=DONE',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+});

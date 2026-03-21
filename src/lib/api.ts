@@ -21,10 +21,25 @@ type ApiResponse<T> = {
   data?: T;
   items?: T;
   metadata?: Record<string, JsonValue>;
+  total_count?: number;
+  totalCount?: number;
   [key: string]: JsonValue | T | undefined;
 };
 
 export type JobRecord = Record<string, JsonValue>;
+
+export type JobsQuery = {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  status?: string;
+  scope?: string;
+};
+
+export type JobsResponse = {
+  items: JobRecord[];
+  totalCount: number;
+};
 export type JobExportType =
   | 'original_file'
   | 'propstream_import'
@@ -619,9 +634,25 @@ export async function validateApiKeys() {
   return requestJson<JsonValue>('/validate-api-keys', { method: 'GET' });
 }
 
-export async function getJobs() {
-  const res = await requestJson<ApiResponse<JobRecord[]>>('/jobs', { method: 'GET', headers: getAuthHeaders() });
-  return (res.items ?? res.data ?? res) as JobRecord[];
+export async function getJobs(query: JobsQuery = {}): Promise<JobsResponse> {
+  const params = new URLSearchParams();
+  if (typeof query.limit === 'number') params.set('limit', String(query.limit));
+  if (typeof query.offset === 'number') params.set('offset', String(query.offset));
+  if (query.search?.trim()) params.set('search', query.search.trim());
+  if (query.status?.trim()) params.set('status', query.status.trim());
+  if (query.scope?.trim()) params.set('scope', query.scope.trim());
+
+  const path = params.toString() ? `/jobs?${params.toString()}` : '/jobs';
+  const res = await requestJson<ApiResponse<JobRecord[]> | JobRecord[]>(path, { method: 'GET', headers: getAuthHeaders() });
+
+  if (Array.isArray(res)) {
+    return { items: res, totalCount: res.length };
+  }
+
+  const items = (res.items ?? res.data ?? []) as JobRecord[];
+  const totalCountRaw = res.total_count ?? res.totalCount;
+  const totalCount = typeof totalCountRaw === 'number' ? totalCountRaw : items.length;
+  return { items, totalCount };
 }
 
 export async function getMetricsSummary(range: MetricsRange, options?: { startDate?: string; endDate?: string }) {

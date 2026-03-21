@@ -1,5 +1,5 @@
 import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
 import Badge, { getBadgeVariant } from '../components/ui/Badge';
@@ -18,6 +18,9 @@ import { subscribeJobUpdates } from '../lib/liveUpdates';
 import { formatHistoryRowCost } from '../lib/costTelemetry';
 
 type StatusFilter = 'ALL' | 'DONE' | 'RUNNING' | 'FAILED';
+
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 const twoLineClampStyle: CSSProperties = {
   display: '-webkit-box',
@@ -46,6 +49,11 @@ const formatDateTime = (value: string | null) => {
   return date.toLocaleString();
 };
 
+const parsePositiveInt = (value: string | null, fallback: number) => {
+  if (!value) return fallback;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
 
 const normalizeStatus = (raw: string | null): 'RUNNING' | 'DONE' | 'FAILED' => {
   if (!raw) return 'RUNNING';
@@ -66,6 +74,7 @@ const triggerDownload = (blob: Blob, filename: string) => {
 
 export default function HistoryPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { role } = useAuthControls();
   const isPrivileged = role === 'admin' || role === 'owner';
   const { showToast } = useToast();
@@ -73,8 +82,16 @@ export default function HistoryPage() {
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
+  const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
+    const rawStatus = (searchParams.get('status') ?? 'ALL').toUpperCase();
+    return (['ALL', 'DONE', 'RUNNING', 'FAILED'] as const).includes(rawStatus as StatusFilter)
+      ? (rawStatus as StatusFilter)
+      : 'ALL';
+  });
+  const [page, setPage] = useState(() => parsePositiveInt(searchParams.get('page'), 1));
+  const [pageSize, setPageSize] = useState(() => parsePositiveInt(searchParams.get('pageSize'), DEFAULT_PAGE_SIZE));
+  const [totalCount, setTotalCount] = useState(0);
   const [catalogByJobId, setCatalogByJobId] = useState<Record<string, ExportCatalogItem[]>>({});
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
   const [localParsePersistenceWarning, setLocalParsePersistenceWarning] = useState(false);
@@ -82,6 +99,31 @@ export default function HistoryPage() {
   const [campaignDraft, setCampaignDraft] = useState('');
   const [savingCampaign, setSavingCampaign] = useState(false);
   const hasLoadedJobsRef = useRef(false);
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+
+  useEffect(() => {
+    setPage((currentPage) => Math.min(currentPage, totalPages));
+  }, [totalPages]);
+
+  useEffect(() => {
+    const nextParams = new URLSearchParams(searchParams);
+    if (search.trim()) nextParams.set('search', search.trim());
+    else nextParams.delete('search');
+
+    if (statusFilter !== 'ALL') nextParams.set('status', statusFilter);
+    else nextParams.delete('status');
+
+    if (page > 1) nextParams.set('page', String(page));
+    else nextParams.delete('page');
+
+    if (pageSize !== DEFAULT_PAGE_SIZE) nextParams.set('pageSize', String(pageSize));
+    else nextParams.delete('pageSize');
+
+    if (nextParams.toString() !== searchParams.toString()) {
+      setSearchParams(nextParams, { replace: true });
+    }
+  }, [page, pageSize, search, searchParams, setSearchParams, statusFilter]);
 
   const loadJobs = useCallback(async () => {
     const hasExistingJobs = hasLoadedJobsRef.current;
@@ -92,8 +134,14 @@ export default function HistoryPage() {
     }
     setError(null);
     try {
-      const response = await getJobs();
-      setJobs(response ?? []);
+      const response = await getJobs({
+        limit: pageSize,
+        offset: (page - 1) * pageSize,
+        search: search.trim() || undefined,
+        status: statusFilter === 'ALL' ? undefined : statusFilter,
+      });
+      setJobs(response.items ?? []);
+      setTotalCount(response.totalCount ?? 0);
       hasLoadedJobsRef.current = true;
     } catch (err) {
       const message = (err as Error).message ?? 'Unable to load history.';
@@ -103,7 +151,7 @@ export default function HistoryPage() {
       setInitialLoading(false);
       setRefreshing(false);
     }
-  }, [showToast]);
+  }, [page, pageSize, search, showToast, statusFilter]);
 
   useEffect(() => {
     void loadJobs();
@@ -167,32 +215,13 @@ export default function HistoryPage() {
     [jobs],
   );
 
-  const statusCounts = useMemo(
-    () => ({
-      ALL: rows.length,
-      DONE: rows.filter((row) => row.status === 'DONE').length,
-      RUNNING: rows.filter((row) => row.status === 'RUNNING').length,
-      FAILED: rows.filter((row) => row.status === 'FAILED').length,
-    }),
-    [rows],
-  );
-
-  const filteredRows = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return rows.filter((row) => {
-      const matchesStatus = statusFilter === 'ALL' || row.status === statusFilter;
-      const matchesSearch = !term || `${row.filename} ${row.name}`.toLowerCase().includes(term);
-      return matchesStatus && matchesSearch;
-    });
-  }, [rows, search, statusFilter]);
-
   useEffect(() => {
-    if (!filteredRows.some((row) => row.status === 'RUNNING')) return;
+    if (!rows.some((row) => row.status === 'RUNNING')) return;
     const timer = window.setInterval(() => {
       void loadJobs();
     }, 5000);
     return () => window.clearInterval(timer);
-  }, [filteredRows, loadJobs]);
+  }, [rows, loadJobs]);
 
   const ensureExportCatalog = async (jobId: string) => {
     if (!jobId || catalogByJobId[jobId]) return;
@@ -253,7 +282,9 @@ export default function HistoryPage() {
   };
 
   const hasAnyJobs = rows.length > 0;
-  const hasFilterResults = (statusFilter === 'ALL' ? rows : rows.filter((row) => row.status === statusFilter)).length > 0;
+  const hasFilterResults = totalCount > 0;
+  const pageStart = totalCount === 0 ? 0 : (page - 1) * pageSize + 1;
+  const pageEnd = totalCount === 0 ? 0 : Math.min(totalCount, page * pageSize);
 
   return (
     <AppShell title="History" subtitle="Review and export previous parse jobs.">
@@ -268,15 +299,21 @@ export default function HistoryPage() {
             <button
               key={status}
               type="button"
-              onClick={() => setStatusFilter(status)}
+              onClick={() => {
+                setStatusFilter(status);
+                setPage(1);
+              }}
               className={`rounded-full px-3 py-1 text-xs font-semibold ${statusFilter === status ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-300'}`}
             >
-              {status === 'ALL' ? 'All' : status[0] + status.slice(1).toLowerCase()} ({statusCounts[status]})
+              {status === 'ALL' ? 'All' : status[0] + status.slice(1).toLowerCase()}
             </button>
           ))}
           <input
             value={search}
-            onChange={(event) => setSearch(event.target.value)}
+            onChange={(event) => {
+              setSearch(event.target.value);
+              setPage(1);
+            }}
             placeholder="Search job name or file"
             className="ml-auto w-full max-w-xs rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
           />
@@ -300,98 +337,130 @@ export default function HistoryPage() {
           )
         ) : !hasFilterResults ? (
           <EmptyState className="mt-6" title="No jobs in this filter" description="Try another status tab." />
-        ) : filteredRows.length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState className="mt-6" title="No jobs matching search" description="Adjust the search query." />
         ) : (
           <>
             {refreshing ? (
               <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">Refreshing…</p>
             ) : null}
-          <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
-            <div className="max-h-[68vh] overflow-auto">
-              <table className="w-full min-w-[1080px] text-left text-sm">
-                <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                  <tr>
-                    <th className="px-4 py-3">Date</th>
-                    <th className="px-4 py-3">Job</th>
-                    <th className="px-4 py-3">Location</th>
-                    <th className="px-4 py-3 text-right">Rows Received</th>
-                    <th className="px-4 py-3 text-right">Unique Valid</th>
-                    <th className="px-4 py-3 text-right">Needs Review</th>
-                    <th className="px-4 py-3 text-right">Out of Scope</th>
-                    <th className="px-4 py-3 text-right">Skipped</th>
-                    <th className="px-4 py-3 text-right">Duplicates</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3 text-right">Cost</th>
-                    <th className="px-4 py-3 text-right">Export</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {filteredRows.map((row) => (
-                    <tr key={row.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => row.hasId && navigate(`/history/${row.id}`)}>
-                      <td className="px-4 py-2.5">{formatDateTime(row.createdAt)}</td>
-                      <td className="px-4 py-2.5">
-                        <div className="font-medium" style={twoLineClampStyle}>{row.name}</div>
-                        <div className="text-xs text-slate-500" style={twoLineClampStyle}>{row.filename}</div>
-                      </td>
-                      <td className="px-4 py-2.5">{row.location}</td>
-                      <td className="px-4 py-2.5 text-right">{row.rowsReceived}</td>
-                      <td className="px-4 py-2.5 text-right">{row.validUnique}</td>
-                      <td className="px-4 py-2.5 text-right">{row.needsReview}</td>
-                      <td className="px-4 py-2.5 text-right">{row.outOfScope}</td>
-                      <td className="px-4 py-2.5 text-right">{row.skipped}</td>
-                      <td className="px-4 py-2.5 text-right">{row.duplicates}</td>
-                      <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(row.status)}>{row.status}</Badge></td>
-                      <td className="px-4 py-2.5 text-right">
-                        <div>{formatHistoryRowCost(row.estimatedJobCost ?? row.spendUsd)}</div>
-                        {isPrivileged && row.estimatedJobCost !== null && row.spendUsd !== row.estimatedJobCost ? (
-                          <div className="text-[11px] text-slate-400">Actual {formatHistoryRowCost(row.spendUsd)}</div>
-                        ) : null}
-                      </td>
-                      <td className="px-4 py-2.5 text-right" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.id); }}>
-                        <ExportPanel
-                          triggerLabel="Export"
-                          className="relative inline-block text-left"
-                          catalog={catalogByJobId[row.id] ?? FALLBACK_EXPORT_CATALOG}
-                          onDownload={(type, label) => void handleDownload(row.id, type, label)}
-                          activeDownloadType={getRowActiveDownloadType(row.id)}
-                          disabled={!row.hasId}
-                        />
-                      </td>
-                      <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
-                        <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(row.id, row.name)} disabled={!row.hasId}>
-                          Edit name
-                        </Button>
-                      </td>
-                    </tr>
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+              <div>
+                Showing {pageStart}–{pageEnd} of {totalCount} jobs
+              </div>
+              <label className="flex items-center gap-2">
+                <span>Rows per page</span>
+                <select
+                  aria-label="Rows per page"
+                  className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200"
+                  value={pageSize}
+                  onChange={(event) => {
+                    setPageSize(Number(event.target.value));
+                    setPage(1);
+                  }}
+                >
+                  {PAGE_SIZE_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
                   ))}
-                </tbody>
-              </table>
+                </select>
+              </label>
             </div>
-          </div>
-          {editingJobId ? (
-            <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 p-4">
-              <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-slate-950">
-                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Edit campaign name</h3>
-                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Update the product-facing name shown in History.</p>
-                <input
-                  aria-label="Campaign name"
-                  value={campaignDraft}
-                  onChange={(event) => setCampaignDraft(event.target.value)}
-                  className="mt-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
-                />
-                <div className="mt-4 flex justify-end gap-2">
-                  <Button type="button" variant="ghost" onClick={() => setEditingJobId(null)} disabled={savingCampaign}>Cancel</Button>
-                  <Button type="button" onClick={() => void saveCampaignName()} disabled={savingCampaign}>
-                    {savingCampaign ? 'Saving…' : 'Save'}
-                  </Button>
-                </div>
+            <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+              <div className="max-h-[68vh] overflow-auto">
+                <table className="w-full min-w-[1080px] text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                    <tr>
+                      <th className="px-4 py-3">Date</th>
+                      <th className="px-4 py-3">Job</th>
+                      <th className="px-4 py-3">Location</th>
+                      <th className="px-4 py-3 text-right">Rows Received</th>
+                      <th className="px-4 py-3 text-right">Unique Valid</th>
+                      <th className="px-4 py-3 text-right">Needs Review</th>
+                      <th className="px-4 py-3 text-right">Out of Scope</th>
+                      <th className="px-4 py-3 text-right">Skipped</th>
+                      <th className="px-4 py-3 text-right">Duplicates</th>
+                      <th className="px-4 py-3">Status</th>
+                      <th className="px-4 py-3 text-right">Cost</th>
+                      <th className="px-4 py-3 text-right">Export</th>
+                      <th className="px-4 py-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {rows.map((row) => (
+                      <tr key={row.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => row.hasId && navigate(`/history/${row.id}`)}>
+                        <td className="px-4 py-2.5">{formatDateTime(row.createdAt)}</td>
+                        <td className="px-4 py-2.5">
+                          <div className="font-medium" style={twoLineClampStyle}>{row.name}</div>
+                          <div className="text-xs text-slate-500" style={twoLineClampStyle}>{row.filename}</div>
+                        </td>
+                        <td className="px-4 py-2.5">{row.location}</td>
+                        <td className="px-4 py-2.5 text-right">{row.rowsReceived}</td>
+                        <td className="px-4 py-2.5 text-right">{row.validUnique}</td>
+                        <td className="px-4 py-2.5 text-right">{row.needsReview}</td>
+                        <td className="px-4 py-2.5 text-right">{row.outOfScope}</td>
+                        <td className="px-4 py-2.5 text-right">{row.skipped}</td>
+                        <td className="px-4 py-2.5 text-right">{row.duplicates}</td>
+                        <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(row.status)}>{row.status}</Badge></td>
+                        <td className="px-4 py-2.5 text-right">
+                          <div>{formatHistoryRowCost(row.estimatedJobCost ?? row.spendUsd)}</div>
+                          {isPrivileged && row.estimatedJobCost !== null && row.spendUsd !== row.estimatedJobCost ? (
+                            <div className="text-[11px] text-slate-400">Actual {formatHistoryRowCost(row.spendUsd)}</div>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-2.5 text-right" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.id); }}>
+                          <ExportPanel
+                            triggerLabel="Export"
+                            className="relative inline-block text-left"
+                            catalog={catalogByJobId[row.id] ?? FALLBACK_EXPORT_CATALOG}
+                            onDownload={(type, label) => void handleDownload(row.id, type, label)}
+                            activeDownloadType={getRowActiveDownloadType(row.id)}
+                            disabled={!row.hasId}
+                          />
+                        </td>
+                        <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
+                          <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(row.id, row.name)} disabled={!row.hasId}>
+                            Edit name
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
-          ) : null}
-        </>
-      )}
+            <div className="mt-4 flex items-center justify-end gap-2 text-sm text-slate-600 dark:text-slate-300">
+              <Button type="button" variant="ghost" onClick={() => setPage((currentPage) => Math.max(1, currentPage - 1))} disabled={page <= 1}>
+                Prev
+              </Button>
+              <span aria-live="polite">Page {page} of {totalPages}</span>
+              <Button type="button" variant="ghost" onClick={() => setPage((currentPage) => Math.min(totalPages, currentPage + 1))} disabled={page >= totalPages}>
+                Next
+              </Button>
+            </div>
+            {editingJobId ? (
+              <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/40 p-4">
+                <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl dark:bg-slate-950">
+                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white">Edit campaign name</h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Update the product-facing name shown in History.</p>
+                  <input
+                    aria-label="Campaign name"
+                    value={campaignDraft}
+                    onChange={(event) => setCampaignDraft(event.target.value)}
+                    className="mt-4 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                  />
+                  <div className="mt-4 flex justify-end gap-2">
+                    <Button type="button" variant="ghost" onClick={() => setEditingJobId(null)} disabled={savingCampaign}>Cancel</Button>
+                    <Button type="button" onClick={() => void saveCampaignName()} disabled={savingCampaign}>
+                      {savingCampaign ? 'Saving…' : 'Save'}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </>
+        )}
       </Card>
     </AppShell>
   );
