@@ -18,12 +18,19 @@ export const isTemporaryResultsUnavailableError = (error: unknown) => {
   return status === 202 || status === 404 || status === 409 || status === 425 || status === 429 || status === 503;
 };
 
-export const hasHydratedResultsPayload = (payload: unknown) => {
+export const hasHydratedResultsPayload = (payload: unknown, options?: { minimumRowsReceived?: number | null }) => {
   if (!payload || typeof payload !== 'object') return false;
   const record = payload as { row_results?: unknown; canonical_addresses?: unknown; summary?: ParseSummary };
   if (!Array.isArray(record.row_results) || !Array.isArray(record.canonical_addresses)) return false;
   const rowsReceived = typeof record.summary?.rows_received === 'number' ? record.summary.rows_received : null;
-  if (rowsReceived !== null && rowsReceived > 0) {
+  const minimumRowsReceived =
+    typeof options?.minimumRowsReceived === 'number' && options.minimumRowsReceived > 0
+      ? options.minimumRowsReceived
+      : null;
+  const expectedRowsReceived = rowsReceived !== null && rowsReceived > 0
+    ? rowsReceived
+    : minimumRowsReceived;
+  if (expectedRowsReceived !== null && expectedRowsReceived > 0) {
     return record.row_results.length > 0 || record.canonical_addresses.length > 0;
   }
   return true;

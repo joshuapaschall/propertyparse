@@ -95,7 +95,9 @@ export type ProviderUsageGoogleStatus = {
   remaining_free_cap_status_mode?: string | null;
   billing_snapshot_missing?: boolean;
   missing_env_vars?: string[];
+  missing_config_env_vars?: string[];
   google_billing_sync_configured?: boolean;
+  billing_sync_configured?: boolean;
   last_sync_timestamp?: string | null;
   [key: string]: JsonValue | undefined;
 };

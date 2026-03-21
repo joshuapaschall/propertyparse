@@ -1182,16 +1182,6 @@ export default function ParsePage() {
     return [];
   }, [metadata]);
 
-  const noAddressesDetected = useMemo(() => {
-    if (debugInfo?.no_addresses_detected === true) return true;
-    if (!parseSummary) return false;
-    return (
-      parseSummary.rows_received > 0 &&
-      parseSummary.valid_total === 0 &&
-      parseSummary.needs_review === 0
-    );
-  }, [debugInfo?.no_addresses_detected, parseSummary]);
-
   const needsReviewRows = useMemo(
     () => rowResults.filter((row) => normalizeStatus(row.status) === 'UNMATCHED_NEEDS_REVIEW'),
     [rowResults],
@@ -1282,6 +1272,25 @@ export default function ParsePage() {
     () => canonicalAddresses.filter(isRenderableCanonicalAddress),
     [canonicalAddresses],
   );
+
+  const zeroStateHydrationPending = useMemo(() => {
+    if (!parseSummary) return false;
+    if (resultsFinalizing) return true;
+    return parseSummary.rows_received > 0 && rowResults.length === 0 && canonicalAddressesForDisplay.length === 0;
+  }, [canonicalAddressesForDisplay.length, parseSummary, resultsFinalizing, rowResults.length]);
+
+  const noAddressesDetected = useMemo(() => {
+    if (zeroStateHydrationPending) return false;
+    if (debugInfo?.no_addresses_detected === true) return true;
+    if (!parseSummary) return false;
+    return (
+      parseSummary.rows_received > 0 &&
+      parseSummary.valid_total === 0 &&
+      parseSummary.needs_review === 0
+    );
+  }, [debugInfo?.no_addresses_detected, parseSummary, zeroStateHydrationPending]);
+
+
 
   useEffect(() => {
     setResultsPage(1);
@@ -2401,7 +2410,7 @@ How to fix: ${fixHint}` : ''}`;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         try {
           const results = await getJobResults(completedJobId, { fresh: true });
-          if (!hasHydratedResultsPayload(results)) {
+          if (!hasHydratedResultsPayload(results, { minimumRowsReceived: fallbackRowsReceived })) {
             throw new Error('Results not ready yet.');
           }
           applyParsedResponse(results as unknown as Record<string, unknown>, fallbackRowsReceived);
@@ -4030,7 +4039,7 @@ How to fix: ${fixHint}` : ''}`;
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {canonicalAddressesForDisplay.length === 0 ? (
+                          {canonicalAddressesForDisplay.length === 0 && !zeroStateHydrationPending ? (
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"

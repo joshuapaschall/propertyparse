@@ -623,6 +623,36 @@ describe('ParsePage', () => {
     expect(screen.queryByText('44')).not.toBeInTheDocument();
   });
 
+
+  it('suppresses stale zero-result states until completed job results hydrate', async () => {
+    const user = userEvent.setup();
+    selectedFileFactory.mockImplementation(() => new File(['pdf'], 'sample.pdf', { type: 'application/pdf' }));
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
+    getJobWithStatus.mockResolvedValue({ job: { job_id: 'job-1', status: 'DONE', phase: 'DONE', progress_done: 1, progress_total: 1 } });
+    getJobDetail.mockResolvedValue({
+      job: { job_id: 'job-1', status: 'DONE', phase: 'DONE' },
+      summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, duplicates: 0, out_of_scope: 0 },
+    });
+    getJobResults
+      .mockResolvedValueOnce({ summary: { rows_received: 0 }, row_results: [], canonical_addresses: [], duplicate_groups: [] })
+      .mockResolvedValueOnce({
+        summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, duplicates: 0, out_of_scope: 0 },
+        row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1', formatted_address: '1 Main St' }],
+        canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St', street1: '1 Main St', city: 'Austin', state: 'TX', zip: '78701', place_id: 'p1' }],
+        duplicate_groups: [],
+      });
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await waitFor(() => expect(getJobResults.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(screen.queryByText('No unique valid addresses yet.')).not.toBeInTheDocument();
+    expect(screen.queryByText(/No addresses were detected in this file/i)).not.toBeInTheDocument();
+    expect((await screen.findAllByText('1 Main St')).length).toBeGreaterThan(0);
+  });
+
   it('suppresses processing mismatch while results are finalizing', async () => {
     const user = userEvent.setup();
     selectedFileFactory.mockImplementation(() => new File(['pdf'], 'sample.pdf', { type: 'application/pdf' }));
