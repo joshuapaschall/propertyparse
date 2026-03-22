@@ -28,12 +28,11 @@ import {
   stringifyPreview,
   getDisplaySafeMatchedAddress,
   getCompareInputDisplay,
-  getManualApprovalBlocker,
+  getApprovalCapabilities,
   getResolverDetails,
   getReviewDebugHint,
   getReviewExplanation,
   getReviewReasonBucket,
-  isSafeManualApprovalCandidate,
   shouldShowOneCandidateBadge,
   type ReviewReasonFilter,
   buildLocalCsvForExport,
@@ -127,6 +126,8 @@ type PersistedLastJobState = {
   cityValue: string;
   campaignName: string;
 };
+
+type ReviewTabKey = 'needs_review' | 'out_of_scope' | 'skipped';
 
 const createId = (row: Record<string, unknown>, index: number) =>
   (row.id as string) || (row.uuid as string) || `${crypto.randomUUID?.() ?? `row-${index}`}`;
@@ -453,6 +454,7 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
       converged_place_ids: Array.isArray(row.converged_place_ids) ? row.converged_place_ids.filter((value): value is string => typeof value === 'string') : Array.isArray(row.convergedPlaceIds) ? row.convergedPlaceIds.filter((value): value is string => typeof value === 'string') : undefined,
       competing_place_ids: Array.isArray(row.competing_place_ids) ? row.competing_place_ids.filter((value): value is string => typeof value === 'string') : Array.isArray(row.competingPlaceIds) ? row.competingPlaceIds.filter((value): value is string => typeof value === 'string') : undefined,
       ambiguity_reason: pickStringValue(row, ['ambiguity_reason', 'ambiguityReason']) || undefined,
+      manual_actions: row.manual_actions ?? row.manualActions ?? undefined,
     };
   }
 
@@ -522,6 +524,7 @@ const normalizeJobRowResult = (row: JobRecord, index: number): RowResult => {
     verification_precision: pickStringValue(row, ['verification_precision', 'verificationPrecision']) || undefined,
     compare_debug: row.compare_debug ?? row.compareDebug ?? undefined,
     blocked_by: (row.blocked_by as string | string[] | undefined) ?? (row.blockedBy as string | string[] | undefined),
+    manual_actions: row.manual_actions ?? row.manualActions ?? undefined,
   };
 };
 
@@ -749,8 +752,13 @@ export default function ParsePage() {
   const [retryingRowIds, setRetryingRowIds] = useState<Set<string>>(new Set());
   const [approvingRowIds, setApprovingRowIds] = useState<Set<string>>(new Set());
   const [selectedNeedsReviewRowIds, setSelectedNeedsReviewRowIds] = useState<Set<string>>(new Set());
+  const [selectedOutOfScopeRowIds, setSelectedOutOfScopeRowIds] = useState<Set<string>>(new Set());
   const [runningAiFixFlaggedRows, setRunningAiFixFlaggedRows] = useState(false);
   const [reviewAutoFocus, setReviewAutoFocus] = useState(false);
+  const [pendingReviewNavigation, setPendingReviewNavigation] = useState<{
+    tab: ReviewTabKey;
+    groupKey: string | null;
+  } | null>(null);
   const [activeDownloadType, setActiveDownloadType] = useState<JobExportType | null>(null);
   const [exportCatalog, setExportCatalog] = useState<ExportCatalogItem[]>(FALLBACK_EXPORT_CATALOG);
   const [downloadSuccessLabel, setDownloadSuccessLabel] = useState<string | null>(null);
@@ -785,6 +793,8 @@ export default function ParsePage() {
   const resetInProgressRef = useRef(false);
   const reviewInputRef = useRef<HTMLInputElement | null>(null);
   const downloadSuccessTimerRef = useRef<number | null>(null);
+  const rowResultsRef = useRef<RowResult[]>([]);
+  const parseSummaryRef = useRef<ParseSummary | null>(null);
 
   const hasFileSelected = Boolean(file);
   const hasLocation = hasValidLocation(stateValue, countyValue, cityValue);
@@ -820,6 +830,14 @@ export default function ParsePage() {
   useEffect(() => {
     busyRef.current = busy;
   }, [busy]);
+
+  useEffect(() => {
+    rowResultsRef.current = rowResults;
+  }, [rowResults]);
+
+  useEffect(() => {
+    parseSummaryRef.current = parseSummary;
+  }, [parseSummary]);
 
   useEffect(() => {
     return () => {
@@ -921,7 +939,9 @@ export default function ParsePage() {
       setRetryingRowIds(new Set());
       setApprovingRowIds(new Set());
       setSelectedNeedsReviewRowIds(new Set());
+      setSelectedOutOfScopeRowIds(new Set());
       setRunningAiFixFlaggedRows(false);
+      setPendingReviewNavigation(null);
       if (downloadSuccessTimerRef.current !== null) {
         window.clearTimeout(downloadSuccessTimerRef.current);
         downloadSuccessTimerRef.current = null;
@@ -1346,9 +1366,35 @@ export default function ParsePage() {
     () => paginateRows(filteredNeedsReviewGroups),
     [filteredNeedsReviewGroups, paginateRows],
   );
+  const rowResultsById = useMemo(() => {
+    const map = new Map<string, RowResult>();
+    rowResults.forEach((row) => map.set(row.source_row_id, row));
+    return map;
+  }, [rowResults]);
+  const getGroupApprovalCapabilities = useCallback(
+    (group: GroupedRow) => {
+      const memberRows = group.memberRowIds
+        .map((rowId) => rowResultsById.get(rowId))
+        .filter((member): member is RowResult => Boolean(member));
+      const capabilities = memberRows.map((member) => getApprovalCapabilities(member));
+      const canApproveMatched =
+        capabilities.length > 0 && capabilities.every((capability) => capability.canApproveMatched);
+      const canApproveWithScopeOverride =
+        capabilities.length > 0 && capabilities.every((capability) => capability.canApproveWithScopeOverride);
+      const blocker =
+        capabilities.find(
+          (capability) => !capability.canApproveMatched && !capability.canApproveWithScopeOverride,
+        )?.blocker ?? null;
+      return { canApproveMatched, canApproveWithScopeOverride, blocker };
+    },
+    [rowResultsById],
+  );
   const allNeedsReviewRowIds = useMemo(
-    () => filteredNeedsReviewGroups.flatMap((group) => group.memberRowIds),
-    [filteredNeedsReviewGroups],
+    () =>
+      filteredNeedsReviewGroups.flatMap((group) =>
+        getGroupApprovalCapabilities(group).canApproveMatched ? group.memberRowIds : [],
+      ),
+    [filteredNeedsReviewGroups, getGroupApprovalCapabilities],
   );
   const allNeedsReviewSelected =
     allNeedsReviewRowIds.length > 0 &&
@@ -1362,15 +1408,21 @@ export default function ParsePage() {
     () => paginateRows(outOfScopeGroups),
     [outOfScopeGroups, paginateRows],
   );
+  const allOutOfScopeRowIds = useMemo(
+    () =>
+      outOfScopeGroups.flatMap((group) =>
+        getGroupApprovalCapabilities(group).canApproveWithScopeOverride ? group.memberRowIds : [],
+      ),
+    [getGroupApprovalCapabilities, outOfScopeGroups],
+  );
+  const allOutOfScopeSelected =
+    allOutOfScopeRowIds.length > 0 &&
+    allOutOfScopeRowIds.every((rowId) => selectedOutOfScopeRowIds.has(rowId));
+  const selectedOutOfScopeCount = selectedOutOfScopeRowIds.size;
   const paginatedDuplicateRowGroups = useMemo(
     () => paginateRows(duplicateRowGroups),
     [duplicateRowGroups, paginateRows],
   );
-  const rowResultsById = useMemo(() => {
-    const map = new Map<string, RowResult>();
-    rowResults.forEach((row) => map.set(row.source_row_id, row));
-    return map;
-  }, [rowResults]);
 
   useEffect(() => {
     const validIds = new Set(allNeedsReviewRowIds);
@@ -1381,6 +1433,16 @@ export default function ParsePage() {
       return new Set(filtered);
     });
   }, [allNeedsReviewRowIds]);
+
+  useEffect(() => {
+    const validIds = new Set(allOutOfScopeRowIds);
+    setSelectedOutOfScopeRowIds((prev) => {
+      if (prev.size === 0) return prev;
+      const filtered = Array.from(prev).filter((rowId) => validIds.has(rowId));
+      if (filtered.length === prev.size) return prev;
+      return new Set(filtered);
+    });
+  }, [allOutOfScopeRowIds]);
 
   const rowAccountingMismatch = useMemo(() => {
     if (!parseSummary || resultsFinalizing) return false;
@@ -1884,16 +1946,46 @@ How to fix: ${fixHint}` : ''}`;
     );
   };
 
+  const mergeUpdatedRows = useCallback((currentRows: RowResult[], updatedRows: RowResult[]) => {
+    if (!updatedRows.length) return currentRows;
+    const updates = new Map<string, RowResult>();
+    updatedRows.forEach((row) => {
+      const id = getRowIdentifier(row as Record<string, unknown>);
+      if (id) updates.set(id, row);
+    });
+    if (!updates.size) return currentRows;
+    const nextRows = currentRows.map((row) => {
+      const id = getRowIdentifier(row as Record<string, unknown>);
+      if (!id || !updates.has(id)) return row;
+      return { ...row, ...(updates.get(id) as RowResult) };
+    });
+    const existingIds = new Set(
+      nextRows
+        .map((row) => getRowIdentifier(row as Record<string, unknown>))
+        .filter((value): value is string => Boolean(value)),
+    );
+    const appendedRows = updatedRows.filter((row) => {
+      const id = getRowIdentifier(row as Record<string, unknown>);
+      return Boolean(id && !existingIds.has(id));
+    });
+    return appendedRows.length ? [...nextRows, ...appendedRows] : nextRows;
+  }, []);
+
+  const queueReviewNavigation = useCallback((tab: ReviewTabKey, groupKey: string | null) => {
+    setPendingReviewNavigation(groupKey ? { tab, groupKey } : null);
+  }, []);
 
   const renderApprovalAction = (row: RowResult, outOfScopeOverride: boolean) => {
-    const approvalBlocker = getManualApprovalBlocker(row);
-    const canApprove = isSafeManualApprovalCandidate(row);
+    const capabilities = getApprovalCapabilities(row);
+    const canApprove = outOfScopeOverride
+      ? capabilities.canApproveWithScopeOverride
+      : capabilities.canApproveMatched;
     const isApproving = approvingRowIds.has(row.source_row_id);
     if (!canApprove) {
       return (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
           <div className="font-semibold text-slate-600 dark:text-slate-200">Approval unavailable</div>
-          <div className="mt-0.5">{approvalBlocker ?? 'Manual approval is not safe for this review case.'}</div>
+          <div className="mt-0.5">{capabilities.blocker ?? 'Manual approval is not safe for this review case.'}</div>
         </div>
       );
     }
@@ -1936,6 +2028,22 @@ How to fix: ${fixHint}` : ''}`;
     setReviewError(null);
     setReviewSaving(false);
   };
+
+  useEffect(() => {
+    if (!pendingReviewNavigation || reviewRow) return;
+    if (activeTab !== pendingReviewNavigation.tab) return;
+    const targetGroups =
+      pendingReviewNavigation.tab === 'out_of_scope'
+        ? outOfScopeGroups
+        : pendingReviewNavigation.tab === 'skipped'
+          ? groupRows(skippedRows)
+          : needsReviewGroups;
+    const targetGroup = targetGroups.find((group) => group.groupKey === pendingReviewNavigation.groupKey);
+    setPendingReviewNavigation(null);
+    if (targetGroup) {
+      openReviewDrawer(targetGroup.displayRow);
+    }
+  }, [activeTab, needsReviewGroups, outOfScopeGroups, pendingReviewNavigation, reviewRow, skippedRows]);
 
   const getGroupMemberRows = (row: RowResult) => {
     const group = findGroupForRow(activeReviewGroups, row);
@@ -2472,6 +2580,8 @@ How to fix: ${fixHint}` : ''}`;
     setReviewSaving(false);
     setReviewDrafts({});
     setSelectedNeedsReviewRowIds(new Set());
+    setSelectedOutOfScopeRowIds(new Set());
+    setPendingReviewNavigation(null);
     setProgressInfo({
       phase: null,
       done: null,
@@ -2748,30 +2858,17 @@ How to fix: ${fixHint}` : ''}`;
     freshReload?: boolean;
   }) => {
     const { updatedRows, updatedJob, freshReload } = payload;
+    const mergedRows =
+      updatedRows?.length
+        ? mergeUpdatedRows(rowResultsRef.current, updatedRows)
+        : rowResultsRef.current;
+
     if (updatedRows?.length) {
+      rowResultsRef.current = mergedRows;
       setDeriveCanonicalsFromRows(true);
-      setRowResults((prev) => {
-        const updates = new Map<string, RowResult>();
-        updatedRows.forEach((row) => {
-          const id = getRowIdentifier(row as Record<string, unknown>);
-          if (id) {
-            updates.set(id, row);
-          }
-        });
-        if (!updates.size) return prev;
-        const nextRows = prev.map((row) => {
-          const id = getRowIdentifier(row as Record<string, unknown>);
-          if (!id || !updates.has(id)) return row;
-          const updatedRow = updates.get(id) as RowResult;
-          return { ...row, ...updatedRow };
-        });
-        const existingIds = new Set(nextRows.map((row) => getRowIdentifier(row as Record<string, unknown>)));
-        const appendedRows = updatedRows.filter((row) => {
-          const id = getRowIdentifier(row as Record<string, unknown>);
-          return Boolean(id && !existingIds.has(id));
-        });
-        return appendedRows.length ? [...nextRows, ...appendedRows] : nextRows;
-      });
+      setRowResults(mergedRows);
+      setCanonicalAddresses(buildCanonicalAddressesFromRows(mergedRows));
+      setDuplicateGroups(buildDuplicateGroupsFromRows(mergedRows));
     }
 
     if (updatedJob) {
@@ -2810,7 +2907,13 @@ How to fix: ${fixHint}` : ''}`;
         'apiCallsUsed',
       ]);
 
-      setRowsReceived((prev) => Math.max(prev ?? 0, rowResults.length));
+      const derivedSummary = deriveDisplayedParseSummary(
+        mergedRows,
+        normalizedSummary ?? parseSummaryRef.current,
+        parseSummaryRef.current ?? undefined,
+      );
+      parseSummaryRef.current = derivedSummary;
+      setRowsReceived(deriveDisplayedRowsReceived(mergedRows, derivedSummary));
       setMetadata((prev) => {
         const next = { ...(prev ?? {}), ...((normalizedUpdatedJob ?? {}) as Record<string, unknown>) };
         if (typeof totalRows === 'number') next.rows_received = totalRows;
@@ -2821,7 +2924,12 @@ How to fix: ${fixHint}` : ''}`;
         if (typeof googleCallsValue === 'number') next.google_calls_used = googleCallsValue;
         return next;
       });
-      setParseSummary((prev) => deriveDisplayedParseSummary(rowResults, normalizedSummary ?? prev, prev));
+      setParseSummary(derivedSummary);
+    } else if (updatedRows?.length) {
+      const derivedSummary = deriveDisplayedParseSummary(mergedRows, parseSummaryRef.current);
+      parseSummaryRef.current = derivedSummary;
+      setParseSummary(derivedSummary);
+      setRowsReceived(deriveDisplayedRowsReceived(mergedRows, derivedSummary));
     }
 
     if (freshReload && jobId) {
@@ -2908,10 +3016,12 @@ How to fix: ${fixHint}` : ''}`;
               : 'Retry complete',
         variant: hasDuplicate || stillNeedsReview ? 'info' : 'success',
       });
+      return true;
     } catch (err) {
       const message = (err as Error).message ?? 'Retry failed.';
       setReviewError(message);
       showToast({ title: message, variant: 'error' });
+      return false;
     } finally {
       setReviewSaving(false);
       setRetryingRowIds((prev) => {
@@ -2928,13 +3038,12 @@ How to fix: ${fixHint}` : ''}`;
       showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
       return;
     }
-    const approvalReady = Boolean(row.place_id);
-    if (!approvalReady) {
-      showToast({ title: 'Approval requires verified address', variant: 'error' });
-      return;
-    }
-    if (isOutOfScopeRow(row) && !allowScopeOverride) {
-      showToast({ title: 'Out-of-scope rows require explicit override', variant: 'error' });
+    const capabilities = getApprovalCapabilities(row);
+    const canApprove = allowScopeOverride
+      ? capabilities.canApproveWithScopeOverride
+      : capabilities.canApproveMatched;
+    if (!canApprove) {
+      showToast({ title: capabilities.blocker ?? 'Approval unavailable for this row.', variant: 'error' });
       return;
     }
 
@@ -2977,9 +3086,11 @@ How to fix: ${fixHint}` : ''}`;
       if (reviewRow?.source_row_id === row.source_row_id) {
         closeReviewDrawer();
       }
+      return true;
     } catch (err) {
       const message = (err as Error).message ?? 'Approve matched failed.';
       showToast({ title: message, variant: 'error' });
+      return false;
     } finally {
       setApprovingRowIds((prev) => {
         const next = new Set(prev);
@@ -2994,7 +3105,10 @@ How to fix: ${fixHint}` : ''}`;
       showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
       return;
     }
-    const rowIds = Array.from(selectedNeedsReviewRowIds);
+    const rowIds = Array.from(selectedNeedsReviewRowIds).filter((rowId) => {
+      const row = rowResultsById.get(rowId);
+      return row ? getApprovalCapabilities(row).canApproveMatched : false;
+    });
     if (!rowIds.length) return;
     setApprovingRowIds((prev) => {
       const next = new Set(prev);
@@ -3055,6 +3169,72 @@ How to fix: ${fixHint}` : ''}`;
             .filter((rowId): rowId is string => Boolean(rowId)),
         );
         setSelectedNeedsReviewRowIds(failedIdSet);
+      }
+    } catch (err) {
+      showToast({
+        title: (err as Error).message ?? 'Bulk approve failed.',
+        variant: 'error',
+      });
+    } finally {
+      setApprovingRowIds((prev) => {
+        const next = new Set(prev);
+        rowIds.forEach((rowId) => next.delete(rowId));
+        return next;
+      });
+    }
+  };
+
+  const handleApproveSelectedOutOfScope = async () => {
+    if (!jobId) {
+      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+      return;
+    }
+    const rowIds = Array.from(selectedOutOfScopeRowIds).filter((rowId) => {
+      const row = rowResultsById.get(rowId);
+      return row ? getApprovalCapabilities(row).canApproveWithScopeOverride : false;
+    });
+    if (!rowIds.length) return;
+    setApprovingRowIds((prev) => {
+      const next = new Set(prev);
+      rowIds.forEach((rowId) => next.add(rowId));
+      return next;
+    });
+    try {
+      const response = await approveMatchedJobRowsBatch(jobId, rowIds, true);
+      const updates = response.updated_row_results ?? response.updated_rows ?? [];
+      const failedRows = response.failed_rows ?? [];
+      const metadata = response.metadata;
+      const approvedCount = metadata?.approved_count ?? updates.length;
+      const failedCount = metadata?.failed_count ?? failedRows.length;
+      const requestedCount = metadata?.requested_count ?? rowIds.length;
+      const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
+      await handleRetryUpdates({
+        updatedRows: updates,
+        updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
+      });
+      const failedRowSummary = failedRows
+        .slice(0, 3)
+        .map((failure) => `${failure.row_id ?? 'unknown row'}: ${failure.error ?? 'Unable to approve'}`)
+        .join(' · ');
+      publishLiveUpdate('job-updated');
+      publishLiveUpdate('metrics-updated');
+      showToast({
+        title: failedCount > 0 ? 'Bulk approve completed with partial success' : `Approved ${approvedCount} rows`,
+        description: [
+          `${approvedCount} approved · ${failedCount} failed · ${requestedCount} selected`,
+          failedRowSummary ? `Failed rows: ${failedRowSummary}` : null,
+        ]
+          .filter(Boolean)
+          .join(' '),
+        variant: failedCount > 0 ? 'info' : 'success',
+      });
+      if (failedCount === 0) {
+        setSelectedOutOfScopeRowIds(new Set());
+      } else {
+        const failedIdSet = new Set(
+          failedRows.map((failure) => failure.row_id).filter((rowId): rowId is string => Boolean(rowId)),
+        );
+        setSelectedOutOfScopeRowIds(new Set(Array.from(failedIdSet)));
       }
     } catch (err) {
       showToast({
@@ -3390,6 +3570,11 @@ How to fix: ${fixHint}` : ''}`;
   const reviewSkipped = reviewRow ? isSkippedRow(reviewRow) : false;
   const reviewScopePass = !reviewOutOfScope;
   const canEditReview = reviewNeedsReview || reviewOutOfScope || reviewSkipped;
+  const reviewApprovalCapabilities = reviewRow ? getApprovalCapabilities(reviewRow) : null;
+  const canReviewApprove = reviewOutOfScope
+    ? Boolean(reviewApprovalCapabilities?.canApproveWithScopeOverride)
+    : Boolean(reviewApprovalCapabilities?.canApproveMatched);
+  const reviewApprovalBlocker = reviewApprovalCapabilities?.blocker ?? null;
 
   const handleCopyRowJson = async (payload: unknown) => {
     try {
@@ -3465,15 +3650,17 @@ How to fix: ${fixHint}` : ''}`;
                   onClear={() => setCountyValue('')}
                 />
                 <AsyncLocationSelect
-                  label="City (optional)"
+                  label="City / locality (optional)"
                   value={cityValue}
-                  placeholder={stateValue ? 'Search city' : 'Select state first'}
+                  placeholder={stateValue ? 'Search or type city/locality' : 'Select state first'}
                   disabled={!stateValue}
                   cacheScope={`cities:${stateValue}:${countyValue}`}
                   loadOptions={loadCityOptions}
+                  allowCustomValue
+                  formatCreateLabel={(inputValue) => `Use "${inputValue.trim()}"`}
                   onChange={(value) => setCityValue(value)}
                   onClear={() => setCityValue('')}
-                  helperText="Select a State, and then either a County or a City (or both)."
+                  helperText="Select from search results or type a missing city/locality manually. State is required; choose either a County or a City (or both)."
                 />
                 {showLocationValidation ? (
                   <p className="text-xs text-rose-600 dark:text-rose-300">
@@ -4168,6 +4355,7 @@ How to fix: ${fixHint}` : ''}`;
                           ) : (
                             paginatedNeedsReviewGroups.map((group) => {
                               const row = group.displayRow;
+                              const groupCapabilities = getGroupApprovalCapabilities(group);
                               const isRowBusy =
                                 approvingRowIds.has(row.source_row_id) ||
                                 retryingRowIds.has(row.source_row_id);
@@ -4186,7 +4374,9 @@ How to fix: ${fixHint}` : ''}`;
                                         type="checkbox"
                                         aria-label={`Select row group ${getRowDisplayId(row)}`}
                                         className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                        disabled={!groupCapabilities.canApproveMatched}
                                         checked={groupSelected}
+                                        title={groupCapabilities.canApproveMatched ? 'Select for bulk approve' : groupCapabilities.blocker ?? 'Approval unavailable'}
                                         onChange={(event) => {
                                           setSelectedNeedsReviewRowIds((prev) => {
                                             const next = new Set(prev);
@@ -4215,7 +4405,7 @@ How to fix: ${fixHint}` : ''}`;
                                     <td className="px-4 py-3 text-right">
                                       <div className="flex min-w-[170px] flex-col items-stretch gap-2" onClick={(event) => event.stopPropagation()} role="presentation">
                                         <button type="button" onClick={() => openReviewDrawer(row)} disabled={isRowBusy} className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:text-slate-200 dark:hover:bg-slate-800">Review</button>
-                                        {renderApprovalAction(row, true)}
+                                        {renderApprovalAction(row, false)}
                                       </div>
                                     </td>
                                   </tr>
@@ -4386,11 +4576,34 @@ How to fix: ${fixHint}` : ''}`;
                 ) : null}
                 {activeTab === 'out_of_scope' ? (
                   <>
+                  <div className="mb-3 flex items-center justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleApproveSelectedOutOfScope()}
+                      disabled={selectedOutOfScopeCount === 0}
+                      className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/40 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
+                    >
+                      Approve Selected
+                    </button>
+                  </div>
                   <div className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-950">
                     <div className="overflow-auto">
                       <table className="min-w-full text-left text-sm">
                         <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                           <tr>
+                            <th className="px-4 py-3">
+                              <input
+                                type="checkbox"
+                                aria-label="Select all out of scope rows"
+                                className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                checked={allOutOfScopeSelected}
+                                onChange={(event) => {
+                                  setSelectedOutOfScopeRowIds(
+                                    event.target.checked ? new Set(allOutOfScopeRowIds) : new Set(),
+                                  );
+                                }}
+                              />
+                            </th>
                             <th className="px-4 py-3">Record ID / Row</th>
                             <th className="px-4 py-3">Original Address</th>
                             <th className="px-4 py-3">Matched Address</th>
@@ -4407,7 +4620,7 @@ How to fix: ${fixHint}` : ''}`;
                             <tr>
                               <td
                                 className="px-4 py-6 text-center text-slate-500 dark:text-slate-400"
-                                colSpan={showDebugMode ? 9 : 8}
+                                colSpan={showDebugMode ? 10 : 9}
                               >
                                 No out-of-scope rows.
                               </td>
@@ -4415,12 +4628,34 @@ How to fix: ${fixHint}` : ''}`;
                           ) : (
                             paginatedOutOfScopeGroups.map((group) => {
                               const row = group.displayRow;
+                              const groupCapabilities = getGroupApprovalCapabilities(group);
                               const isRowBusy =
                                 approvingRowIds.has(row.source_row_id) ||
                                 retryingRowIds.has(row.source_row_id);
                               return (
                                 <Fragment key={group.groupKey}>
                                   <tr className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => openReviewDrawer(row)}>
+                                    <td className="px-4 py-3" onClick={(event) => event.stopPropagation()}>
+                                      <input
+                                        type="checkbox"
+                                        aria-label={`Select out of scope row group ${getRowDisplayId(row)}`}
+                                        className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
+                                        disabled={!groupCapabilities.canApproveWithScopeOverride}
+                                        checked={group.memberRowIds.every((rowId) => selectedOutOfScopeRowIds.has(rowId))}
+                                        title={groupCapabilities.canApproveWithScopeOverride ? 'Select for bulk approve' : groupCapabilities.blocker ?? 'Approval unavailable'}
+                                        onChange={(event) => {
+                                          setSelectedOutOfScopeRowIds((prev) => {
+                                            const next = new Set(prev);
+                                            if (event.target.checked) {
+                                              group.memberRowIds.forEach((rowId) => next.add(rowId));
+                                            } else {
+                                              group.memberRowIds.forEach((rowId) => next.delete(rowId));
+                                            }
+                                            return next;
+                                          });
+                                        }}
+                                      />
+                                    </td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getRowDisplayId(row)}
                                       {group.count > 1 ? (
                                         <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{group.count} rows affected</p>
@@ -4751,6 +4986,12 @@ How to fix: ${fixHint}` : ''}`;
                     No action available for this row.
                   </div>
                 )}
+                {!canReviewApprove && reviewApprovalBlocker ? (
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">Approval unavailable.</span>{' '}
+                    {reviewApprovalBlocker}
+                  </div>
+                ) : null}
                 <div className="mt-4 flex flex-wrap justify-end gap-3">
                   <button
                     type="button"
@@ -4761,9 +5002,9 @@ How to fix: ${fixHint}` : ''}`;
                   </button>
                   <button type="button" onClick={() => navigateReviewRow('next')} disabled={!canReviewNext} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Skip & Next</button>
                   {canEditReview ? (
-                    <button type="button" onClick={async () => { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; await handleReviewRetry(); if (nextGroup) openReviewDrawer(nextGroup.displayRow); }} disabled={!canEditReview || reviewSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300">{reviewSaving ? 'Retrying...' : 'Retry & Next'}</button>
+                    <button type="button" onClick={async () => { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleReviewRetry(); if (!succeeded) { setPendingReviewNavigation(null); } }} disabled={!canEditReview || reviewSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300">{reviewSaving ? 'Retrying...' : 'Retry & Next'}</button>
                   ) : null}
-                  <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; await handleApproveMatched(reviewRow, reviewOutOfScope); if (nextGroup) openReviewDrawer(nextGroup.displayRow); } }} disabled={!reviewRow || !reviewRow.place_id || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
+                  <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleApproveMatched(reviewRow, reviewOutOfScope); if (!succeeded) { setPendingReviewNavigation(null); } } }} disabled={!reviewRow || !canReviewApprove || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
                 </div>
               </div>
             </div>

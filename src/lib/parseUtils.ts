@@ -1,5 +1,12 @@
 import type { CanonicalAddress, ParseSummary, RowResult } from '../types/parse';
 
+export type ApprovalCapabilities = {
+  canApproveMatched: boolean;
+  canApproveWithScopeOverride: boolean;
+  blocker: string | null;
+  source: 'backend' | 'fallback';
+};
+
 const normalizeValue = (value?: string) => (value ?? '').toUpperCase();
 
 const getHttpStatusFromError = (error: unknown) => {
@@ -615,6 +622,76 @@ export const getManualApprovalBlocker = (row: RowResult) => {
   if (['county', 'county_only'].includes(precision)) return 'County-only candidate cannot be approved';
   if (['locality', 'locality_only'].includes(precision)) return 'Locality-only candidate cannot be approved';
   return getReviewExplanation(row);
+};
+
+const readBoolean = (record: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'boolean') return value;
+  }
+  return null;
+};
+
+const readString = (record: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+};
+
+export const getApprovalCapabilities = (row: RowResult): ApprovalCapabilities => {
+  const manualActions =
+    row.manual_actions && typeof row.manual_actions === 'object' && !Array.isArray(row.manual_actions)
+      ? (row.manual_actions as Record<string, unknown>)
+      : null;
+
+  if (manualActions) {
+    const safeApprove = readBoolean(manualActions, [
+      'can_approve_matched',
+      'canApproveMatched',
+      'can_safe_approve',
+      'canSafeApprove',
+      'can_approve',
+      'canApprove',
+    ]);
+    const scopeOverride = readBoolean(manualActions, [
+      'can_scope_override',
+      'canScopeOverride',
+      'allow_scope_override',
+      'allowScopeOverride',
+    ]);
+    const blocker = readString(manualActions, [
+      'blocker_message',
+      'blockerMessage',
+      'disabled_reason',
+      'disabledReason',
+      'reason',
+      'message',
+    ]);
+    if (safeApprove !== null || scopeOverride !== null || blocker) {
+      return {
+        canApproveMatched: Boolean(safeApprove),
+        canApproveWithScopeOverride: Boolean(scopeOverride),
+        blocker: blocker ?? null,
+        source: 'backend',
+      };
+    }
+  }
+
+  const hasVerifiedPlaceId = Boolean(row.place_id?.trim());
+  const isOutOfScope = isOutOfScopeRow(row);
+  const safeFallback = hasVerifiedPlaceId && isSafeManualApprovalCandidate(row);
+  const fallbackBlocker = !hasVerifiedPlaceId
+    ? 'Approval requires verified address'
+    : getManualApprovalBlocker(row);
+
+  return {
+    canApproveMatched: safeFallback && !isOutOfScope,
+    canApproveWithScopeOverride: safeFallback && isOutOfScope,
+    blocker: safeFallback ? null : fallbackBlocker,
+    source: 'fallback',
+  };
 };
 
 export const getCompareInputDisplay = (row: RowResult) => {

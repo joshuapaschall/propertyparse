@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncSelect from 'react-select/async';
+import AsyncCreatableSelect from 'react-select/async-creatable';
 import type { SingleValue } from 'react-select';
 
 type Option = { value: string; label: string };
@@ -12,6 +13,8 @@ type AsyncLocationSelectProps = {
   required?: boolean;
   helperText?: string;
   cacheScope?: string;
+  allowCustomValue?: boolean;
+  formatCreateLabel?: (inputValue: string) => string;
   loadOptions: (inputValue: string) => Promise<string[]>;
   onChange: (value: string) => void;
   onClear: () => void;
@@ -25,6 +28,8 @@ export default function AsyncLocationSelect({
   required,
   helperText,
   cacheScope = 'default',
+  allowCustomValue = false,
+  formatCreateLabel,
   loadOptions,
   onChange,
   onClear,
@@ -97,6 +102,48 @@ export default function AsyncLocationSelect({
     return { value, label: value };
   }, [value]);
 
+  const commonProps = {
+    key: cacheScope,
+    unstyled: true,
+    isSearchable: true,
+    cacheOptions: true,
+    defaultOptions: defaultOptions.length ? defaultOptions : true,
+    value: selectedOption,
+    isDisabled: disabled,
+    placeholder,
+    maxMenuHeight: 300,
+    loadOptions: fetchOptions,
+    onChange: (option: SingleValue<Option>) => onChange(option?.value ?? ''),
+    classNames: {
+      control: (state: { isFocused: boolean }) =>
+        [
+          'flex min-h-[42px] w-full items-center rounded-lg border px-3 py-2 text-sm shadow-sm transition',
+          state.isFocused
+            ? 'border-indigo-400 ring-2 ring-indigo-100 dark:border-indigo-300 dark:ring-indigo-900/40'
+            : 'border-slate-200 dark:border-slate-700',
+          disabled
+            ? 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
+            : 'bg-white text-slate-700 dark:bg-slate-900 dark:text-slate-200',
+        ].join(' '),
+      valueContainer: () => 'p-0',
+      singleValue: () => 'text-sm text-slate-700 dark:text-slate-200',
+      placeholder: () => 'text-sm text-slate-400 dark:text-slate-500',
+      indicatorsContainer: () => 'text-slate-400 dark:text-slate-500',
+      menu: () =>
+        'mt-1 rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900',
+      menuList: () => 'max-h-72 overflow-auto py-2',
+      option: (state: { isSelected: boolean; isFocused: boolean }) =>
+        [
+          'cursor-pointer rounded-md px-3 py-2 text-sm',
+          state.isSelected
+            ? 'bg-indigo-600 text-white'
+            : state.isFocused
+              ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100'
+              : 'text-slate-700 dark:text-slate-200',
+        ].join(' '),
+    },
+  } as const;
+
   return (
     <div className="relative space-y-2">
       <label className="text-sm font-semibold text-slate-700 dark:text-slate-200">
@@ -105,47 +152,15 @@ export default function AsyncLocationSelect({
       </label>
       <div className="flex items-center gap-2">
         <div className="flex-1">
-          <AsyncSelect<Option, false>
-            key={cacheScope}
-            unstyled
-            isSearchable
-            cacheOptions
-            defaultOptions={defaultOptions.length ? defaultOptions : true}
-            value={selectedOption}
-            isDisabled={disabled}
-            placeholder={placeholder}
-            maxMenuHeight={300}
-            loadOptions={fetchOptions}
-            onChange={(option: SingleValue<Option>) => onChange(option?.value ?? '')}
-            classNames={{
-              control: (state) =>
-                [
-                  'flex min-h-[42px] w-full items-center rounded-lg border px-3 py-2 text-sm shadow-sm transition',
-                  state.isFocused
-                    ? 'border-indigo-400 ring-2 ring-indigo-100 dark:border-indigo-300 dark:ring-indigo-900/40'
-                    : 'border-slate-200 dark:border-slate-700',
-                  disabled
-                    ? 'bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
-                    : 'bg-white text-slate-700 dark:bg-slate-900 dark:text-slate-200',
-                ].join(' '),
-              valueContainer: () => 'p-0',
-              singleValue: () => 'text-sm text-slate-700 dark:text-slate-200',
-              placeholder: () => 'text-sm text-slate-400 dark:text-slate-500',
-              indicatorsContainer: () => 'text-slate-400 dark:text-slate-500',
-              menu: () =>
-                'mt-1 rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900',
-              menuList: () => 'max-h-72 overflow-auto py-2',
-              option: (state) =>
-                [
-                  'cursor-pointer rounded-md px-3 py-2 text-sm',
-                  state.isSelected
-                    ? 'bg-indigo-600 text-white'
-                    : state.isFocused
-                      ? 'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-100'
-                      : 'text-slate-700 dark:text-slate-200',
-                ].join(' '),
-            }}
-          />
+          {allowCustomValue ? (
+            <AsyncCreatableSelect<Option, false>
+              {...commonProps}
+              formatCreateLabel={formatCreateLabel}
+              onCreateOption={(inputValue) => onChange(inputValue.trim())}
+            />
+          ) : (
+            <AsyncSelect<Option, false> {...commonProps} />
+          )}
         </div>
         {value ? (
           <button

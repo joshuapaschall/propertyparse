@@ -103,6 +103,7 @@ export type RowResult = {
   public_reason_label?: string;
   public_reason_message?: string;
   public_action_hint?: string;
+  manual_actions?: unknown;
 };
 
 export type DuplicateGroup = {
