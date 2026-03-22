@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncSelect from 'react-select/async';
 import AsyncCreatableSelect from 'react-select/async-creatable';
-import type { SingleValue } from 'react-select';
+import type { GroupBase, SingleValue } from 'react-select';
 
-type Option = { value: string; label: string };
+type Option = { value: string; label: string; kind?: 'official' | 'recent-custom'; __isNew__?: boolean };
+type OptionGroup = GroupBase<Option>;
 
 type AsyncLocationSelectProps = {
   label: string;
@@ -15,9 +16,42 @@ type AsyncLocationSelectProps = {
   cacheScope?: string;
   allowCustomValue?: boolean;
   formatCreateLabel?: (inputValue: string) => string;
+  noOptionsMessage?: (inputValue: string) => string;
   loadOptions: (inputValue: string) => Promise<string[]>;
   onChange: (value: string) => void;
   onClear: () => void;
+};
+
+const RECENT_CUSTOM_LOCALITIES_KEY = 'pp-recent-custom-localities';
+
+export const normalizeLocalityInput = (value: string) =>
+  value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+
+const readRecentCustomValues = (cacheScope: string) => {
+  try {
+    const raw = window.localStorage.getItem(RECENT_CUSTOM_LOCALITIES_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as Record<string, string[]>;
+    return Array.isArray(parsed?.[cacheScope]) ? parsed[cacheScope] : [];
+  } catch {
+    return [];
+  }
+};
+
+const writeRecentCustomValue = (cacheScope: string, value: string) => {
+  try {
+    const raw = window.localStorage.getItem(RECENT_CUSTOM_LOCALITIES_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
+    const existing = Array.isArray(parsed[cacheScope]) ? parsed[cacheScope] : [];
+    parsed[cacheScope] = [value, ...existing.filter((item) => item.toLowerCase() !== value.toLowerCase())].slice(0, 8);
+    window.localStorage.setItem(RECENT_CUSTOM_LOCALITIES_KEY, JSON.stringify(parsed));
+  } catch {
+    // no-op
+  }
 };
 
 export default function AsyncLocationSelect({
@@ -30,17 +64,28 @@ export default function AsyncLocationSelect({
   cacheScope = 'default',
   allowCustomValue = false,
   formatCreateLabel,
+  noOptionsMessage,
   loadOptions,
   onChange,
   onClear,
 }: AsyncLocationSelectProps) {
-  const [defaultOptions, setDefaultOptions] = useState<Option[]>([]);
-  const cacheRef = useRef<Map<string, Option[]>>(new Map());
+  const [defaultOptions, setDefaultOptions] = useState<OptionGroup[]>([]);
+  const [recentCustomOptions, setRecentCustomOptions] = useState<Option[]>([]);
+  const cacheRef = useRef<Map<string, OptionGroup[]>>(new Map());
   const debounceRef = useRef<number | null>(null);
 
   useEffect(() => {
     cacheRef.current.clear();
     setDefaultOptions([]);
+    setRecentCustomOptions(
+      allowCustomValue
+        ? readRecentCustomValues(cacheScope).map((entry) => ({
+            value: entry,
+            label: entry,
+            kind: 'recent-custom',
+          }))
+        : [],
+    );
   }, [cacheScope]);
 
   useEffect(() => {
@@ -51,7 +96,7 @@ export default function AsyncLocationSelect({
     };
   }, []);
 
-  const toOptions = useCallback((values: string[]) => {
+  const toOptions = useCallback((values: string[], kind: Option['kind'] = 'official') => {
     const seen = new Set<string>();
     return values
       .map((entry) => entry.trim())
@@ -62,8 +107,32 @@ export default function AsyncLocationSelect({
         seen.add(key);
         return true;
       })
-      .map((entry) => ({ value: entry, label: entry }));
+      .map((entry) => ({ value: entry, label: entry, kind }));
   }, []);
+
+  const toGroupedOptions = useCallback(
+    (values: string[], query: string) => {
+      const officialOptions = toOptions(values, 'official');
+      const loweredQuery = query.trim().toLowerCase();
+      const filteredRecent = allowCustomValue
+        ? recentCustomOptions.filter((option) =>
+            loweredQuery ? option.value.toLowerCase().includes(loweredQuery) : true,
+          )
+        : [];
+      const officialLower = new Set(officialOptions.map((option) => option.value.toLowerCase()));
+      const dedupedRecent = filteredRecent.filter((option) => !officialLower.has(option.value.toLowerCase()));
+      const groups: OptionGroup[] = [];
+      if (dedupedRecent.length) {
+        groups.push({ label: 'Recent custom localities', options: dedupedRecent });
+      }
+      groups.push({
+        label: allowCustomValue ? 'Official localities' : 'Available options',
+        options: officialOptions,
+      });
+      return groups;
+    },
+    [allowCustomValue, recentCustomOptions, toOptions],
+  );
 
   const fetchOptions = useCallback(
     (inputValue: string) => {
@@ -78,11 +147,11 @@ export default function AsyncLocationSelect({
         window.clearTimeout(debounceRef.current);
       }
 
-      return new Promise<Option[]>((resolve) => {
+      return new Promise<OptionGroup[]>((resolve) => {
         debounceRef.current = window.setTimeout(async () => {
           try {
             const result = await loadOptions(query);
-            const options = toOptions(result);
+            const options = toGroupedOptions(result, query);
             cacheRef.current.set(cacheKey, options);
             if (!query) {
               setDefaultOptions(options);
@@ -94,13 +163,19 @@ export default function AsyncLocationSelect({
         }, 250);
       });
     },
-    [cacheScope, loadOptions, toOptions],
+    [cacheScope, loadOptions, toGroupedOptions],
   );
+
+  useEffect(() => {
+    void fetchOptions('');
+  }, [fetchOptions]);
 
   const selectedOption = useMemo(() => {
     if (!value) return null;
-    return { value, label: value };
-  }, [value]);
+    const normalizedValue = allowCustomValue ? normalizeLocalityInput(value) : value;
+    const isRecent = recentCustomOptions.some((option) => option.value.toLowerCase() === normalizedValue.toLowerCase());
+    return { value: normalizedValue, label: normalizedValue, kind: isRecent ? 'recent-custom' : 'official' };
+  }, [allowCustomValue, recentCustomOptions, value]);
 
   const commonProps = {
     key: cacheScope,
@@ -114,6 +189,16 @@ export default function AsyncLocationSelect({
     maxMenuHeight: 300,
     loadOptions: fetchOptions,
     onChange: (option: SingleValue<Option>) => onChange(option?.value ?? ''),
+    noOptionsMessage: ({ inputValue }: { inputValue: string }) =>
+      noOptionsMessage?.(inputValue) ??
+      (allowCustomValue && inputValue.trim()
+        ? 'No official matches yet. You can use a custom locality.'
+        : 'No options available for this scope yet.'),
+    formatGroupLabel: (group: OptionGroup) => (
+      <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+        {group.label}
+      </div>
+    ),
     classNames: {
       control: (state: { isFocused: boolean }) =>
         [
@@ -132,9 +217,10 @@ export default function AsyncLocationSelect({
       menu: () =>
         'mt-1 rounded-lg border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900',
       menuList: () => 'max-h-72 overflow-auto py-2',
-      option: (state: { isSelected: boolean; isFocused: boolean }) =>
+      option: (state: { isSelected: boolean; isFocused: boolean; data: Option }) =>
         [
           'cursor-pointer rounded-md px-3 py-2 text-sm',
+          state.data.kind === 'recent-custom' ? 'border border-dashed border-amber-200 dark:border-amber-500/30' : '',
           state.isSelected
             ? 'bg-indigo-600 text-white'
             : state.isFocused
@@ -155,8 +241,20 @@ export default function AsyncLocationSelect({
           {allowCustomValue ? (
             <AsyncCreatableSelect<Option, false>
               {...commonProps}
-              formatCreateLabel={formatCreateLabel}
-              onCreateOption={(inputValue) => onChange(inputValue.trim())}
+              formatCreateLabel={(inputValue) =>
+                formatCreateLabel?.(normalizeLocalityInput(inputValue)) ??
+                `Use custom locality "${normalizeLocalityInput(inputValue)}"`
+              }
+              onCreateOption={(inputValue) => {
+                const normalized = normalizeLocalityInput(inputValue);
+                if (!normalized) return;
+                writeRecentCustomValue(cacheScope, normalized);
+                setRecentCustomOptions((prev) => [
+                  { value: normalized, label: normalized, kind: 'recent-custom' },
+                  ...prev.filter((item) => item.value.toLowerCase() !== normalized.toLowerCase()),
+                ].slice(0, 8));
+                onChange(normalized);
+              }}
             />
           ) : (
             <AsyncSelect<Option, false> {...commonProps} />

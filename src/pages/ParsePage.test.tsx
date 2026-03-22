@@ -138,6 +138,8 @@ describe('ParsePage', () => {
     showToast.mockClear();
     Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:mock'), configurable: true });
     Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(), configurable: true });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    vi.spyOn(window, 'prompt').mockReturnValue('Reviewed by operator');
   });
 
   it('publishes invalidation events after parse completion', async () => {
@@ -152,6 +154,126 @@ describe('ParsePage', () => {
     await waitFor(() => expect(publishJobUpdate).toHaveBeenCalled());
     expect(publishJobUpdate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'job-updated' }));
     expect(publishJobUpdate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'metrics-updated' }));
+  });
+
+  it('normalizes first-render parse rows so backend manual actions apply without reload', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 2 });
+    parseFile.mockResolvedValue({
+      summary: { rows_received: 2, needs_review: 1, out_of_scope: 1, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, matched: 0, attention_total: 2 },
+      row_results: [
+        {
+          sourceRowId: 'needs-safe',
+          sourceRowIndex: 1,
+          status: 'UNMATCHED_NEEDS_REVIEW',
+          matchedAddress: '12 Main St',
+          placeId: 'p1',
+          manualActions: { canApproveMatched: true },
+        },
+        {
+          sourceRowId: 'scope-safe',
+          sourceRowIndex: 2,
+          status: 'OUT_OF_SCOPE',
+          matchedAddress: '14 Main St',
+          placeId: 'p2',
+          manualActions: { canScopeOverride: true },
+        },
+      ],
+      canonical_addresses: [],
+      duplicate_groups: [],
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 2, needs_review: 1, out_of_scope: 1, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, matched: 0, attention_total: 2 },
+      row_results: [
+        { source_row_id: 'needs-safe', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', matched_address: '12 Main St', place_id: 'p1', manual_actions: { can_approve_matched: true } },
+        { source_row_id: 'scope-safe', source_row_index: 2, status: 'OUT_OF_SCOPE', matched_address: '14 Main St', place_id: 'p2', manual_actions: { can_scope_override: true } },
+      ],
+      canonical_addresses: [],
+      duplicate_groups: [],
+    });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await user.click((await screen.findAllByRole('button', { name: /Needs Review/i }))[0]);
+    expect(await screen.findByText('Approve matched')).toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox', { name: /Select row group/i })[0]).toBeEnabled();
+    await user.click((await screen.findAllByRole('button', { name: /Out of Scope/i }))[0]);
+    expect(screen.getAllByRole('checkbox', { name: /Select out of scope row group/i })[0]).toBeEnabled();
+  });
+
+  it('renders explicit force override for risky rows and keeps them out of bulk approval', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 2 });
+    parseFile.mockResolvedValue({
+      summary: { rows_received: 2, needs_review: 2, out_of_scope: 0, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, matched: 0, attention_total: 2 },
+      row_results: [
+        {
+          source_row_id: 'force-only',
+          source_row_index: 1,
+          status: 'UNMATCHED_NEEDS_REVIEW',
+          matched_address: '10 Route Rd',
+          place_id: 'p1',
+          manual_actions: { can_force_override: true, blocker: 'Route mismatch requires explicit override' },
+        },
+        {
+          source_row_id: 'safe-bulk',
+          source_row_index: 2,
+          status: 'UNMATCHED_NEEDS_REVIEW',
+          matched_address: '12 Main St',
+          place_id: 'p2',
+          manual_actions: { can_approve_matched: true },
+        },
+      ],
+      canonical_addresses: [],
+      duplicate_groups: [],
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 2, needs_review: 2, out_of_scope: 0, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, matched: 0, attention_total: 2 },
+      row_results: [
+        { source_row_id: 'force-only', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', matched_address: '10 Route Rd', place_id: 'p1', manual_actions: { can_force_override: true, blocker: 'Route mismatch requires explicit override' } },
+        { source_row_id: 'safe-bulk', source_row_index: 2, status: 'UNMATCHED_NEEDS_REVIEW', matched_address: '12 Main St', place_id: 'p2', manual_actions: { can_approve_matched: true } },
+      ],
+      canonical_addresses: [],
+      duplicate_groups: [],
+    });
+    approveMatchedJobRow.mockResolvedValue({ updated_row_results: [], updated_job: {} });
+    approveMatchedJobRowsBatch.mockResolvedValue({ updated_row_results: [], failed_rows: [], metadata: { approved_count: 1, failed_count: 0, requested_count: 1 }, updated_job: {} });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await user.click((await screen.findAllByRole('button', { name: /Needs Review/i }))[0]);
+    expect(await screen.findByText('Override to Valid')).toBeInTheDocument();
+    const checkboxes = screen.getAllByRole('checkbox', { name: /Select row group/i });
+    expect(checkboxes[0]).toBeDisabled();
+    expect(checkboxes[1]).toBeEnabled();
+
+    await user.click(screen.getByText('Override to Valid'));
+    expect(approveMatchedJobRow).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ forceOverride: true, overrideReason: 'Reviewed by operator' }),
+    );
+    expect(approveMatchedJobRowsBatch).not.toHaveBeenCalled();
+  });
+
+  it('shows scope summary copy for county-wide vs locality-only scope', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('State not selected • County not selected • All localities in county') ?? false)[0]).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • All localities in county') ?? false)[0]).toBeInTheDocument();
+    await user.clear(screen.getByRole('textbox', { name: 'City / locality (optional)' }));
+    await user.type(screen.getByRole('textbox', { name: 'City / locality (optional)' }), 'Stonecrest');
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • Stonecrest only') ?? false)[0]).toBeInTheDocument();
   });
 
 

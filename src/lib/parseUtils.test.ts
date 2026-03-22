@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import React from 'react';
+import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { RowResult } from '../types/parse';
+import AsyncLocationSelect, { normalizeLocalityInput } from '../components/AsyncLocationSelect';
 import {
   buildLocalCsvForExport,
   computeParseSummaryFromRowResults,
@@ -20,6 +24,41 @@ import {
   shouldShowOneCandidateBadge,
 } from './parseUtils';
 
+vi.mock('react-select/async', () => ({
+  default: ({ defaultOptions, loadOptions, onChange, noOptionsMessage }: any) => {
+    const options = Array.isArray(defaultOptions)
+      ? defaultOptions.flatMap((group: any) => group.options ?? [])
+      : [];
+    return React.createElement(
+      'div',
+      null,
+      React.createElement('button', { type: 'button', onClick: () => void loadOptions('') }, 'open-menu'),
+      ...(options.length
+        ? options.map((option: any) =>
+            React.createElement('button', { key: option.value, type: 'button', onClick: () => onChange(option) }, option.label),
+          )
+        : [React.createElement('div', { key: 'empty' }, noOptionsMessage?.({ inputValue: '' }))]),
+    );
+  },
+}));
+
+vi.mock('react-select/async-creatable', () => ({
+  default: ({ defaultOptions, loadOptions, onChange, onCreateOption, formatCreateLabel }: any) => {
+    const options = Array.isArray(defaultOptions)
+      ? defaultOptions.flatMap((group: any) => group.options ?? [])
+      : [];
+    return React.createElement(
+      'div',
+      null,
+      React.createElement('button', { type: 'button', onClick: () => void loadOptions('') }, 'open-menu'),
+      React.createElement('button', { type: 'button', onClick: () => onCreateOption('  stone   crest  ') }, formatCreateLabel('Stonecrest')),
+      ...options.map((option: any) =>
+        React.createElement('button', { key: option.value, type: 'button', onClick: () => onChange(option) }, option.label),
+      ),
+    );
+  },
+}));
+
 const buildRow = (overrides: Partial<RowResult>): RowResult => ({
   source_row_index: 1,
   source_row_id: 'row-1',
@@ -28,6 +67,10 @@ const buildRow = (overrides: Partial<RowResult>): RowResult => ({
 });
 
 describe('parseUtils filters', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it('flags needs review rows by status or reason', () => {
     expect(isNeedsReviewRow(buildRow({ status: 'UNMATCHED_NEEDS_REVIEW' }))).toBe(true);
     expect(isNeedsReviewRow(buildRow({ status: 'unmatched_other' }))).toBe(true);
@@ -247,20 +290,83 @@ describe('parseUtils filters', () => {
     expect(getApprovalCapabilities(backendOverrideRow)).toEqual({
       canApproveMatched: false,
       canApproveWithScopeOverride: true,
+      canForceOverride: false,
       blocker: 'Scope override required',
       source: 'backend',
     });
     expect(getApprovalCapabilities(fallbackSafeRow)).toEqual({
       canApproveMatched: true,
       canApproveWithScopeOverride: false,
+      canForceOverride: false,
       blocker: null,
       source: 'fallback',
     });
     expect(getApprovalCapabilities(blockedRow)).toEqual({
       canApproveMatched: false,
       canApproveWithScopeOverride: false,
+      canForceOverride: false,
       blocker: 'House number conflict',
       source: 'fallback',
     });
+  });
+
+  it('surfaces backend blocker and force override capability', () => {
+    const row = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      manual_actions: {
+        can_approve_matched: false,
+        can_scope_override: false,
+        can_force_override: true,
+        blocker: 'Route mismatch requires explicit override',
+      },
+    });
+
+    expect(getApprovalCapabilities(row)).toEqual({
+      canApproveMatched: false,
+      canApproveWithScopeOverride: false,
+      canForceOverride: true,
+      blocker: 'Route mismatch requires explicit override',
+      source: 'backend',
+    });
+  });
+
+  it('normalizes custom locality input for deliberate reuse', () => {
+    expect(normalizeLocalityInput('  stone   crest  ')).toBe('Stone Crest');
+  });
+
+  it('shows empty-query options and stores recent custom localities by scope', async () => {
+    const user = userEvent.setup();
+    const loadOptions = vi.fn().mockResolvedValue(['Atlanta', 'Decatur']);
+    const onChange = vi.fn();
+
+    const { rerender } = render(React.createElement(AsyncLocationSelect, {
+      label: 'City / locality',
+      value: '',
+      placeholder: 'Search',
+      cacheScope: 'cities:GA:DeKalb',
+      allowCustomValue: true,
+      loadOptions,
+      onChange,
+      onClear: () => undefined,
+    }));
+
+    await waitFor(() => expect(loadOptions).toHaveBeenCalledWith(''));
+    expect(screen.getByText('Atlanta')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /Use custom locality/i }));
+    expect(onChange).toHaveBeenCalledWith('Stone Crest');
+
+    rerender(React.createElement(AsyncLocationSelect, {
+      label: 'City / locality',
+      value: '',
+      placeholder: 'Search',
+      cacheScope: 'cities:GA:DeKalb',
+      allowCustomValue: true,
+      loadOptions,
+      onChange,
+      onClear: () => undefined,
+    }));
+
+    expect(window.localStorage.getItem('pp-recent-custom-localities')).toContain('Stone Crest');
   });
 });

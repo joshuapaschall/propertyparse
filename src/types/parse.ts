@@ -106,6 +106,15 @@ export type RowResult = {
   manual_actions?: unknown;
 };
 
+export type ManualActions = {
+  can_approve_matched?: boolean;
+  can_scope_override?: boolean;
+  can_force_override?: boolean;
+  blocker?: string | null;
+  blocker_message?: string | null;
+  [key: string]: unknown;
+};
+
 export type DuplicateGroup = {
   canonical_id: string;
   canonical_formatted_address: string;
