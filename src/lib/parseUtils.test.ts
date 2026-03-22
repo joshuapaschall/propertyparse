@@ -3,6 +3,7 @@ import type { RowResult } from '../types/parse';
 import {
   buildLocalCsvForExport,
   computeParseSummaryFromRowResults,
+  getApprovalCapabilities,
   getDisplaySafeMatchedAddress,
   getManualApprovalBlocker,
   getReasonMetadata,
@@ -216,6 +217,50 @@ describe('parseUtils filters', () => {
       label: 'Street details need confirmation',
       description: 'We could not confirm this address automatically.',
       fix_hint: 'Check the full street address and retry.',
+    });
+  });
+
+  it('prefers backend approval capabilities and falls back to safe frontend gating', () => {
+    const backendOverrideRow = buildRow({
+      status: 'OUT_OF_SCOPE',
+      place_id: 'p1',
+      manual_actions: { can_scope_override: true, blocker_message: 'Scope override required' },
+    });
+    const fallbackSafeRow = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      place_id: 'p2',
+      matched_address: '12 Main St',
+      resolver_strategy: 'wrapper_text_single_candidate',
+      decision_tier: 'manual_confirm',
+      candidate_count_in_scope: 1,
+      normalized_compare_input: '12 MAIN ST',
+    });
+    const blockedRow = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      place_id: 'p3',
+      matched_address: '14 Main St',
+      candidate_count_in_scope: 1,
+      blocked_by: ['house_number_mismatch'],
+      resolver_strategy: 'wrapper_text_single_candidate',
+    });
+
+    expect(getApprovalCapabilities(backendOverrideRow)).toEqual({
+      canApproveMatched: false,
+      canApproveWithScopeOverride: true,
+      blocker: 'Scope override required',
+      source: 'backend',
+    });
+    expect(getApprovalCapabilities(fallbackSafeRow)).toEqual({
+      canApproveMatched: true,
+      canApproveWithScopeOverride: false,
+      blocker: null,
+      source: 'fallback',
+    });
+    expect(getApprovalCapabilities(blockedRow)).toEqual({
+      canApproveMatched: false,
+      canApproveWithScopeOverride: false,
+      blocker: 'House number conflict',
+      source: 'fallback',
     });
   });
 });

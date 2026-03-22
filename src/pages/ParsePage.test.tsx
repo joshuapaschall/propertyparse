@@ -15,6 +15,10 @@ const getApiErrorInfo = vi.fn();
 const runAiFixFlaggedRows = vi.fn();
 const downloadJobExport = vi.fn();
 const getJobExportCatalog = vi.fn();
+const approveMatchedJobRow = vi.fn();
+const approveMatchedJobRowsBatch = vi.fn();
+const retryJobBatch = vi.fn();
+const retryJobRow = vi.fn();
 const publishJobUpdate = vi.fn();
 const showToast = vi.fn();
 const selectedFileFactory = vi.fn(() => new File(['a'], 'sample.csv', { type: 'text/csv' }));
@@ -29,14 +33,38 @@ vi.mock('../components/FileUploadCard', () => ({
   ),
 }));
 vi.mock('../components/AsyncLocationSelect', () => ({
-  default: ({ label, onChange, disabled }: { label: string; onChange: (value: string) => void; disabled?: boolean }) => (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={() => onChange(label === 'State' ? 'TX' : label.includes('County') ? 'Travis' : 'Austin')}
-    >
-      set-{label}
-    </button>
+  default: ({
+    label,
+    value,
+    onChange,
+    disabled,
+    allowCustomValue,
+  }: {
+    label: string;
+    value?: string;
+    onChange: (value: string) => void;
+    disabled?: boolean;
+    allowCustomValue?: boolean;
+  }) => (
+    <div>
+      <label>
+        {label}
+        <input
+          aria-label={label}
+          disabled={disabled}
+          value={value ?? ''}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      </label>
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => onChange(label === 'State' ? 'TX' : label.includes('County') ? 'Travis' : 'Austin')}
+      >
+        set-{label}
+      </button>
+      {allowCustomValue ? <span>custom-enabled</span> : null}
+    </div>
   ),
 }));
 vi.mock('../components/ProcessingReportModal', () => ({ default: () => null }));
@@ -75,10 +103,10 @@ vi.mock('../lib/api', () => ({
   getJobWithStatus: (...args: unknown[]) => getJobWithStatus(...args),
   parseFile: (...args: unknown[]) => parseFile(...args),
   parseFileAsync: (...args: unknown[]) => parseFileAsync(...args),
-  approveMatchedJobRow: vi.fn(async () => ({ updated_row_results: [], updated_job: {} })),
-  approveMatchedJobRowsBatch: vi.fn(),
-  retryJobBatch: vi.fn(),
-  retryJobRow: vi.fn(),
+  approveMatchedJobRow: (...args: unknown[]) => approveMatchedJobRow(...args),
+  approveMatchedJobRowsBatch: (...args: unknown[]) => approveMatchedJobRowsBatch(...args),
+  retryJobBatch: (...args: unknown[]) => retryJobBatch(...args),
+  retryJobRow: (...args: unknown[]) => retryJobRow(...args),
   retryParseBatch: vi.fn(),
   retryParseRow: vi.fn(),
   runAiFixFlaggedRows: (...args: unknown[]) => runAiFixFlaggedRows(...args),
@@ -97,6 +125,10 @@ describe('ParsePage', () => {
     getJobWithStatus.mockResolvedValue({ job: { job_id: 'job-1', status: 'RUNNING', phase: 'VERIFYING' } });
     getJobExportCatalog.mockResolvedValue([]);
     downloadJobExport.mockResolvedValue({ blob: new Blob(['header\n'], { type: 'text/csv' }), filename: 'f.csv' });
+    approveMatchedJobRow.mockResolvedValue({ updated_row_results: [], updated_job: {} });
+    approveMatchedJobRowsBatch.mockResolvedValue({ updated_row_results: [], failed_rows: [], metadata: { approved_count: 0, failed_count: 0, requested_count: 0 }, updated_job: {} });
+    retryJobBatch.mockResolvedValue({ updated_row_results: [], updated_job: {} });
+    retryJobRow.mockResolvedValue({ updated_row_results: [], updated_job: {} });
     getJobDetail.mockResolvedValue({ job: { job_id: 'job-1' }, summary: {} });
     getJobResults.mockResolvedValue({ summary: { rows_received: 0 }, row_results: [], canonical_addresses: [], duplicate_groups: [] });
     getAllJobRows.mockResolvedValue([]);
@@ -510,7 +542,7 @@ describe('ParsePage', () => {
     expect(screen.queryByRole('button', { name: 'Approve matched' })).not.toBeInTheDocument();
 
     await user.click(screen.getAllByRole('button', { name: /^Out of Scope/i })[0]);
-    expect(await screen.findByText(/Approval requires a confirmed in-scope candidate count/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Approval requires verified address/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve matched' })).not.toBeInTheDocument();
   });
 
@@ -672,6 +704,140 @@ describe('ParsePage', () => {
 
     expect(await screen.findByText(/Finalizing results/i)).toBeInTheDocument();
     expect(screen.queryByText(/Processing mismatch/i)).not.toBeInTheDocument();
+  });
+
+  it('allows a custom city entry and sends it in the parse request', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.clear(screen.getByRole('textbox', { name: 'City / locality (optional)' }));
+    await user.type(screen.getByRole('textbox', { name: 'City / locality (optional)' }), 'Stonecrest');
+    expect(screen.getByText('custom-enabled')).toBeInTheDocument();
+
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await waitFor(() =>
+      expect(parseFile).toHaveBeenCalledWith(
+        'f1',
+        expect.objectContaining({ city: 'Stonecrest' }),
+      ),
+    );
+  });
+
+  it('supports out-of-scope bulk approval with scope override and updates valid rows immediately', async () => {
+    const user = userEvent.setup();
+    const summary = {
+      rows_received: 1,
+      valid_total: 0,
+      valid_unique: 0,
+      needs_review: 0,
+      skipped: 0,
+      duplicates: 0,
+      out_of_scope: 1,
+      matched: 0,
+      attention_total: 1,
+    };
+    const row = {
+      source_row_id: 'r1',
+      source_row_index: 1,
+      status: 'OUT_OF_SCOPE',
+      detected_address: '123 Main St',
+      matched_address: '123 Main St, Stonecrest, GA 30038',
+      formatted_address: '123 Main St, Stonecrest, GA 30038',
+      canonical_id: 'c1',
+      place_id: 'p1',
+      components: {
+        street_address: '123 Main St',
+        address2: 'Unit B',
+        city: 'Stonecrest',
+        state: 'GA',
+        zip: '30038',
+      },
+      manual_actions: { can_scope_override: true },
+    };
+    parseFile.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+    approveMatchedJobRowsBatch.mockResolvedValue({
+      updated_row_results: [{ ...row, status: 'VALID_OVERRIDE' }],
+      updated_job: {
+        summary: {
+          ...summary,
+          valid_total: 1,
+          valid_unique: 1,
+          out_of_scope: 0,
+          matched: 1,
+          attention_total: 0,
+        },
+      },
+      failed_rows: [],
+      metadata: { requested_count: 1, approved_count: 1, failed_count: 0 },
+    });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+    await user.click(await screen.findByRole('button', { name: /Out of Scope \(1 rows\)/i }));
+
+    expect(screen.getByRole('checkbox', { name: 'Select all out of scope rows' })).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: 'Select all out of scope rows' }));
+    await user.click(screen.getByRole('button', { name: 'Approve Selected' }));
+
+    await waitFor(() => expect(approveMatchedJobRowsBatch).toHaveBeenCalledWith(expect.any(String), ['r1'], true));
+
+    await user.click(screen.getByRole('button', { name: /Valid \(rows:\s*1\s*·\s*unique:\s*1\)/i }));
+    expect(await screen.findAllByText('123 Main St, Stonecrest, GA 30038')).toHaveLength(1);
+    expect(screen.getByText('123 Main St')).toBeInTheDocument();
+    expect(screen.getByText('Unit B')).toBeInTheDocument();
+    expect(screen.getByText('Stonecrest')).toBeInTheDocument();
+    expect(screen.getByText('GA')).toBeInTheDocument();
+    expect(screen.getByText('30038')).toBeInTheDocument();
+  });
+
+  it('uses the same approval gating in the table and review drawer for blocked rows', async () => {
+    const user = userEvent.setup();
+    const summary = {
+      rows_received: 1,
+      valid_total: 0,
+      valid_unique: 0,
+      needs_review: 1,
+      skipped: 0,
+      duplicates: 0,
+      out_of_scope: 0,
+      matched: 0,
+      attention_total: 1,
+    };
+    const row = {
+      source_row_id: 'r1',
+      source_row_index: 1,
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      detected_address: '789 Legacy Ln',
+      matched_address: '789 Legacy Ln, Austin, TX 78701',
+      place_id: 'p1',
+      candidate_count_in_scope: 1,
+      blocked_by: ['house_number_mismatch'],
+      resolver_strategy: 'wrapper_text_single_candidate',
+      normalized_compare_input: '789 LEGACY LN',
+    };
+    parseFile.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+    await user.click(await screen.findByRole('button', { name: /Needs Review \(1 issues · 1 rows\)/i }));
+
+    expect(screen.getByText('Approval unavailable')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Review' }));
+
+    expect(await screen.findByText(/Approval unavailable\./i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Approve & Next' })).toBeDisabled();
+    expect(approveMatchedJobRow).not.toHaveBeenCalled();
   });
 
 });
