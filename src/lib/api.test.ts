@@ -367,3 +367,51 @@ describe('jobs API', () => {
     );
   });
 });
+
+
+describe('parse payload APIs', () => {
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.restoreAllMocks();
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.com');
+    vi.stubEnv('VITE_SUPABASE_URL', 'https://supabase.example.com');
+    vi.stubEnv('VITE_SUPABASE_ANON_KEY', 'anon-key');
+
+    const { setAuthHeaderState } = await import('./authState');
+    setAuthHeaderState({ accessToken: 'token-123', orgId: 'org-123', userId: 'user-123', role: 'admin' });
+  });
+
+  afterEach(async () => {
+    const { clearAuthHeaderState } = await import('./authState');
+    clearAuthHeaderState();
+    vi.unstubAllEnvs();
+  });
+
+  it('sends scope_mode, localities, and legacy city in parse requests', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { ok: true } }), { status: 200, headers: { 'content-type': 'application/json' } })));
+    const { parseFile } = await import('./api');
+
+    await parseFile('file-123', {
+      state: 'Georgia',
+      county: 'DeKalb',
+      city: 'Stonecrest',
+      localities: ['Stonecrest', 'Lithonia'],
+      scope_mode: 'locality_strict',
+    });
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.example.com/parse',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          fileId: 'file-123',
+          state: 'Georgia',
+          county: 'DeKalb',
+          city: 'Stonecrest',
+          localities: ['Stonecrest', 'Lithonia'],
+          scope_mode: 'locality_strict',
+        }),
+      }),
+    );
+  });
+});

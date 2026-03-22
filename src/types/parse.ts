@@ -1,3 +1,11 @@
+export type ParseScopeMetadata = {
+  state?: string;
+  county?: string;
+  city?: string;
+  localities?: string[];
+  scope_mode?: 'county_wide' | 'locality_strict';
+};
+
 export type UsageSummaryFlatFields = {
   geocoding_calls?: number;
   autocomplete_calls?: number;

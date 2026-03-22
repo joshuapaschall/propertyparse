@@ -67,6 +67,16 @@ vi.mock('../components/AsyncLocationSelect', () => ({
     </div>
   ),
 }));
+vi.mock('../components/AsyncLocationMultiSelect', () => ({
+  default: ({ label, values = [], onChange, disabled }: { label: string; values?: string[]; onChange: (values: string[]) => void; disabled?: boolean }) => (
+    <div>
+      <label>{label}<input aria-label={label} disabled={disabled} value={values.join(', ')} readOnly /></label>
+      <button type="button" disabled={disabled} onClick={() => onChange(['Stonecrest', 'Lithonia'])}>{`set-${label}`}</button>
+      <button type="button" disabled={disabled} onClick={() => onChange([])}>{`clear-${label}`}</button>
+    </div>
+  ),
+}));
+
 vi.mock('../components/ProcessingReportModal', () => ({ default: () => null }));
 vi.mock('../components/ProgressIndicator', () => ({
   default: ({ percent }: { percent?: number | null }) => <div>{typeof percent === 'number' ? `percent:${percent}` : 'indeterminate'}</div>,
@@ -271,9 +281,9 @@ describe('ParsePage', () => {
     await user.click(screen.getByRole('button', { name: 'set-State' }));
     await user.click(screen.getByRole('button', { name: /set-County/i }));
     expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • All localities in county') ?? false)[0]).toBeInTheDocument();
-    await user.clear(screen.getByRole('textbox', { name: 'City / locality (optional)' }));
-    await user.type(screen.getByRole('textbox', { name: 'City / locality (optional)' }), 'Stonecrest');
-    expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • Stonecrest only') ?? false)[0]).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
+    await user.click(screen.getByRole('button', { name: 'set-Localities' }));
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • Stonecrest, Lithonia') ?? false)[0]).toBeInTheDocument();
   });
 
 
@@ -828,22 +838,22 @@ describe('ParsePage', () => {
     expect(screen.queryByText(/Processing mismatch/i)).not.toBeInTheDocument();
   });
 
-  it('allows a custom city entry and sends it in the parse request', async () => {
+  it('allows locality-strict selection and sends the first locality in the backward-compatible parse request', async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
 
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.clear(screen.getByRole('textbox', { name: 'City / locality (optional)' }));
-    await user.type(screen.getByRole('textbox', { name: 'City / locality (optional)' }), 'Stonecrest');
-    expect(screen.getByText('custom-enabled')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
+    await user.click(screen.getByRole('button', { name: 'set-Localities' }));
 
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await waitFor(() =>
       expect(parseFile).toHaveBeenCalledWith(
         'f1',
-        expect.objectContaining({ city: 'Stonecrest' }),
+        expect.objectContaining({ city: 'Stonecrest', localities: ['Stonecrest', 'Lithonia'], scope_mode: 'locality_strict' }),
       ),
     );
   });
@@ -960,6 +970,72 @@ describe('ParsePage', () => {
     expect(await screen.findByText(/Approval unavailable\./i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Approve & Next' })).toBeDisabled();
     expect(approveMatchedJobRow).not.toHaveBeenCalled();
+  });
+
+
+
+  it('toggles locality picker visibility based on explicit scope mode', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+
+    expect(screen.queryByLabelText('Localities')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
+    expect(screen.getByLabelText('Localities')).toBeInTheDocument();
+  });
+
+  it('sends explicit scope payload fields when parsing', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
+    await user.click(screen.getByRole('button', { name: 'set-Localities' }));
+    await user.click(screen.getByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await waitFor(() => expect(parseFile).toHaveBeenCalled());
+    expect(parseFile).toHaveBeenCalledWith('f1', expect.objectContaining({
+      state: 'TX',
+      county: 'Travis',
+      city: 'Stonecrest',
+      localities: ['Stonecrest', 'Lithonia'],
+      scope_mode: 'locality_strict',
+    }));
+  });
+
+  it('hydrates scope metadata from backend job details and supports legacy city-only jobs', async () => {
+    getJobDetail.mockResolvedValueOnce({
+      job: { job_id: 'job-scope', metadata: { scope: { state: 'Georgia', county: 'DeKalb', localities: ['Stonecrest', 'Lithonia'], scope_mode: 'locality_strict' } } },
+      summary: {},
+    });
+    getJobResults.mockResolvedValueOnce({ summary: { rows_received: 0 }, row_results: [], canonical_addresses: [], duplicate_groups: [], metadata: { scope: { state: 'Georgia', county: 'DeKalb', localities: ['Stonecrest', 'Lithonia'], scope_mode: 'locality_strict' } } });
+
+    render(<MemoryRouter initialEntries={['/?job=job-scope']}><ParsePage /></MemoryRouter>);
+    expect(await screen.findByDisplayValue('Georgia')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('DeKalb')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: /Only selected localities/i })).toBeChecked();
+    expect(screen.getByDisplayValue('Stonecrest, Lithonia')).toBeInTheDocument();
+
+    window.localStorage.setItem('pp-parse-last-job', JSON.stringify({ version: 1, jobId: 'job-legacy', stateValue: 'Georgia', countyValue: 'DeKalb', cityValue: 'Stonecrest', campaignName: '' }));
+    getJobDetail.mockResolvedValueOnce({ job: { job_id: 'job-legacy' }, summary: {} });
+    getJobResults.mockResolvedValueOnce({ summary: { rows_received: 0 }, row_results: [], canonical_addresses: [], duplicate_groups: [] });
+
+    render(<MemoryRouter initialEntries={['/?job=job-legacy']}><ParsePage /></MemoryRouter>);
+    expect(await screen.findByDisplayValue('Stonecrest')).toBeInTheDocument();
+  });
+
+  it('renders explicit scope summary copy for county-wide and multi-locality states', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-County/i }));
+
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • All localities in county') ?? false)[0]).toBeInTheDocument();
+    await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
+    await user.click(screen.getByRole('button', { name: 'set-Localities' }));
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • Stonecrest, Lithonia') ?? false)[0]).toBeInTheDocument();
   });
 
 });

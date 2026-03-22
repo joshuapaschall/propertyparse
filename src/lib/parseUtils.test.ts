@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { RowResult } from '../types/parse';
 import AsyncLocationSelect, { normalizeLocalityInput } from '../components/AsyncLocationSelect';
+import AsyncLocationMultiSelect from '../components/AsyncLocationMultiSelect';
 import {
   buildLocalCsvForExport,
   computeParseSummaryFromRowResults,
@@ -368,5 +369,67 @@ describe('parseUtils filters', () => {
     }));
 
     expect(window.localStorage.getItem('pp-recent-custom-localities')).toContain('Stone Crest');
+  });
+});
+
+
+describe('locality select helpers', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('normalizes custom locality values before saving', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      React.createElement(AsyncLocationSelect, {
+        label: 'City / locality',
+        value: '',
+        placeholder: 'Search',
+        cacheScope: 'cities:GA:Dekalb',
+        allowCustomValue: true,
+        loadOptions: vi.fn().mockResolvedValue(['Stone Mountain']),
+        onChange,
+        onClear: () => {},
+      }),
+    );
+
+    await user.click(screen.getByRole('button', { name: /Use custom locality/i }));
+
+    expect(onChange).toHaveBeenCalledWith('Stone Crest');
+  });
+
+  it('stores recent custom localities by scoped county and shows them above official results', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      React.createElement(AsyncLocationMultiSelect, {
+        label: 'Localities',
+        values: [],
+        placeholder: 'Search',
+        cacheScope: 'cities:GA:Dekalb',
+        loadOptions: vi.fn().mockResolvedValue(['Lithonia']),
+        onChange,
+      }),
+    );
+
+    await user.click(screen.getByRole('button', { name: /Use custom locality/i }));
+    const stored = JSON.parse(window.localStorage.getItem('pp-recent-custom-localities') ?? '{}');
+    expect(stored['cities:GA:Dekalb']).toEqual(['Stone Crest']);
+
+    render(
+      React.createElement(AsyncLocationMultiSelect, {
+        label: 'Localities',
+        values: [],
+        placeholder: 'Search',
+        cacheScope: 'cities:GA:Dekalb',
+        loadOptions: vi.fn().mockResolvedValue(['Lithonia']),
+        onChange: vi.fn(),
+      }),
+    );
+
+    await user.click(screen.getAllByRole('button', { name: 'open-menu' })[1]);
+    expect(window.localStorage.getItem('pp-recent-custom-localities')).toContain('cities:GA:Dekalb');
+    expect(screen.getAllByRole('button', { name: /Use custom locality "Stonecrest"/i }).length).toBeGreaterThan(0);
   });
 });
