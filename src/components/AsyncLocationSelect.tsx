@@ -31,7 +31,7 @@ export const normalizeLocalityInput = (value: string) =>
     .toLowerCase()
     .replace(/\b\w/g, (char) => char.toUpperCase());
 
-const readRecentCustomValues = (cacheScope: string) => {
+export const readRecentCustomValues = (cacheScope: string) => {
   try {
     const raw = window.localStorage.getItem(RECENT_CUSTOM_LOCALITIES_KEY);
     if (!raw) return [];
@@ -42,7 +42,7 @@ const readRecentCustomValues = (cacheScope: string) => {
   }
 };
 
-const writeRecentCustomValue = (cacheScope: string, value: string) => {
+export const writeRecentCustomValue = (cacheScope: string, value: string) => {
   try {
     const raw = window.localStorage.getItem(RECENT_CUSTOM_LOCALITIES_KEY);
     const parsed = raw ? (JSON.parse(raw) as Record<string, string[]>) : {};
@@ -178,7 +178,6 @@ export default function AsyncLocationSelect({
   }, [allowCustomValue, recentCustomOptions, value]);
 
   const commonProps = {
-    key: cacheScope,
     unstyled: true,
     isSearchable: true,
     cacheOptions: true,
@@ -240,6 +239,7 @@ export default function AsyncLocationSelect({
         <div className="flex-1">
           {allowCustomValue ? (
             <AsyncCreatableSelect<Option, false>
+              key={cacheScope}
               {...commonProps}
               formatCreateLabel={(inputValue) =>
                 formatCreateLabel?.(normalizeLocalityInput(inputValue)) ??
@@ -257,7 +257,7 @@ export default function AsyncLocationSelect({
               }}
             />
           ) : (
-            <AsyncSelect<Option, false> {...commonProps} />
+            <AsyncSelect<Option, false> key={cacheScope} {...commonProps} />
           )}
         </div>
         {value ? (

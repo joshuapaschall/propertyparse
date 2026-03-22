@@ -427,30 +427,27 @@ export async function uploadFile(file: File, displayName?: string) {
   });
 }
 
+export type ParseLocationPayload = {
+  state: string;
+  county: string;
+  city?: string;
+  localities?: string[];
+  scope_mode?: 'county_wide' | 'locality_strict';
+  force_refresh?: boolean;
+  jobId?: string;
+  jobName?: string;
+};
+
 export async function parseFile(
   fileId: string,
-  payload: {
-    state: string;
-    county: string;
-    city?: string;
-    force_refresh?: boolean;
-    jobId?: string;
-    jobName?: string;
-  },
+  payload: ParseLocationPayload,
 ) {
   return postJson<ParseResponse>('/parse', { fileId, ...payload }, { headers: getAuthHeaders() });
 }
 
 export async function parseFileAsync(
   fileId: string,
-  payload: {
-    state: string;
-    county: string;
-    city?: string;
-    force_refresh?: boolean;
-    jobId?: string;
-    jobName?: string;
-  },
+  payload: ParseLocationPayload,
 ) {
   return postJson<ParseResponse>(
     '/parse?async_mode=true',

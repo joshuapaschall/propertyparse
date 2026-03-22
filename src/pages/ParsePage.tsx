@@ -5,6 +5,7 @@ import AppShell from '../components/AppShell';
 import AccountedRowsIndicator from '../components/AccountedRowsIndicator';
 import FileUploadCard from '../components/FileUploadCard';
 import AsyncLocationSelect from '../components/AsyncLocationSelect';
+import AsyncLocationMultiSelect from '../components/AsyncLocationMultiSelect';
 import ProcessingReportModal, {
   ProcessingReportFilter,
 } from '../components/ProcessingReportModal';
@@ -118,12 +119,16 @@ type NormalizedCanonicalAddress = CanonicalAddress & {
   fullAddress: string;
 };
 
+type ScopeMode = 'county_wide' | 'locality_strict';
+
 type PersistedLastJobState = {
   version: number;
   jobId: string;
   stateValue: string;
   countyValue: string;
   cityValue: string;
+  scopeMode?: ScopeMode;
+  selectedLocalities?: string[];
   campaignName: string;
 };
 
@@ -686,6 +691,52 @@ const clearLastJobState = () => {
   }
 };
 
+const normalizeLocalityList = (values: unknown): string[] => {
+  if (!Array.isArray(values)) return [];
+  const seen = new Set<string>();
+  return values
+    .filter((value): value is string => typeof value === 'string')
+    .map((value) => value.trim())
+    .filter((value) => {
+      if (!value) return false;
+      const key = value.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+};
+
+const hydrateLocationScope = (source: Record<string, unknown> | null | undefined) => {
+  const metadataScope = source && typeof source.scope === 'object' && source.scope ? (source.scope as Record<string, unknown>) : null;
+  const state = [metadataScope?.state, source?.state, source?.stateValue].find((value): value is string => typeof value === 'string' && value.trim())?.trim() ?? '';
+  const county = [metadataScope?.county, source?.county, source?.countyValue].find((value): value is string => typeof value === 'string' && value.trim())?.trim() ?? '';
+  const legacyCity = [source?.city, source?.cityValue, metadataScope?.city].find((value): value is string => typeof value === 'string' && value.trim())?.trim() ?? '';
+  const localities = normalizeLocalityList(metadataScope?.localities ?? source?.localities ?? source?.selectedLocalities);
+  const selectedLocalities = localities.length ? localities : legacyCity ? [legacyCity] : [];
+  const rawScopeMode = [metadataScope?.scope_mode, metadataScope?.scopeMode, source?.scope_mode, source?.scopeMode].find((value): value is string => typeof value === 'string');
+  const scopeMode: ScopeMode = rawScopeMode === 'locality_strict' || rawScopeMode === 'county_wide' ? rawScopeMode : selectedLocalities.length ? 'locality_strict' : 'county_wide';
+  return { stateValue: state, countyValue: county, cityValue: selectedLocalities[0] ?? '', selectedLocalities, scopeMode };
+};
+
+const buildLocationPayload = (state: string, county: string, scopeMode: ScopeMode, selectedLocalities: string[]) => ({
+  state,
+  county,
+  city: selectedLocalities[0] ?? '',
+  localities: selectedLocalities,
+  scope_mode: scopeMode,
+});
+
+const buildScopeSummary = (state: string, county: string, scopeMode: ScopeMode, localities: string[]) => {
+  const localitySummary = scopeMode === 'county_wide'
+    ? 'All localities in county'
+    : localities.length <= 1
+      ? `${localities[0] ?? 'No locality selected'} only`
+      : localities.length === 2
+        ? localities.join(', ')
+        : `${localities[0]} + ${localities.length - 1} more localit${localities.length - 1 === 1 ? 'y' : 'ies'}`;
+  return [state || 'State not selected', county ? `${county} County` : 'County not selected', localitySummary].join(' • ');
+};
+
 export default function ParsePage() {
   const { role } = useAuthControls();
   const isPrivileged = role === 'admin' || role === 'owner';
@@ -693,7 +744,9 @@ export default function ParsePage() {
   const navigate = useNavigate();
   const [stateValue, setStateValue] = useState('');
   const [countyValue, setCountyValue] = useState('');
-  const [cityValue, setCityValue] = useState('');
+  const [scopeMode, setScopeMode] = useState<ScopeMode>('county_wide');
+  const [selectedLocalities, setSelectedLocalities] = useState<string[]>([]);
+  const cityValue = selectedLocalities[0] ?? '';
   const [campaignName, setCampaignName] = useState('');
   const { showToast } = useToast();
   const [file, setFile] = useState<File | null>(null);
@@ -797,10 +850,10 @@ export default function ParsePage() {
   const parseSummaryRef = useRef<ParseSummary | null>(null);
 
   const hasFileSelected = Boolean(file);
-  const hasLocation = hasValidLocation(stateValue, countyValue, cityValue);
+  const hasLocation = hasValidLocation(stateValue, countyValue, scopeMode, selectedLocalities);
   const canRerunSameUpload = Boolean(fileId) && hasLocation && !busy && !rehydrating;
-  const showLocationValidation = Boolean(stateValue && !countyValue && !cityValue);
-  const canParse = canStartParse(file, stateValue, countyValue, cityValue) && !busy;
+  const showLocationValidation = Boolean(stateValue) && !hasLocation;
+  const canParse = canStartParse(file, stateValue, countyValue, scopeMode, selectedLocalities) && !busy;
   const parseCtaLabel = useMemo(() => {
     if (busy) return 'Processing…';
     if (!hasFileSelected) return 'Select a file to process';
@@ -950,7 +1003,8 @@ export default function ParsePage() {
       setDownloadSuccessLabel(null);
       setStateValue('');
       setCountyValue('');
-      setCityValue('');
+      setScopeMode('county_wide');
+      setSelectedLocalities([]);
       setCampaignName('');
       setForceRefresh(false);
       setBusy(false);
@@ -1023,10 +1077,19 @@ export default function ParsePage() {
         setIsJobReload(true);
         setFile(null);
         setFileId(pickString(combinedJob, ['file_id', 'fileId', 'fileID', 'file']));
+        const hydratedLocationSource = ((jobDetail.job as Record<string, unknown> | undefined)?.metadata as Record<string, unknown> | undefined)?.scope
+          ? { ...(jobDetail.job as Record<string, unknown>), scope: ((jobDetail.job as Record<string, unknown>).metadata as Record<string, unknown>).scope }
+          : resultsResponse?.metadata && typeof resultsResponse.metadata === 'object' && 'scope' in resultsResponse.metadata
+            ? { ...(resultsResponse as Record<string, unknown>), scope: (resultsResponse.metadata as Record<string, unknown>).scope }
+            : storedState;
+        if (hydratedLocationSource) {
+          const hydratedLocation = hydrateLocationScope(hydratedLocationSource as Record<string, unknown>);
+          setStateValue(hydratedLocation.stateValue);
+          setCountyValue(hydratedLocation.countyValue);
+          setScopeMode(hydratedLocation.scopeMode);
+          setSelectedLocalities(hydratedLocation.selectedLocalities);
+        }
         if (storedState) {
-          setStateValue(storedState.stateValue);
-          setCountyValue(storedState.countyValue);
-          setCityValue(storedState.cityValue);
           setCampaignName(storedState.campaignName);
         }
         setParseTimestamp(createdAt);
@@ -2134,6 +2197,8 @@ How to fix: ${fixHint}` : ''}`;
       `Timestamp: ${parseTimestamp ?? new Date().toISOString()}`,
       `State: ${stateValue || '--'}`,
       `County: ${countyValue || '--'}`,
+      `Scope mode: ${scopeMode}`,
+      `Localities: ${selectedLocalities.length ? selectedLocalities.join(', ') : '--'}`,
       `City: ${cityValue || '--'}`,
       `Campaign name: ${campaignName || '--'}`,
       `File: ${file?.name || '--'}`,
@@ -2185,6 +2250,8 @@ How to fix: ${fixHint}` : ''}`;
                 stateValue,
                 countyValue,
                 cityValue,
+                scopeMode,
+                selectedLocalities,
                 campaignName,
               },
               { fresh: true },
@@ -2199,7 +2266,7 @@ How to fix: ${fixHint}` : ''}`;
       setPersistenceWarningActive(true);
       writeLocalParsePersistenceState({ jobId: completedJobId, persistenceWarning: true });
     },
-    [campaignName, cityValue, countyValue, loadJobResults, stateValue],
+    [campaignName, cityValue, countyValue, loadJobResults, scopeMode, selectedLocalities, stateValue],
   );
 
   const startPolling = (jobIdToWatch: string, options?: { onFinished?: () => Promise<void> | void }) => {
@@ -2419,6 +2486,9 @@ How to fix: ${fixHint}` : ''}`;
       };
       const hasRowAccounting = Boolean(parseResponse.summary && parseResponse.row_results);
       const responseMeta = (parseResponse.metadata as Record<string, unknown>) ?? {};
+      const hydratedLocation = hydrateLocationScope({ ...responseMeta, state: stateValue, county: countyValue, city: cityValue, selectedLocalities, scopeMode });
+      setScopeMode(hydratedLocation.scopeMode);
+      setSelectedLocalities(hydratedLocation.selectedLocalities);
       const persistenceWarning = Boolean(
         responseMeta.persistence_warning === true ||
           responseMeta.source === 'memory' ||
@@ -2509,6 +2579,13 @@ How to fix: ${fixHint}` : ''}`;
         ...(jobDetail.summary ?? {}),
         ...(jobDetail.job ?? {}),
       };
+      const hydratedLocation = hydrateLocationScope((jobDetail.job as Record<string, unknown>) ?? null);
+      if (hydratedLocation.stateValue || hydratedLocation.countyValue || hydratedLocation.selectedLocalities.length) {
+        setStateValue(hydratedLocation.stateValue);
+        setCountyValue(hydratedLocation.countyValue);
+        setScopeMode(hydratedLocation.scopeMode);
+        setSelectedLocalities(hydratedLocation.selectedLocalities);
+      }
       const summary = buildParseSummaryFromJob(mergedJob);
       const displayedSummary = deriveDisplayedParseSummary([], summary);
       const resolvedRowsReceived = displayedSummary?.rows_received ?? fallbackRowsReceived ?? null;
@@ -2617,11 +2694,9 @@ How to fix: ${fixHint}` : ''}`;
     resetForFreshParse();
     try {
       const trimmedCampaignName = campaignName.trim();
-      const cityToUse = cityOverride ?? cityValue;
+      const localitiesToUse = cityOverride !== undefined ? (cityOverride ? [cityOverride] : []) : selectedLocalities;
       const parsed = await parseFile(uploadFileId, {
-        state: stateValue,
-        county: countyValue,
-        city: cityToUse,
+        ...buildLocationPayload(stateValue, countyValue, scopeMode, localitiesToUse),
         force_refresh: forceRefresh,
         jobName: trimmedCampaignName || undefined,
       });
@@ -2697,7 +2772,8 @@ How to fix: ${fixHint}` : ''}`;
         setMetadata((parsed.metadata as Record<string, unknown>) || null);
       }
       if (cityOverride !== undefined) {
-        setCityValue(cityOverride);
+        setSelectedLocalities(cityOverride ? [cityOverride] : []);
+        setScopeMode(cityOverride ? 'locality_strict' : 'county_wide');
       }
       updateJobQueryParam(createdJobId);
       writeLastJobState({
@@ -2705,7 +2781,9 @@ How to fix: ${fixHint}` : ''}`;
         jobId: createdJobId,
         stateValue,
         countyValue,
-        cityValue: cityToUse,
+        cityValue: localitiesToUse[0] ?? '',
+        scopeMode,
+        selectedLocalities: localitiesToUse,
         campaignName: trimmedCampaignName,
       });
     } catch (err) {
@@ -2755,9 +2833,7 @@ How to fix: ${fixHint}` : ''}`;
           },
         });
         await parseFileAsync(upload.fileId, {
-          state: stateValue,
-          county: countyValue,
-          city: cityValue,
+          ...buildLocationPayload(stateValue, countyValue, scopeMode, selectedLocalities),
           force_refresh: forceRefresh,
           jobId: newJobId,
           jobName: trimmedCampaignName || undefined,
@@ -2765,9 +2841,7 @@ How to fix: ${fixHint}` : ''}`;
       } else {
         startPolling(newJobId);
         const parsed = await parseFile(upload.fileId, {
-          state: stateValue,
-          county: countyValue,
-          city: cityValue,
+          ...buildLocationPayload(stateValue, countyValue, scopeMode, selectedLocalities),
           force_refresh: forceRefresh,
           jobId: newJobId,
           jobName: trimmedCampaignName || undefined,
@@ -2788,6 +2862,8 @@ How to fix: ${fixHint}` : ''}`;
         stateValue,
         countyValue,
         cityValue,
+        scopeMode,
+        selectedLocalities,
         campaignName: trimmedCampaignName,
       });
     } catch (err) {
@@ -2839,7 +2915,7 @@ How to fix: ${fixHint}` : ''}`;
     try {
       const response = await retryParseRow({
         row: row.original ?? row,
-        location: { state: stateValue, county: countyValue, city: cityValue },
+        location: buildLocationPayload(stateValue, countyValue, scopeMode, selectedLocalities),
       });
       setRetryAvailable('available');
       updateRetryStatus(row.id, false);
@@ -2860,7 +2936,7 @@ How to fix: ${fixHint}` : ''}`;
     try {
       const response = await retryParseBatch({
         rows: marked.map((row) => row.original ?? row),
-        location: { state: stateValue, county: countyValue, city: cityValue },
+        location: buildLocationPayload(stateValue, countyValue, scopeMode, selectedLocalities),
       });
       setRetryAvailable('available');
       setLegacyUnmatchedRows((prev) => prev.map((row) => ({ ...row, needsRetry: false })));
@@ -3463,6 +3539,8 @@ How to fix: ${fixHint}` : ''}`;
                 stateValue,
                 countyValue,
                 cityValue,
+                scopeMode,
+                selectedLocalities,
                 campaignName,
               },
               { fresh: true },
@@ -3660,11 +3738,7 @@ How to fix: ${fixHint}` : ''}`;
     : Boolean(reviewApprovalCapabilities?.canApproveMatched);
   const canReviewForceOverride = Boolean(reviewApprovalCapabilities?.canForceOverride);
   const reviewApprovalBlocker = reviewApprovalCapabilities?.blocker ?? null;
-  const scopeSummary = [
-    stateValue || 'State not selected',
-    countyValue ? `${countyValue} County` : 'County not selected',
-    cityValue ? `${cityValue} only` : 'All localities in county',
-  ].join(' • ');
+  const scopeSummary = buildScopeSummary(stateValue, countyValue, scopeMode, selectedLocalities);
 
   const handleCopyRowJson = async (payload: unknown) => {
     try {
@@ -3719,16 +3793,18 @@ How to fix: ${fixHint}` : ''}`;
                   onChange={(value) => {
                     setStateValue(value);
                     setCountyValue('');
-                    setCityValue('');
+                    setScopeMode('county_wide');
+                    setSelectedLocalities([]);
                   }}
                   onClear={() => {
                     setStateValue('');
                     setCountyValue('');
-                    setCityValue('');
+                    setScopeMode('county_wide');
+                    setSelectedLocalities([]);
                   }}
                 />
                 <AsyncLocationSelect
-                  label="County (optional)"
+                  label="County"
                   value={countyValue}
                   placeholder={stateValue ? 'Search county' : 'Select state first'}
                   disabled={!stateValue}
@@ -3739,34 +3815,51 @@ How to fix: ${fixHint}` : ''}`;
                   loadOptions={loadCountyOptions}
                   onChange={(value) => {
                     setCountyValue(value);
-                    setCityValue('');
+                    setSelectedLocalities([]);
                   }}
-                  onClear={() => setCountyValue('')}
+                  onClear={() => {
+                    setCountyValue('');
+                    setSelectedLocalities([]);
+                  }}
+                  helperText="Select the county to define parse scope. County is required in this flow."
                 />
-                <AsyncLocationSelect
-                  label="City / locality (optional)"
-                  value={cityValue}
-                  placeholder={stateValue ? 'Search or type city/locality' : 'Select state first'}
-                  disabled={!stateValue}
-                  cacheScope={`cities:${stateValue}:${countyValue}`}
-                  noOptionsMessage={() =>
-                    stateValue
-                      ? 'Open the menu to browse localities, or create a custom locality.'
-                      : 'Select a state first.'
-                  }
-                  loadOptions={loadCityOptions}
-                  allowCustomValue
-                  formatCreateLabel={(inputValue) => `Use custom locality "${inputValue}"`}
-                  onChange={(value) => setCityValue(value)}
-                  onClear={() => setCityValue('')}
-                  helperText="Select from search results or type a missing city/locality manually. State is required; choose either a County or a City (or both)."
-                />
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">Parse scope</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Make the coverage explicit so county-wide parses and selected-locality parses are easy to review.</p>
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Parse scope">
+                    <label className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 text-sm transition ${scopeMode === 'county_wide' ? 'border-indigo-400 bg-indigo-50 dark:border-indigo-400 dark:bg-indigo-500/10' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'}`}>
+                      <input type="radio" name="scope-mode" checked={scopeMode === 'county_wide'} onChange={() => setScopeMode('county_wide')} className="mt-0.5" />
+                      <span><span className="font-semibold text-slate-700 dark:text-slate-100">All localities in county</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">Every locality in the selected county will count as in scope.</span></span>
+                    </label>
+                    <label className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 text-sm transition ${scopeMode === 'locality_strict' ? 'border-indigo-400 bg-indigo-50 dark:border-indigo-400 dark:bg-indigo-500/10' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'}`}>
+                      <input type="radio" name="scope-mode" checked={scopeMode === 'locality_strict'} onChange={() => setScopeMode('locality_strict')} className="mt-0.5" />
+                      <span><span className="font-semibold text-slate-700 dark:text-slate-100">Only selected localities</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">Only the localities you choose below will count as in scope.</span></span>
+                    </label>
+                  </div>
+                </div>
+                {scopeMode === 'locality_strict' ? (
+                  <AsyncLocationMultiSelect
+                    label="Localities"
+                    values={selectedLocalities}
+                    placeholder={countyValue ? 'Search or create locality' : 'Select county first'}
+                    disabled={!stateValue || !countyValue}
+                    required
+                    cacheScope={`cities:${stateValue}:${countyValue}`}
+                    noOptionsMessage={() => countyValue ? 'Open the menu to browse localities, or create a custom locality.' : 'Select a county first.'}
+                    loadOptions={loadCityOptions}
+                    formatCreateLabel={(inputValue) => `Use custom locality "${inputValue}"`}
+                    onChange={setSelectedLocalities}
+                    helperText="Choose one or more official localities, or add a normalized custom locality for this county."
+                  />
+                ) : null}
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                   <span className="font-semibold text-slate-700 dark:text-slate-100">Scope:</span> {scopeSummary}
                 </div>
                 {showLocationValidation ? (
                   <p className="text-xs text-rose-600 dark:text-rose-300">
-                    Select a State, and then either a County or a City (or both).
+Select a state and county. If you choose only selected localities, add at least one locality.
                   </p>
                 ) : null}
               </div>
