@@ -514,6 +514,8 @@ export async function approveMatchedJobRow(
     rowId: string;
     applyToSameNormalizedInput?: boolean;
     allowScopeOverride?: boolean;
+    forceOverride?: boolean;
+    overrideReason?: string;
   },
 ) {
   return postJson<{
@@ -524,6 +526,8 @@ export async function approveMatchedJobRow(
     row_id: payload.rowId,
     apply_to_same_normalized_input: payload.applyToSameNormalizedInput ?? false,
     allow_scope_override: payload.allowScopeOverride ?? false,
+    force_override: payload.forceOverride ?? false,
+    override_reason: payload.overrideReason,
   });
 }
 

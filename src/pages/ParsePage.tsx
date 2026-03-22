@@ -1381,11 +1381,16 @@ export default function ParsePage() {
         capabilities.length > 0 && capabilities.every((capability) => capability.canApproveMatched);
       const canApproveWithScopeOverride =
         capabilities.length > 0 && capabilities.every((capability) => capability.canApproveWithScopeOverride);
+      const canForceOverride =
+        capabilities.length > 0 && capabilities.every((capability) => capability.canForceOverride);
       const blocker =
         capabilities.find(
-          (capability) => !capability.canApproveMatched && !capability.canApproveWithScopeOverride,
+          (capability) =>
+            !capability.canApproveMatched &&
+            !capability.canApproveWithScopeOverride &&
+            !capability.canForceOverride,
         )?.blocker ?? null;
-      return { canApproveMatched, canApproveWithScopeOverride, blocker };
+      return { canApproveMatched, canApproveWithScopeOverride, canForceOverride, blocker };
     },
     [rowResultsById],
   );
@@ -1981,6 +1986,18 @@ How to fix: ${fixHint}` : ''}`;
       ? capabilities.canApproveWithScopeOverride
       : capabilities.canApproveMatched;
     const isApproving = approvingRowIds.has(row.source_row_id);
+    if (!canApprove && capabilities.canForceOverride) {
+      return (
+        <button
+          type="button"
+          onClick={() => void handleForceOverride(row)}
+          disabled={isApproving}
+          className="w-full rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/20"
+        >
+          {isApproving ? '⏳ Overriding…' : 'Override to Valid'}
+        </button>
+      );
+    }
     if (!canApprove) {
       return (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
@@ -2434,15 +2451,17 @@ How to fix: ${fixHint}` : ''}`;
           rowAccountingMetadata.cache_hits = parsed.cache_hits;
         }
 
-        const parsedRows = (parseResponse.row_results ?? []) as RowResult[];
+        const parsedRows = ((parseResponse.row_results ?? []) as JobRecord[]).map((row, index) =>
+          normalizeJobRowResult(row, index),
+        );
         const displayedSummary = deriveDisplayedParseSummary(parsedRows, summary);
         setParseSummary(displayedSummary);
         setRowsReceived(deriveDisplayedRowsReceived(parsedRows, displayedSummary));
         const canonicalRows = (parseResponse.canonical_addresses ?? []) as CanonicalAddress[];
         setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
         setDeriveCanonicalsFromRows(false);
-        setRowResults((parseResponse.row_results ?? []) as RowResult[]);
-        setDuplicateGroups((parseResponse.duplicate_groups ?? []) as DuplicateGroup[]);
+        setRowResults(parsedRows);
+        setDuplicateGroups(buildDuplicateGroupsFromRows(parsedRows));
         setDebugInfo((parseResponse.debug ?? null) as ParseDebugInfo | null);
         setMetadata(Object.keys(rowAccountingMetadata).length ? rowAccountingMetadata : null);
         setLegacyMode(false);
@@ -2646,15 +2665,17 @@ How to fix: ${fixHint}` : ''}`;
           rowAccountingMetadata.cache_hits = parsedRecord.cache_hits;
         }
 
-        const parsedRows = (parsed.row_results ?? []) as RowResult[];
+        const parsedRows = ((parsed.row_results ?? []) as JobRecord[]).map((row, index) =>
+          normalizeJobRowResult(row, index),
+        );
         const displayedSummary = deriveDisplayedParseSummary(parsedRows, summary);
         setParseSummary(displayedSummary);
         setRowsReceived(deriveDisplayedRowsReceived(parsedRows, displayedSummary));
         const canonicalRows = (parsed.canonical_addresses ?? []) as CanonicalAddress[];
         setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
         setDeriveCanonicalsFromRows(false);
-        setRowResults((parsed.row_results ?? []) as RowResult[]);
-        setDuplicateGroups((parsed.duplicate_groups ?? []) as DuplicateGroup[]);
+        setRowResults(parsedRows);
+        setDuplicateGroups(buildDuplicateGroupsFromRows(parsedRows));
         setDebugInfo((parsed.debug ?? null) as ParseDebugInfo | null);
         setMetadata(Object.keys(rowAccountingMetadata).length ? rowAccountingMetadata : null);
         setLegacyMode(false);
@@ -3090,6 +3111,69 @@ How to fix: ${fixHint}` : ''}`;
     } catch (err) {
       const message = (err as Error).message ?? 'Approve matched failed.';
       showToast({ title: message, variant: 'error' });
+      return false;
+    } finally {
+      setApprovingRowIds((prev) => {
+        const next = new Set(prev);
+        memberRows.forEach((memberRow) => next.delete(memberRow.source_row_id));
+        return next;
+      });
+    }
+  };
+
+  const handleForceOverride = async (row: RowResult) => {
+    if (!jobId) {
+      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+      return false;
+    }
+    const capabilities = getApprovalCapabilities(row);
+    if (!capabilities.canForceOverride) {
+      showToast({ title: capabilities.blocker ?? 'Override unavailable for this row.', variant: 'error' });
+      return false;
+    }
+    const confirmed = window.confirm(
+      'Override to Valid bypasses the normal safety checks for this row. Continue only if you reviewed the matched address carefully.',
+    );
+    if (!confirmed) return false;
+    const overrideReason = window.prompt('Enter an override reason for audit history:', 'Manual review confirmed')?.trim();
+    if (!overrideReason) {
+      showToast({ title: 'Override reason is required.', variant: 'error' });
+      return false;
+    }
+
+    const memberRows = getGroupMemberRows(row);
+    setApprovingRowIds((prev) => {
+      const next = new Set(prev);
+      memberRows.forEach((memberRow) => next.add(memberRow.source_row_id));
+      return next;
+    });
+
+    try {
+      const response = await approveMatchedJobRow(jobId, {
+        rowId: row.source_row_id,
+        applyToSameNormalizedInput: false,
+        forceOverride: true,
+        overrideReason,
+      });
+      const updates = response.updated_row_results ?? response.updated_rows ?? [];
+      const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
+      await handleRetryUpdates({
+        updatedRows: updates,
+        updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
+      });
+      publishLiveUpdate('job-updated');
+      publishLiveUpdate('metrics-updated');
+      showToast({
+        title: 'Override applied',
+        description: 'This row was manually overridden to valid.',
+        variant: 'success',
+      });
+      if (reviewRow?.source_row_id === row.source_row_id) {
+        closeReviewDrawer();
+      }
+      return true;
+    } catch (err) {
+      showToast({ title: (err as Error).message ?? 'Override failed.', variant: 'error' });
       return false;
     } finally {
       setApprovingRowIds((prev) => {
@@ -3574,7 +3658,13 @@ How to fix: ${fixHint}` : ''}`;
   const canReviewApprove = reviewOutOfScope
     ? Boolean(reviewApprovalCapabilities?.canApproveWithScopeOverride)
     : Boolean(reviewApprovalCapabilities?.canApproveMatched);
+  const canReviewForceOverride = Boolean(reviewApprovalCapabilities?.canForceOverride);
   const reviewApprovalBlocker = reviewApprovalCapabilities?.blocker ?? null;
+  const scopeSummary = [
+    stateValue || 'State not selected',
+    countyValue ? `${countyValue} County` : 'County not selected',
+    cityValue ? `${cityValue} only` : 'All localities in county',
+  ].join(' • ');
 
   const handleCopyRowJson = async (payload: unknown) => {
     try {
@@ -3624,6 +3714,7 @@ How to fix: ${fixHint}` : ''}`;
                   value={stateValue}
                   placeholder="Search state"
                   required
+                  noOptionsMessage={() => 'Open the menu to browse states or type to filter.'}
                   loadOptions={loadStateOptions}
                   onChange={(value) => {
                     setStateValue(value);
@@ -3642,6 +3733,9 @@ How to fix: ${fixHint}` : ''}`;
                   placeholder={stateValue ? 'Search county' : 'Select state first'}
                   disabled={!stateValue}
                   cacheScope={`counties:${stateValue}`}
+                  noOptionsMessage={() =>
+                    stateValue ? 'Open the menu to browse counties or type to filter.' : 'Select a state first.'
+                  }
                   loadOptions={loadCountyOptions}
                   onChange={(value) => {
                     setCountyValue(value);
@@ -3655,13 +3749,21 @@ How to fix: ${fixHint}` : ''}`;
                   placeholder={stateValue ? 'Search or type city/locality' : 'Select state first'}
                   disabled={!stateValue}
                   cacheScope={`cities:${stateValue}:${countyValue}`}
+                  noOptionsMessage={() =>
+                    stateValue
+                      ? 'Open the menu to browse localities, or create a custom locality.'
+                      : 'Select a state first.'
+                  }
                   loadOptions={loadCityOptions}
                   allowCustomValue
-                  formatCreateLabel={(inputValue) => `Use "${inputValue.trim()}"`}
+                  formatCreateLabel={(inputValue) => `Use custom locality "${inputValue}"`}
                   onChange={(value) => setCityValue(value)}
                   onClear={() => setCityValue('')}
                   helperText="Select from search results or type a missing city/locality manually. State is required; choose either a County or a City (or both)."
                 />
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                  <span className="font-semibold text-slate-700 dark:text-slate-100">Scope:</span> {scopeSummary}
+                </div>
                 {showLocationValidation ? (
                   <p className="text-xs text-rose-600 dark:text-rose-300">
                     Select a State, and then either a County or a City (or both).
@@ -4986,10 +5088,15 @@ How to fix: ${fixHint}` : ''}`;
                     No action available for this row.
                   </div>
                 )}
-                {!canReviewApprove && reviewApprovalBlocker ? (
+                {!canReviewApprove && !canReviewForceOverride && reviewApprovalBlocker ? (
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                     <span className="font-semibold text-slate-700 dark:text-slate-200">Approval unavailable.</span>{' '}
                     {reviewApprovalBlocker}
+                  </div>
+                ) : null}
+                {canReviewForceOverride ? (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                    Override to Valid bypasses the normal safety checks and always requires a reason.
                   </div>
                 ) : null}
                 <div className="mt-4 flex flex-wrap justify-end gap-3">
@@ -5004,7 +5111,11 @@ How to fix: ${fixHint}` : ''}`;
                   {canEditReview ? (
                     <button type="button" onClick={async () => { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleReviewRetry(); if (!succeeded) { setPendingReviewNavigation(null); } }} disabled={!canEditReview || reviewSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300">{reviewSaving ? 'Retrying...' : 'Retry & Next'}</button>
                   ) : null}
-                  <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleApproveMatched(reviewRow, reviewOutOfScope); if (!succeeded) { setPendingReviewNavigation(null); } } }} disabled={!reviewRow || !canReviewApprove || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
+                  {canReviewForceOverride ? (
+                    <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleForceOverride(reviewRow); if (!succeeded) { setPendingReviewNavigation(null); } } }} disabled={!reviewRow || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:bg-amber-300">Override & Next</button>
+                  ) : (
+                    <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleApproveMatched(reviewRow, reviewOutOfScope); if (!succeeded) { setPendingReviewNavigation(null); } } }} disabled={!reviewRow || !canReviewApprove || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
+                  )}
                 </div>
               </div>
             </div>

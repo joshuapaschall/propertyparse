@@ -3,6 +3,7 @@ import type { CanonicalAddress, ParseSummary, RowResult } from '../types/parse';
 export type ApprovalCapabilities = {
   canApproveMatched: boolean;
   canApproveWithScopeOverride: boolean;
+  canForceOverride: boolean;
   blocker: string | null;
   source: 'backend' | 'fallback';
 };
@@ -661,7 +662,14 @@ export const getApprovalCapabilities = (row: RowResult): ApprovalCapabilities =>
       'allow_scope_override',
       'allowScopeOverride',
     ]);
+    const forceOverride = readBoolean(manualActions, [
+      'can_force_override',
+      'canForceOverride',
+      'allow_force_override',
+      'allowForceOverride',
+    ]);
     const blocker = readString(manualActions, [
+      'blocker',
       'blocker_message',
       'blockerMessage',
       'disabled_reason',
@@ -669,10 +677,11 @@ export const getApprovalCapabilities = (row: RowResult): ApprovalCapabilities =>
       'reason',
       'message',
     ]);
-    if (safeApprove !== null || scopeOverride !== null || blocker) {
+    if (safeApprove !== null || scopeOverride !== null || forceOverride !== null || blocker) {
       return {
         canApproveMatched: Boolean(safeApprove),
         canApproveWithScopeOverride: Boolean(scopeOverride),
+        canForceOverride: Boolean(forceOverride),
         blocker: blocker ?? null,
         source: 'backend',
       };
@@ -689,6 +698,7 @@ export const getApprovalCapabilities = (row: RowResult): ApprovalCapabilities =>
   return {
     canApproveMatched: safeFallback && !isOutOfScope,
     canApproveWithScopeOverride: safeFallback && isOutOfScope,
+    canForceOverride: false,
     blocker: safeFallback ? null : fallbackBlocker,
     source: 'fallback',
   };
