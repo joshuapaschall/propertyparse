@@ -2017,9 +2017,24 @@ How to fix: ${fixHint}` : ''}`;
   const mergeUpdatedRows = useCallback((currentRows: RowResult[], updatedRows: RowResult[]) => {
     if (!updatedRows.length) return currentRows;
     const updates = new Map<string, RowResult>();
+    const currentIds = new Set(
+      currentRows
+        .map((row) => getRowIdentifier(row as Record<string, unknown>))
+        .filter((value): value is string => Boolean(value)),
+    );
     updatedRows.forEach((row) => {
       const id = getRowIdentifier(row as Record<string, unknown>);
-      if (id) updates.set(id, row);
+      if (!id) {
+        console.warn('[ParsePage] Skipping updated row with missing identifier during merge.', row);
+        return;
+      }
+      if (!currentIds.has(id)) {
+        console.warn('[ParsePage] Updated row identifier not found in local rows; appending row as fallback.', {
+          id,
+          row,
+        });
+      }
+      updates.set(id, row);
     });
     if (!updates.size) return currentRows;
     const nextRows = currentRows.map((row) => {
@@ -3029,6 +3044,39 @@ How to fix: ${fixHint}` : ''}`;
       setRowsReceived(deriveDisplayedRowsReceived(mergedRows, derivedSummary));
     }
 
+    if (updatedJob) {
+      const backendNR = pickNumberFromRecord(updatedJob, ['needs_review']);
+      const backendVU = pickNumberFromRecord(updatedJob, ['valid_unique']);
+      const localSummary = computeParseSummaryFromRowResults(mergedRows);
+      const maxDrift = Math.max(updatedRows.length, 1);
+      const needsReviewDrifted =
+        typeof backendNR === 'number' && Math.abs(backendNR - localSummary.needs_review) > maxDrift;
+      const validUniqueDrifted =
+        typeof backendVU === 'number' && Math.abs(backendVU - localSummary.valid_unique) > maxDrift;
+
+      if ((needsReviewDrifted || validUniqueDrifted) && jobId) {
+        console.warn('[ParsePage] Backend and local summaries drifted after row updates; forcing fresh reload.', {
+          backend: { needs_review: backendNR, valid_unique: backendVU },
+          local: { needs_review: localSummary.needs_review, valid_unique: localSummary.valid_unique },
+          maxDrift,
+          updatedRowsCount: updatedRows.length,
+        });
+        await loadJobResults(
+          jobId,
+          {
+            version: LAST_JOB_STORAGE_VERSION,
+            jobId,
+            stateValue,
+            countyValue,
+            cityValue,
+            campaignName,
+          },
+          { fresh: true },
+        );
+        return;
+      }
+    }
+
     if (freshReload && jobId) {
       await loadJobResults(
         jobId,
@@ -3089,6 +3137,7 @@ How to fix: ${fixHint}` : ''}`;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
+        freshReload: true,
       });
       publishLiveUpdate('job-updated');
       publishLiveUpdate('metrics-updated');
@@ -3162,6 +3211,7 @@ How to fix: ${fixHint}` : ''}`;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
+        freshReload: true,
       });
       const hasDuplicate = updates.some((updatedRow) =>
         normalizeStatus(updatedRow.status).includes('DUPLICATE'),
@@ -3236,6 +3286,7 @@ How to fix: ${fixHint}` : ''}`;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
+        freshReload: true,
       });
       publishLiveUpdate('job-updated');
       publishLiveUpdate('metrics-updated');
@@ -3287,6 +3338,7 @@ How to fix: ${fixHint}` : ''}`;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
+        freshReload: true,
       });
       const duplicateCount = updates.filter((row) => normalizeStatus(row.status).includes('DUPLICATE')).length;
 
@@ -3371,6 +3423,7 @@ How to fix: ${fixHint}` : ''}`;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
+        freshReload: true,
       });
       const failedRowSummary = failedRows
         .slice(0, 3)
