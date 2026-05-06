@@ -17,7 +17,6 @@ import Card from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import Skeleton from '../components/ui/Skeleton';
 import ExportPanel from '../components/exports/ExportPanel';
-import InternalCostPanel from '../components/InternalCostPanel';
 import { useToast } from '../components/ui/ToastProvider';
 import {
   getReasonMetadata,
@@ -73,12 +72,10 @@ import type {
   RowResult,
 } from '../types/parse';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
-import { flattenUsageSummary, mergeUsageSummary } from '../lib/usageSummary';
+import { mergeUsageSummary } from '../lib/usageSummary';
 import JobWarnings from '../components/JobWarnings';
 import { deriveDisplayedParseSummary, deriveDisplayedRowsReceived, normalizeJobSummary, normalizeUpdatedJobPayload, toParseSummary } from '../lib/jobSummary';
 import { writeLocalParsePersistenceState } from '../lib/persistenceStatus';
-import { buildAdminCostSections, buildProductSafeCostItems } from '../lib/costTelemetry';
-import { hasLocalOnlyBillingWarning, LOCAL_ONLY_BILLING_WARNING } from '../lib/telemetryWarnings';
 import type { ExportCatalogItem } from '../types/exports';
 import { publishJobUpdate } from '../lib/liveUpdates';
 
@@ -1201,48 +1198,10 @@ export default function ParsePage() {
     return (metadata.deduped_count as number) || (metadata.dedupedCount as number) || null;
   }, [metadata]);
 
-  const cacheHits = useMemo(() => {
-    if (!metadata) return null;
-    return (metadata.cache_hits as number) || (metadata.cacheHits as number) || null;
-  }, [metadata]);
-
-  const googleCallsUsed = useMemo(() => {
-    if (!metadata) return null;
-    return (metadata.google_calls_used as number) || (metadata.googleCallsUsed as number) || null;
-  }, [metadata]);
-
-  const cacheBackend = useMemo(() => {
-    if (!metadata) return null;
-    return (metadata.cache_backend as string) || (metadata.cacheBackend as string) || null;
-  }, [metadata]);
-
-  const extractionMethod = useMemo(() => {
-    if (!metadata) return null;
-    return (
-      (metadata.extraction_method as string) ||
-      (metadata.extractionMethod as string) ||
-      null
-    );
-  }, [metadata]);
-
   const verificationSourceCounts = useMemo(() => {
     if (!metadata) return null;
     return (metadata.verification_source_counts as Record<string, number>) || null;
   }, [metadata]);
-
-  const verificationSourcesSummary = useMemo(() => {
-    if (!verificationSourceCounts) return null;
-    const preferredOrder = ['cache', 'geocoding', 'places', 'parser'];
-    const entries = Object.entries(verificationSourceCounts).filter(([, value]) => typeof value === 'number');
-    if (!entries.length) return null;
-    const orderedEntries = [
-      ...preferredOrder
-        .map((key) => [key, verificationSourceCounts[key]] as const)
-        .filter(([, value]) => typeof value === 'number'),
-      ...entries.filter(([key]) => !preferredOrder.includes(key)),
-    ];
-    return orderedEntries.map(([key, value]) => `${key} ${value}`).join(' • ');
-  }, [verificationSourceCounts]);
 
   const unmatchedCount = useMemo(() => {
     if (!metadata) return dedupedUnmatched.length;
@@ -1316,39 +1275,6 @@ export default function ParsePage() {
   const computedParseSummary = useMemo(
     () => deriveDisplayedParseSummary(rowResults, parseSummary),
     [parseSummary, rowResults],
-  );
-
-  const usageSummary = useMemo(
-    () =>
-      flattenUsageSummary({
-        ...((((parsePayload as { summary?: Record<string, unknown> } | null)?.summary ?? {}) as Record<string, unknown>)),
-        ...(((parseSummary ?? {}) as Record<string, unknown>)),
-        ...(((computedParseSummary ?? {}) as Record<string, unknown>)),
-      }),
-    [computedParseSummary, parsePayload, parseSummary],
-  );
-
-  const costPanelSections = useMemo(
-    () =>
-      isPrivileged
-        ? buildAdminCostSections({
-            usage: usageSummary,
-            estimatedJobCost: computedParseSummary?.spend_usd,
-            estimatedMonthlyTotal: computedParseSummary?.estimated_monthly_cost_usd,
-            jobGeocodingCalls: computedParseSummary?.job_geocoding_calls ?? googleCallsUsed,
-          })
-        : undefined,
-    [computedParseSummary, googleCallsUsed, isPrivileged, usageSummary],
-  );
-
-  const showLocalOnlyBillingWarning = useMemo(
-    () => hasLocalOnlyBillingWarning(usageSummary),
-    [usageSummary],
-  );
-
-  const costPanelItems = useMemo(
-    () => buildProductSafeCostItems({ usage: usageSummary, estimatedJobCost: computedParseSummary?.spend_usd }),
-    [computedParseSummary?.spend_usd, usageSummary],
   );
 
   const canonicalAddressesForDisplay = useMemo(
@@ -4379,60 +4305,12 @@ Select a state and county. If you choose only selected localities, add at least 
                   </p>
                 </div>
               ) : null}
-              {cacheHits !== null ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Cache Hits</p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {cacheHits}
-                  </p>
-                </div>
-              ) : null}
-              {googleCallsUsed !== null ? (
-                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-                  <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                    Verification Calls Used
-                  </p>
-                  <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                    {googleCallsUsed}
-                  </p>
-                </div>
-              ) : null}
             </div>
           )}
-          <div className="mt-6">
-            {showLocalOnlyBillingWarning ? (
-              <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-100">
-                {LOCAL_ONLY_BILLING_WARNING}
-              </div>
-            ) : null}
-            <InternalCostPanel
-              title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
-              subtitle={isPrivileged ? 'Internal-only usage and reconciliation fields.' : 'Product-safe estimate only.'}
-              items={costPanelItems}
-              sections={costPanelSections}
-              isPrivileged={isPrivileged}
-            />
-          </div>
           {parseSummary ? (
             <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
               Unique valid addresses are deduped. Use Processing Report to see every input row’s
               outcome.
-            </p>
-          ) : null}
-          {verificationSourcesSummary ? (
-            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-              Sources: {verificationSourcesSummary}
-            </p>
-          ) : null}
-          {parseSummary && extractionMethod ? (
-            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-              Extraction method: {extractionMethod}
-            </p>
-          ) : null}
-          {parseSummary && (googleCallsUsed !== null || cacheHits !== null || cacheBackend) ? (
-            <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-              Verification calls used: {googleCallsUsed ?? 0} • Cache hits: {cacheHits ?? 0}
-              {cacheBackend ? ` • Cache backend: ${cacheBackend}` : ''}
             </p>
           ) : null}
           {parseSummary && errorRows.length > 0 ? (
