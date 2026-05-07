@@ -726,12 +726,25 @@ const buildLocationPayload = (state: string, county: string, scopeMode: ScopeMod
 const buildScopeSummary = (state: string, county: string, scopeMode: ScopeMode, localities: string[]) => {
   const localitySummary = scopeMode === 'county_wide'
     ? 'All localities in county'
-    : localities.length <= 1
-      ? `${localities[0] ?? 'No locality selected'} only`
-      : localities.length === 2
-        ? localities.join(', ')
-        : `${localities[0]} + ${localities.length - 1} more localit${localities.length - 1 === 1 ? 'y' : 'ies'}`;
-  return [state || 'State not selected', county ? `${county} County` : 'County not selected', localitySummary].join(' • ');
+    : localities.length === 0
+      ? 'No locality selected'
+      : localities.length === 1
+        ? `${localities[0]} only`
+        : localities.length === 2
+          ? localities.join(', ')
+          : `${localities[0]} + ${localities.length - 1} more localit${localities.length - 1 === 1 ? 'y' : 'ies'}`;
+  const stateSegment = state || 'State not selected';
+  // Omit the county segment entirely when no county is set AND localities are present
+  // (state + city scope doesn't need a "County not selected" line).
+  // Keep the segment when locality_strict is empty so the user still sees they need to act.
+  const showCountySegment = Boolean(county) || localities.length === 0;
+  const countySegment = county
+    ? `${county} County`
+    : 'County not selected';
+  const segments = showCountySegment
+    ? [stateSegment, countySegment, localitySummary]
+    : [stateSegment, localitySummary];
+  return segments.join(' • ');
 };
 
 export default function ParsePage() {
@@ -3798,9 +3811,12 @@ How to fix: ${fixHint}` : ''}`;
                   }}
                   onClear={() => {
                     setCountyValue('');
-                    setSelectedLocalities([]);
+                    // Localities are independently valid without a county — keep them.
+                    // If we had county_wide mode, flip to locality_strict (the only valid mode
+                    // when no county is set). This keeps the radio in a consistent state.
+                    setScopeMode('locality_strict');
                   }}
-                  helperText="Select the county to define parse scope. County is required in this flow."
+                  helperText="Optional. Pick a county for county-scoped parsing, or leave empty and pick one or more cities below for city-scoped parsing."
                 />
                 <div className="space-y-3">
                   <div>
@@ -3808,9 +3824,32 @@ How to fix: ${fixHint}` : ''}`;
                     <p className="text-xs text-slate-500 dark:text-slate-400">Make the coverage explicit so county-wide parses and selected-locality parses are easy to review.</p>
                   </div>
                   <div className="grid gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Parse scope">
-                    <label className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 text-sm transition ${scopeMode === 'county_wide' ? 'border-indigo-400 bg-indigo-50 dark:border-indigo-400 dark:bg-indigo-500/10' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'}`}>
-                      <input type="radio" name="scope-mode" checked={scopeMode === 'county_wide'} onChange={() => setScopeMode('county_wide')} className="mt-0.5" />
-                      <span><span className="font-semibold text-slate-700 dark:text-slate-100">All localities in county</span><span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">Every locality in the selected county will count as in scope.</span></span>
+                    <label
+                      className={`flex items-start gap-3 rounded-lg border px-3 py-3 text-sm transition ${
+                        !countyValue
+                          ? 'cursor-not-allowed border-slate-200 bg-slate-50 opacity-60 dark:border-slate-700 dark:bg-slate-900'
+                          : scopeMode === 'county_wide'
+                            ? 'cursor-pointer border-indigo-400 bg-indigo-50 dark:border-indigo-400 dark:bg-indigo-500/10'
+                            : 'cursor-pointer border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'
+                      }`}
+                      title={!countyValue ? 'Pick a county to enable county-wide scope' : undefined}
+                    >
+                      <input
+                        type="radio"
+                        name="scope-mode"
+                        checked={scopeMode === 'county_wide'}
+                        onChange={() => setScopeMode('county_wide')}
+                        disabled={!countyValue}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="font-semibold text-slate-700 dark:text-slate-100">All localities in county</span>
+                        <span className="mt-1 block text-xs text-slate-500 dark:text-slate-400">
+                          {countyValue
+                            ? 'Every locality in the selected county will count as in scope.'
+                            : 'Pick a county to enable.'}
+                        </span>
+                      </span>
                     </label>
                     <label className={`flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 text-sm transition ${scopeMode === 'locality_strict' ? 'border-indigo-400 bg-indigo-50 dark:border-indigo-400 dark:bg-indigo-500/10' : 'border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900'}`}>
                       <input type="radio" name="scope-mode" checked={scopeMode === 'locality_strict'} onChange={() => setScopeMode('locality_strict')} className="mt-0.5" />
@@ -3822,11 +3861,11 @@ How to fix: ${fixHint}` : ''}`;
                   <AsyncLocationMultiSelect
                     label="Localities"
                     values={selectedLocalities}
-                    placeholder={countyValue ? 'Search or create locality' : 'Select county first'}
-                    disabled={!stateValue || !countyValue}
+                    placeholder={stateValue ? 'Search or create locality' : 'Select a state first'}
+                    disabled={!stateValue}
                     required
                     cacheScope={`cities:${stateValue}:${countyValue}`}
-                    noOptionsMessage={() => countyValue ? 'Open the menu to browse localities, or create a custom locality.' : 'Select a county first.'}
+                    noOptionsMessage={() => stateValue ? 'Open the menu to browse cities, or create a custom locality.' : 'Select a state first.'}
                     loadOptions={loadCityOptions}
                     formatCreateLabel={(inputValue) => `Use custom locality "${inputValue}"`}
                     onChange={setSelectedLocalities}
@@ -3838,7 +3877,7 @@ How to fix: ${fixHint}` : ''}`;
                 </div>
                 {showLocationValidation ? (
                   <p className="text-xs text-rose-600 dark:text-rose-300">
-Select a state and county. If you choose only selected localities, add at least one locality.
+    Select a state. Then either pick a county, or pick at least one city/locality below.
                   </p>
                 ) : null}
               </div>
@@ -4123,7 +4162,7 @@ Select a state and county. If you choose only selected localities, add at least 
                 className="mt-4 py-6"
                 title="No parse results yet"
                 description="Step 1 Upload • Step 2 Choose location • Step 3 Process & export"
-                hint="State required. County or City recommended."
+                hint="State required. Add a county or one or more cities."
               />
 
             )}
