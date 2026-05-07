@@ -913,6 +913,39 @@ describe('ParsePage', () => {
     }));
   });
 
+
+
+  it('allows parsing with state and localities and no county', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    // Skip the county selection entirely — go straight to localities.
+    await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
+    await user.click(screen.getByRole('button', { name: 'set-Localities' }));
+    await user.click(screen.getByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await waitFor(() => expect(parseFile).toHaveBeenCalled());
+    expect(parseFile).toHaveBeenCalledWith('f1', expect.objectContaining({
+      state: 'TX',
+      county: '',
+      city: 'Stonecrest',
+      localities: ['Stonecrest', 'Lithonia'],
+      scope_mode: 'locality_strict',
+    }));
+  });
+
+  it('disables the county-wide radio when no county is selected', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    // No county selected.
+    const countyWideRadio = screen.getByRole('radio', { name: /All localities in county/i });
+    expect(countyWideRadio).toBeDisabled();
+    const localityStrictRadio = screen.getByRole('radio', { name: /Only selected localities/i });
+    expect(localityStrictRadio).not.toBeDisabled();
+  });
+
   it('hydrates scope metadata from backend job details and supports legacy city-only jobs', async () => {
     getJobDetail.mockResolvedValueOnce({
       job: { job_id: 'job-scope', metadata: { scope: { state: 'Georgia', county: 'DeKalb', localities: ['Stonecrest', 'Lithonia'], scope_mode: 'locality_strict' } } },
