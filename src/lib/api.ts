@@ -429,7 +429,7 @@ export async function uploadFile(file: File, displayName?: string) {
 
 export type ParseLocationPayload = {
   state: string;
-  county: string;
+  counties: string[];
   city?: string;
   localities?: string[];
   scope_mode?: 'county_wide' | 'locality_strict';

@@ -59,7 +59,7 @@ vi.mock('../components/AsyncLocationSelect', () => ({
       <button
         type="button"
         disabled={disabled}
-        onClick={() => onChange(label === 'State' ? 'TX' : label.includes('County') ? 'Travis' : 'Austin')}
+        onClick={() => onChange(label === 'State' ? 'TX' : 'Austin')}
       >
         set-{label}
       </button>
@@ -68,13 +68,16 @@ vi.mock('../components/AsyncLocationSelect', () => ({
   ),
 }));
 vi.mock('../components/AsyncLocationMultiSelect', () => ({
-  default: ({ label, values = [], onChange, disabled }: { label: string; values?: string[]; onChange: (values: string[]) => void; disabled?: boolean }) => (
-    <div>
-      <label>{label}<input aria-label={label} disabled={disabled} value={values.join(', ')} readOnly /></label>
-      <button type="button" disabled={disabled} onClick={() => onChange(['Stonecrest', 'Lithonia'])}>{`set-${label}`}</button>
-      <button type="button" disabled={disabled} onClick={() => onChange([])}>{`clear-${label}`}</button>
-    </div>
-  ),
+  default: ({ label, values = [], onChange, disabled }: { label: string; values?: string[]; onChange: (values: string[]) => void; disabled?: boolean }) => {
+    const presetValues = label === 'Counties' ? ['Travis'] : ['Stonecrest', 'Lithonia'];
+    return (
+      <div>
+        <label>{label}<input aria-label={label} disabled={disabled} value={values.join(', ')} readOnly /></label>
+        <button type="button" disabled={disabled} onClick={() => onChange(presetValues)}>{`set-${label}`}</button>
+        <button type="button" disabled={disabled} onClick={() => onChange([])}>{`clear-${label}`}</button>
+      </div>
+    );
+  },
 }));
 
 vi.mock('../components/ProcessingReportModal', () => ({ default: () => null }));
@@ -157,7 +160,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(await screen.findByText('Processing Results')).toBeInTheDocument();
@@ -205,7 +208,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await user.click((await screen.findAllByRole('button', { name: /Needs Review/i }))[0]);
@@ -256,7 +259,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await user.click((await screen.findAllByRole('button', { name: /Needs Review/i }))[0]);
@@ -277,10 +280,10 @@ describe('ParsePage', () => {
     const user = userEvent.setup();
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
 
-    expect(screen.getAllByText((_, element) => element?.textContent?.includes('State not selected • County not selected • All localities in county') ?? false)[0]).toBeInTheDocument();
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('State not selected • Counties not selected • No counties selected') ?? false)[0]).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
-    expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • All localities in county') ?? false)[0]).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • All localities in Travis County') ?? false)[0]).toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
     await user.click(screen.getByRole('button', { name: 'set-Localities' }));
     expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • Stonecrest, Lithonia') ?? false)[0]).toBeInTheDocument();
@@ -309,7 +312,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await waitFor(() => expect(getJobDetail).toHaveBeenCalled());
@@ -338,7 +341,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(getJobWithStatus).toHaveBeenCalledTimes(1);
@@ -393,7 +396,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(await screen.findByText(/Needs Review \(2 issues · 3 rows\)/)).toBeInTheDocument();
@@ -414,7 +417,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(await screen.findByText(/Saved export rows are unavailable for this run/i)).toBeInTheDocument();
@@ -451,7 +454,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
     await user.click(await screen.findByRole('button', { name: /Needs Review \(2 issues · 2 rows\)/i }));
 
@@ -479,7 +482,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await user.click(screen.getByRole('button', { name: 'download-needs_review' }));
@@ -502,7 +505,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await user.click(screen.getByRole('button', { name: /^Needs Review \(/i }));
@@ -567,7 +570,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(await screen.findByText('Processing Results')).toBeInTheDocument();
@@ -606,7 +609,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(await screen.findByText('Rows Received')).toBeInTheDocument();
@@ -620,7 +623,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(screen.getByRole('button', { name: 'Process File' }));
 
     await screen.findByText('Processing Results');
@@ -665,7 +668,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await user.click(screen.getByRole('button', { name: /^Needs Review \(/i }));
@@ -686,7 +689,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(await screen.findByText(/we couldn’t verify your session\. sign in again\./i)).toBeInTheDocument();
@@ -716,7 +719,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await waitFor(() => expect(getJobResults.mock.calls.length).toBeGreaterThanOrEqual(2));
@@ -739,7 +742,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(await screen.findByText(/Finalizing results/i)).toBeInTheDocument();
@@ -752,7 +755,7 @@ describe('ParsePage', () => {
 
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
     await user.click(screen.getByRole('button', { name: 'set-Localities' }));
 
@@ -818,7 +821,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
     await user.click(await screen.findByRole('button', { name: /Out of Scope \(1 rows\)/i }));
 
@@ -868,7 +871,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
     await user.click(await screen.findByRole('button', { name: /Needs Review \(1 issues · 1 rows\)/i }));
 
@@ -886,7 +889,7 @@ describe('ParsePage', () => {
     const user = userEvent.setup();
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
 
     expect(screen.queryByLabelText('Localities')).not.toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
@@ -898,7 +901,7 @@ describe('ParsePage', () => {
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
     await user.click(screen.getByRole('button', { name: 'set-Localities' }));
     await user.click(screen.getByRole('button', { name: /Process File|Reprocess File/i }));
@@ -906,7 +909,7 @@ describe('ParsePage', () => {
     await waitFor(() => expect(parseFile).toHaveBeenCalled());
     expect(parseFile).toHaveBeenCalledWith('f1', expect.objectContaining({
       state: 'TX',
-      county: 'Travis',
+      counties: ['Travis'],
       city: 'Stonecrest',
       localities: ['Stonecrest', 'Lithonia'],
       scope_mode: 'locality_strict',
@@ -928,19 +931,19 @@ describe('ParsePage', () => {
     await waitFor(() => expect(parseFile).toHaveBeenCalled());
     expect(parseFile).toHaveBeenCalledWith('f1', expect.objectContaining({
       state: 'TX',
-      county: '',
+      counties: [],
       city: 'Stonecrest',
       localities: ['Stonecrest', 'Lithonia'],
       scope_mode: 'locality_strict',
     }));
   });
 
-  it('disables the county-wide radio when no county is selected', async () => {
+  it('disables the county-wide radio when no counties are selected', async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    // No county selected.
-    const countyWideRadio = screen.getByRole('radio', { name: /All localities in county/i });
+    // No counties selected.
+    const countyWideRadio = screen.getByRole('radio', { name: /All localities in county|All localities in selected counties/i });
     expect(countyWideRadio).toBeDisabled();
     const localityStrictRadio = screen.getByRole('radio', { name: /Only selected localities/i });
     expect(localityStrictRadio).not.toBeDisabled();
@@ -971,12 +974,31 @@ describe('ParsePage', () => {
     const user = userEvent.setup();
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'set-State' }));
-    await user.click(screen.getByRole('button', { name: /set-County/i }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
 
-    expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • All localities in county') ?? false)[0]).toBeInTheDocument();
+    expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • All localities in Travis County') ?? false)[0]).toBeInTheDocument();
     await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
     await user.click(screen.getByRole('button', { name: 'set-Localities' }));
     expect(screen.getAllByText((_, element) => element?.textContent?.includes('TX • Travis County • Stonecrest, Lithonia') ?? false)[0]).toBeInTheDocument();
+  });
+
+  it('sends counties array with selected counties when user picks them', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: 'set-Counties' }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await waitFor(() => expect(parseFile).toHaveBeenCalled());
+    expect(parseFile).toHaveBeenCalledWith('f1', expect.objectContaining({
+      state: 'TX',
+      counties: ['Travis'],
+      scope_mode: expect.any(String),
+    }));
+    // Confirm legacy `county` field is NOT sent on the wire.
+    const callArgs = parseFile.mock.calls[0][1];
+    expect(callArgs).not.toHaveProperty('county');
   });
 
 });
