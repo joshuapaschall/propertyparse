@@ -1,6 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
 import AccountedRowsIndicator from '../components/AccountedRowsIndicator';
 import FileUploadCard from '../components/FileUploadCard';
@@ -36,6 +35,7 @@ import {
   shouldShowOneCandidateBadge,
   type ReviewReasonFilter,
   buildLocalCsvForExport,
+  computeParseSummaryFromRowResults,
   isHeaderOnlyCsv,
   hasHydratedResultsPayload,
   isTemporaryResultsUnavailableError,
@@ -261,16 +261,7 @@ const normalizeNumber = (value: unknown) => {
   return null;
 };
 
-const formatCurrency = (value: unknown) => {
-  const amount = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(amount)) return null;
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(amount);
-};
 
-const formatCount = (value: unknown) => {
-  const amount = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(amount) && amount >= 0 ? amount.toLocaleString() : null;
-};
 
 const normalizeStatus = (value?: string) => (value ?? '').toUpperCase();
 
@@ -706,7 +697,7 @@ const normalizeLocalityList = (values: unknown): string[] => {
 
 const hydrateLocationScope = (source: Record<string, unknown> | null | undefined) => {
   const metadataScope = source && typeof source.scope === 'object' && source.scope ? (source.scope as Record<string, unknown>) : null;
-  const state = [metadataScope?.state, source?.state, source?.stateValue].find((value): value is string => typeof value === 'string' && value.trim())?.trim() ?? '';
+  const state = [metadataScope?.state, source?.state, source?.stateValue].find((value): value is string => typeof value === 'string' && value.trim().length > 0)?.trim() ?? '';
   // Counties: read metadata.scope.counties first, fall back to legacy single county fields.
   const metadataCounties = Array.isArray(metadataScope?.counties)
     ? (metadataScope!.counties as unknown[]).filter((v): v is string => typeof v === 'string' && v.trim().length > 0).map((v) => v.trim())
@@ -720,10 +711,10 @@ const hydrateLocationScope = (source: Record<string, unknown> | null | undefined
   } else if (sourceCounties.length > 0) {
     counties = sourceCounties;
   } else {
-    const legacyCounty = [metadataScope?.county, source?.county, source?.countyValue].find((value): value is string => typeof value === 'string' && value.trim())?.trim() ?? '';
+    const legacyCounty = [metadataScope?.county, source?.county, source?.countyValue].find((value): value is string => typeof value === 'string' && value.trim().length > 0)?.trim() ?? '';
     counties = legacyCounty ? [legacyCounty] : [];
   }
-  const legacyCity = [source?.city, source?.cityValue, metadataScope?.city].find((value): value is string => typeof value === 'string' && value.trim())?.trim() ?? '';
+  const legacyCity = [source?.city, source?.cityValue, metadataScope?.city].find((value): value is string => typeof value === 'string' && value.trim().length > 0)?.trim() ?? '';
   const localities = normalizeLocalityList(metadataScope?.localities ?? source?.localities ?? source?.selectedLocalities);
   const selectedLocalities = localities.length > 0 ? localities : (legacyCity ? [legacyCity] : []);
   const rawScopeMode = [metadataScope?.scope_mode, metadataScope?.scopeMode, source?.scope_mode, source?.scopeMode].find((value): value is string => typeof value === 'string');
@@ -745,8 +736,6 @@ const buildLocationPayload = (state: string, counties: string[], scopeMode: Scop
 
 
 export default function ParsePage() {
-  const { role } = useAuthControls();
-  const isPrivileged = role === 'admin' || role === 'owner';
   const location = useLocation();
   const navigate = useNavigate();
   const [stateValue, setStateValue] = useState('');
@@ -975,15 +964,16 @@ export default function ParsePage() {
       setShowDebugMode(false);
       setProgressStep(0);
       setProgressPercent(null);
-      setProgressInfo({
-        phase: null,
-        done: null,
-        total: null,
-        detail: null,
-        cacheHits: null,
-        googleCallsUsed: null,
-        eta: null,
-      });
+        setProgressInfo({
+          phase: null,
+          done: null,
+          total: null,
+          detail: null,
+          cacheHits: null,
+          googleCallsUsed: null,
+          eta: null,
+          unavailableReason: null,
+        });
       setError(null);
       setPollError(null);
       setPollErrorCount(0);
@@ -1047,11 +1037,11 @@ export default function ParsePage() {
           getJobDetail(jobIdToLoad),
           getJobResults(jobIdToLoad, { fresh: options?.fresh }).catch(() => null),
         ]);
-        const combinedJob: JobRecord = {
+        const combinedJob = {
           ...(jobDetail.summary ?? {}),
           ...(resultsResponse?.summary ?? {}),
           ...(jobDetail.job ?? {}),
-        };
+        } as JobRecord;
         let normalizedRows: RowResult[] = [];
         if (resultsResponse?.row_results && Array.isArray(resultsResponse.row_results)) {
           normalizedRows = (resultsResponse.row_results as RowResult[]).map((row, index) =>
@@ -1144,6 +1134,7 @@ export default function ParsePage() {
           cacheHits: cacheHitsValue,
           googleCallsUsed: googleCallsValue,
           eta: null,
+          unavailableReason: null,
         });
         if (options?.syncUrlOnSuccess) {
           updateJobQueryParam(jobIdToLoad);
@@ -1182,16 +1173,6 @@ export default function ParsePage() {
     });
   }, [busy, jobId, loadJobResults, location.search, parseSummary, rehydrating]);
 
-  const apiCallsUsed = useMemo(() => {
-    if (!metadata) return null;
-    return (
-      (metadata.apiCallsUsed as number) ||
-      (metadata.api_calls_used as number) ||
-      (metadata.api_calls as number) ||
-      (metadata.callsUsed as number) ||
-      null
-    );
-  }, [metadata]);
 
   const candidatesExtracted = useMemo(() => {
     if (!metadata) return null;
@@ -1212,10 +1193,6 @@ export default function ParsePage() {
     return (metadata.deduped_count as number) || (metadata.dedupedCount as number) || null;
   }, [metadata]);
 
-  const verificationSourceCounts = useMemo(() => {
-    if (!metadata) return null;
-    return (metadata.verification_source_counts as Record<string, number>) || null;
-  }, [metadata]);
 
   const unmatchedCount = useMemo(() => {
     if (!metadata) return dedupedUnmatched.length;
