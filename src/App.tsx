@@ -68,6 +68,11 @@ type BootstrapGuidanceResponse = {
 
 type BootstrapResponse = BootstrapSuccessResponse | BootstrapGuidanceResponse;
 
+const isBootstrapGuidance = (
+  resp: BootstrapResponse,
+): resp is BootstrapGuidanceResponse =>
+  'noMembership' in resp && resp.noMembership === true;
+
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
 if (!API_BASE_URL) {
@@ -134,7 +139,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
     setBootstrapError(null);
     try {
       const { data, accessToken } = await bootstrapAuthSessionRequest(currentSession);
-      if ('noMembership' in data && data.noMembership) {
+      if (isBootstrapGuidance(data)) {
         setOrgId(null);
         setUserId(null);
         setRole(null);

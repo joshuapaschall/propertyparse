@@ -132,10 +132,6 @@ const renderOriginalAddressCell = (row: RowResult) => {
   );
 };
 
-const formatCount = (value: unknown) => {
-  const amount = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(amount) && amount >= 0 ? amount.toLocaleString() : null;
-};
 
 export default function HistoryDetailPage() {
   const { role } = useAuthControls();

@@ -393,7 +393,7 @@ describe('parse payload APIs', () => {
 
     await parseFile('file-123', {
       state: 'Georgia',
-      county: 'DeKalb',
+      counties: ['DeKalb'],
       city: 'Stonecrest',
       localities: ['Stonecrest', 'Lithonia'],
       scope_mode: 'locality_strict',
@@ -406,7 +406,7 @@ describe('parse payload APIs', () => {
         body: JSON.stringify({
           fileId: 'file-123',
           state: 'Georgia',
-          county: 'DeKalb',
+          counties: ['DeKalb'],
           city: 'Stonecrest',
           localities: ['Stonecrest', 'Lithonia'],
           scope_mode: 'locality_strict',

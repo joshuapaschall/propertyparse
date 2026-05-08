@@ -21,15 +21,6 @@ const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
 ];
 
 const toNumber = (value: unknown) => (typeof value === 'number' ? value : Number(value ?? 0) || 0);
-const formatCurrency = (value: unknown) => {
-  const amount = typeof value === 'number' ? value : Number(value);
-  if (!Number.isFinite(amount)) return null;
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(amount);
-};
-const formatCount = (value: unknown) => {
-  const amount = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(amount) ? amount.toLocaleString() : null;
-};
 
 export default function DashboardPage() {
   const { role } = useAuthControls();
