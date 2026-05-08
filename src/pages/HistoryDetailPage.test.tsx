@@ -444,4 +444,35 @@ describe('HistoryDetailPage summary normalization', () => {
     expect(await screen.findByText(/Local estimate only/i)).toBeInTheDocument();
   });
 
+  it('does not repeatedly refetch results after initial load settles', async () => {
+    getJobDetail.mockResolvedValue({
+      job: { job_id: 'job-1', status: 'COMPLETED', spend_usd: 2.5 },
+      summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, out_of_scope: 0, duplicates: 0 },
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, out_of_scope: 0, duplicates: 0 },
+      row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1' }],
+      canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St' }],
+    });
+
+    render(
+      <MemoryRouter initialEntries={['/history/job-1']}>
+        <Routes>
+          <Route path="/history/:jobId" element={<HistoryDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('Rows Received')).toBeInTheDocument();
+    await waitFor(() => expect(getJobResults).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    });
+
+    expect(getJobResults.mock.calls.length).toBeLessThanOrEqual(2);
+  });
+
+
+
 });

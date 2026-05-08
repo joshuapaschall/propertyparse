@@ -162,6 +162,8 @@ export default function HistoryDetailPage() {
   const [results, setResults] = useState<Awaited<ReturnType<typeof getJobResults>> | null>(null);
   const [resultsFinalizing, setResultsFinalizing] = useState(false);
   const hasLoadedDetailRef = useRef(false);
+  const resultsRef = useRef<Awaited<ReturnType<typeof getJobResults>> | null>(null);
+  const loadInFlightRef = useRef(false);
 
   const hydrateResultsWithRetry = useCallback(async () => {
     if (!jobId) return;
@@ -182,8 +184,14 @@ export default function HistoryDetailPage() {
     }
   }, [jobId]);
 
+  useEffect(() => {
+    resultsRef.current = results;
+  }, [results]);
+
   const loadDetails = useCallback(async () => {
     if (!jobId) return;
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
     const hasExistingSummary = hasLoadedDetailRef.current;
     if (hasExistingSummary) {
       setRefreshing(true);
@@ -210,12 +218,13 @@ export default function HistoryDetailPage() {
       void hydrateResultsWithRetry().catch((resultsError) => {
         const message = (resultsError as Error).message ?? 'Unable to load job results.';
         setResultsFinalizing(false);
-        if (!(results?.row_results?.length ?? 0)) {
+        if (!(resultsRef.current?.row_results?.length ?? 0)) {
           setError(message);
           showToast({ title: message, variant: 'error' });
         }
       }).finally(() => {
         setRefreshing(false);
+        loadInFlightRef.current = false;
       });
     } catch (err) {
       const message = (err as Error).message ?? 'Unable to load job details.';
@@ -224,45 +233,29 @@ export default function HistoryDetailPage() {
       setInitialLoading(false);
       setRefreshing(false);
       showToast({ title: message, variant: 'error' });
+      loadInFlightRef.current = false;
     }
-  }, [hydrateResultsWithRetry, jobId, results, showToast]);
+  }, [hydrateResultsWithRetry, jobId, showToast]);
 
   useEffect(() => {
     void loadDetails();
   }, [loadDetails]);
 
   useEffect(() => {
-    const unsubscribe = subscribeJobUpdates((event) => {
+    return subscribeJobUpdates((event) => {
       if (event.jobId && jobId && event.jobId !== jobId) return;
       void loadDetails();
     });
-    return unsubscribe;
   }, [jobId, loadDetails]);
 
   useEffect(() => {
-    const onFocus = () => {
-      void loadDetails();
-    };
     const onVisibility = () => {
       if (!document.hidden) {
         void loadDetails();
       }
     };
-    window.addEventListener('focus', onFocus);
     document.addEventListener('visibilitychange', onVisibility);
-    return () => {
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibility);
-    };
-  }, [loadDetails]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (!document.hidden) {
-        void loadDetails();
-      }
-    }, 25000);
-    return () => window.clearInterval(timer);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [loadDetails]);
 
   useEffect(() => {
