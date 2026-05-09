@@ -1593,7 +1593,7 @@ export default function ParsePage() {
     return row.source_row_id;
   };
 
-  const getInputAddress = (row: RowResult) => {
+  const getInputAddress = useCallback((row: RowResult) => {
     const rawRow = row.raw_row as Record<string, unknown> | undefined;
     const candidate =
       row.detected_address ??
@@ -1610,7 +1610,7 @@ export default function ParsePage() {
     if (typeof candidate === 'string') return candidate;
     if (typeof candidate === 'number') return candidate.toString();
     return row.detected_address ?? row.formatted_address ?? '';
-  };
+  }, []);
 
   const getSkippedOriginalAddress = (row: RowResult) => {
     const inputAddress = getInputAddress(row).trim();
@@ -2085,8 +2085,11 @@ How to fix: ${fixHint}` : ''}`;
   };
 
 
-  const findGroupForRow = (groups: GroupedRow[], row: RowResult) =>
-    groups.find((group) => group.memberRowIds.includes(row.source_row_id)) ?? null;
+  const findGroupForRow = useCallback(
+    (groups: GroupedRow[], row: RowResult) =>
+      groups.find((group) => group.memberRowIds.includes(row.source_row_id)) ?? null,
+    [],
+  );
 
   const activeReviewGroups =
     activeTab === 'out_of_scope'
@@ -2096,21 +2099,24 @@ How to fix: ${fixHint}` : ''}`;
         : needsReviewGroups;
   const activeReviewGroup = reviewRow ? findGroupForRow(activeReviewGroups, reviewRow) : null;
 
-  const openReviewDrawer = (row: RowResult, focusEdit = false) => {
-    const group = findGroupForRow(activeReviewGroups, row);
-    const displayRow = group?.displayRow ?? row;
-    const draft = reviewDrafts[displayRow.source_row_id];
-    setReviewRow(displayRow);
-    setReviewAddress(draft ?? getInputAddress(displayRow));
-    setReviewError(null);
-    setReviewAutoFocus(focusEdit);
-  };
+  const openReviewDrawer = useCallback(
+    (row: RowResult, focusEdit = false) => {
+      const group = findGroupForRow(activeReviewGroups, row);
+      const displayRow = group?.displayRow ?? row;
+      const draft = reviewDrafts[displayRow.source_row_id];
+      setReviewRow(displayRow);
+      setReviewAddress(draft ?? getInputAddress(displayRow));
+      setReviewError(null);
+      setReviewAutoFocus(focusEdit);
+    },
+    [activeReviewGroups, reviewDrafts, findGroupForRow, getInputAddress],
+  );
 
-  const closeReviewDrawer = () => {
+  const closeReviewDrawer = useCallback(() => {
     setReviewRow(null);
     setReviewError(null);
     setReviewSaving(false);
-  };
+  }, []);
 
   useEffect(() => {
     if (!pendingReviewNavigation || reviewRow) return;
@@ -2126,7 +2132,7 @@ How to fix: ${fixHint}` : ''}`;
     if (targetGroup) {
       openReviewDrawer(targetGroup.displayRow);
     }
-  }, [activeTab, needsReviewGroups, outOfScopeGroups, pendingReviewNavigation, reviewRow, skippedRows]);
+  }, [activeTab, needsReviewGroups, openReviewDrawer, outOfScopeGroups, pendingReviewNavigation, reviewRow, skippedRows]);
 
   const getGroupMemberRows = (row: RowResult) => {
     const group = findGroupForRow(activeReviewGroups, row);
@@ -2170,7 +2176,7 @@ How to fix: ${fixHint}` : ''}`;
         openReviewDrawer(target.displayRow);
       }
     },
-    [activeReviewGroups, activeReviewIndex, canReviewNext, canReviewPrev, reviewRow],
+    [activeReviewGroups, activeReviewIndex, canReviewNext, canReviewPrev, openReviewDrawer, reviewRow],
   );
 
   useEffect(() => {
@@ -2193,7 +2199,7 @@ How to fix: ${fixHint}` : ''}`;
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [navigateReviewRow, reviewRow]);
+  }, [closeReviewDrawer, navigateReviewRow, reviewRow]);
 
   const handleCopyDebugInfo = async () => {
     const debugText = [
@@ -2576,7 +2582,7 @@ How to fix: ${fixHint}` : ''}`;
         }
       }
     },
-    [],
+    [cityValue, scopeMode, selectedCounties, selectedLocalities, stateValue],
   );
 
   const hydrateSummaryFromJobDetail = useCallback(
