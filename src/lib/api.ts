@@ -8,6 +8,7 @@ import type {
 import { getAuthHeaderState } from './authState';
 import { AUTH_FAILURE_MESSAGE, ensureFreshSession } from './sessionRefresh';
 import type { ExportCatalogResponseItem } from '../types/exports';
+import { supabase } from './supabase';
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -224,10 +225,11 @@ const toFriendlyAuthMessage = (status: number, detail: string) => {
 
 const refreshAuthHeadersFromSession = async () => {
   const refreshed = await ensureFreshSession(getAuthHeaderState().accessToken);
+  const { orgId, userId } = getAuthHeaderState();
   return {
     Authorization: `Bearer ${refreshed.accessToken}`,
-    ...(getAuthHeaderState().orgId ? { 'X-Org-Id': getAuthHeaderState().orgId } : {}),
-    ...(getAuthHeaderState().userId ? { 'X-User-Id': getAuthHeaderState().userId } : {}),
+    ...(orgId ? { 'X-Org-Id': orgId } : {}),
+    ...(userId ? { 'X-User-Id': userId } : {}),
   };
 };
 
