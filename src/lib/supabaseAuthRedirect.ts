@@ -1,5 +1,20 @@
 import { supabase } from './supabase';
 
+
+const ALLOWED_OTP_TYPES = [
+  'signup',
+  'invite',
+  'magiclink',
+  'recovery',
+  'email_change',
+  'email',
+] as const;
+
+type AllowedOtpType = (typeof ALLOWED_OTP_TYPES)[number];
+
+const isAllowedOtpType = (value: string | null): value is AllowedOtpType =>
+  value !== null && (ALLOWED_OTP_TYPES as readonly string[]).includes(value);
+
 export type AuthRedirectResult = {
   sessionEstablished: boolean;
   flow?: string | null;
@@ -72,7 +87,7 @@ export async function consumeSupabaseAuthRedirect(): Promise<AuthRedirectResult>
     return { sessionEstablished: true, flow, type, debug };
   }
 
-  if (tokenHash && type) {
+  if (tokenHash && isAllowedOtpType(type)) {
     const { error } = await supabase.auth.verifyOtp({ token_hash: tokenHash, type });
     if (error) {
       return { sessionEstablished: false, flow, type, authErrorDescription: error.message, debug };

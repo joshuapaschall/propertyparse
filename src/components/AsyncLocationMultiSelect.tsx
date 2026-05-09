@@ -48,7 +48,11 @@ export default function AsyncLocationMultiSelect({
   const cacheRef = useRef<Map<string, OptionGroup[]>>(new Map());
   const debounceRef = useRef<number | null>(null);
 
-  const toOptions = useCallback((entries: string[], kind: Option['kind']) => dedupe(entries.map(normalizeLocalityInput).filter(Boolean)).map((entry) => ({ value: entry, label: entry, kind })), []);
+  const toOptions = useCallback(
+    (entries: string[], kind: Option['kind']) =>
+      dedupe(entries.map(normalizeLocalityInput).filter(Boolean)).map((entry): Option => ({ value: entry, label: entry, kind })),
+    [],
+  );
 
   useEffect(() => {
     cacheRef.current.clear();
@@ -103,7 +107,7 @@ export default function AsyncLocationMultiSelect({
   const selectedOptions = useMemo(() => values.map((value) => {
     const normalized = normalizeLocalityInput(value);
     const isRecent = recentCustomOptions.some((option) => option.value.toLowerCase() === normalized.toLowerCase());
-    return { value: normalized, label: normalized, kind: isRecent ? 'recent-custom' : 'custom' as const };
+    return { value: normalized, label: normalized, kind: isRecent ? 'recent-custom' : ('custom' as const) } as Option;
   }), [recentCustomOptions, values]);
 
   const updateValues = useCallback((next: string[]) => {

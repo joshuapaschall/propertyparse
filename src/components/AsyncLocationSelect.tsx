@@ -107,7 +107,7 @@ export default function AsyncLocationSelect({
         seen.add(key);
         return true;
       })
-      .map((entry) => ({ value: entry, label: entry, kind }));
+      .map((entry): Option => ({ value: entry, label: entry, kind }));
   }, []);
 
   const toGroupedOptions = useCallback(
@@ -174,7 +174,11 @@ export default function AsyncLocationSelect({
     if (!value) return null;
     const normalizedValue = allowCustomValue ? normalizeLocalityInput(value) : value;
     const isRecent = recentCustomOptions.some((option) => option.value.toLowerCase() === normalizedValue.toLowerCase());
-    return { value: normalizedValue, label: normalizedValue, kind: isRecent ? 'recent-custom' : 'official' };
+    return {
+      value: normalizedValue,
+      label: normalizedValue,
+      kind: isRecent ? 'recent-custom' : 'official',
+    } as Option;
   }, [allowCustomValue, recentCustomOptions, value]);
 
   const commonProps = {
@@ -250,7 +254,7 @@ export default function AsyncLocationSelect({
                 if (!normalized) return;
                 writeRecentCustomValue(cacheScope, normalized);
                 setRecentCustomOptions((prev) => [
-                  { value: normalized, label: normalized, kind: 'recent-custom' },
+                  { value: normalized, label: normalized, kind: 'recent-custom' as const },
                   ...prev.filter((item) => item.value.toLowerCase() !== normalized.toLowerCase()),
                 ].slice(0, 8));
                 onChange(normalized);
