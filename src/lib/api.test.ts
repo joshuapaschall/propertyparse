@@ -121,6 +121,28 @@ describe('API error handling', () => {
       message: 'We couldn’t verify your session. Sign in again.',
     });
   });
+
+  it('sends Authorization + X-Org-Id headers for validateApiKeys (audit B76)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ google_key_present: true }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      ),
+    );
+
+    const { validateApiKeys } = await import('./api');
+    await validateApiKeys();
+
+    const fetchMock = vi.mocked(fetch);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const init = fetchMock.mock.calls[0]?.[1];
+    const headers = new Headers(init && 'headers' in init ? init.headers : undefined);
+    expect(headers.get('Authorization')).toBe('Bearer token-123');
+    expect(headers.get('X-Org-Id')).toBe('org-123');
+  });
 });
 
 describe('export APIs', () => {
