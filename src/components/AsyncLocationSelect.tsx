@@ -79,6 +79,9 @@ export default function AsyncLocationSelect({
   useEffect(() => {
     cacheRef.current.clear();
     setDefaultOptions([]);
+  }, [cacheScope]);
+
+  useEffect(() => {
     setRecentCustomOptions(
       allowCustomValue
         ? readRecentCustomValues(cacheScope).map((entry) => ({
@@ -88,7 +91,7 @@ export default function AsyncLocationSelect({
           }))
         : [],
     );
-  }, [cacheScope]);
+  }, [cacheScope, allowCustomValue]);
 
   useEffect(() => {
     return () => {
