@@ -329,9 +329,11 @@ describe('ParsePage', () => {
     selectedFileFactory.mockImplementation(() => new File(['pdf'], 'sample.pdf', { type: 'application/pdf' }));
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 2 });
     let resolvePoll: ((value: unknown) => void) | null = null;
-    vi.spyOn(window, 'setInterval').mockImplementation((() => {
-      return 1 as unknown as number;
-    }) as typeof window.setInterval);
+    vi.spyOn(window, 'setInterval').mockImplementation((handler: TimerHandler, _timeout?: number, ...args: unknown[]) => {
+      void handler;
+      void args;
+      return 1 as unknown as ReturnType<typeof window.setInterval>;
+    });
     vi.spyOn(window, 'clearInterval').mockImplementation(() => undefined);
     getJobWithStatus.mockImplementation(() => new Promise((resolve) => {
       resolvePoll = resolve;
