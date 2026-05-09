@@ -48,28 +48,32 @@ const navItems: NavItem[] = [
       </svg>
     ),
   },
-  {
-    label: 'Admin',
-    to: '/admin',
-    icon: (
-      <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
-      </svg>
-    ),
-  },
 ];
+
+
+const adminNavItem: NavItem = {
+  label: 'Admin',
+  to: '/admin',
+  icon: (
+    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
+    </svg>
+  ),
+};
 
 const navLinkBase =
   'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition';
 
 export default function AppShell({ title, subtitle, actions, children, contentFullWidth = false }: AppShellProps) {
-  const { logout } = useAuthControls();
+  const { logout, role } = useAuthControls();
   const { theme, toggleTheme } = useThemeControls();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const canAccessAdmin = role === 'admin' || role === 'owner';
+  const visibleNavItems = canAccessAdmin ? [...navItems, adminNavItem] : navItems;
 
   const renderNavLinks = () => (
     <nav className="space-y-1">
-      {navItems.map((item) => (
+      {visibleNavItems.map((item) => (
         <NavLink
           key={item.to}
           to={item.to}
@@ -167,6 +171,15 @@ export default function AppShell({ title, subtitle, actions, children, contentFu
                     </svg>
                   </summary>
                   <div className="absolute right-0 mt-2 w-40 rounded-lg border border-slate-200 bg-white p-2 text-xs shadow-lg dark:border-slate-800 dark:bg-slate-950">
+                    <NavLink
+                      to="/account/security"
+                      onClick={(event) => {
+                        event.currentTarget.closest('details')?.removeAttribute('open');
+                      }}
+                      className="block w-full rounded-md px-3 py-2 text-left text-xs font-semibold text-slate-600 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-900"
+                    >
+                      Account security
+                    </NavLink>
                     <button
                       type="button"
                       onClick={() => void logout()}

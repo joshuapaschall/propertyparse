@@ -115,6 +115,56 @@ describe('AdminPage provider usage sync section', () => {
     expect(screen.getByText('proj_123')).toBeInTheDocument();
   });
 
+
+  it('rejects invites with malformed email addresses before calling the API (B63)', async () => {
+    const user = userEvent.setup();
+    const inviteOrgMember = (await import('../lib/api')).inviteOrgMember as ReturnType<typeof vi.fn>;
+    inviteOrgMember.mockClear();
+
+    render(<MemoryRouter><AdminPage /></MemoryRouter>);
+    expect(await screen.findByText('Provider Usage')).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText(/first name/i), 'Test');
+    await user.type(screen.getByPlaceholderText(/last name/i), 'User');
+    await user.type(screen.getByPlaceholderText(/name@company.com/i), 'test@localhost');
+    await user.click(screen.getByRole('button', { name: /invite member/i }));
+
+    expect(inviteOrgMember).not.toHaveBeenCalled();
+    expect(showToast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Please enter a valid email address.',
+        variant: 'error',
+      }),
+    );
+  });
+
+  it('opens a confirm dialog before removing a team member (B62)', async () => {
+    const user = userEvent.setup();
+    const removeOrgMember = (await import('../lib/api')).removeOrgMember as ReturnType<typeof vi.fn>;
+    removeOrgMember.mockClear();
+    removeOrgMember.mockResolvedValue(undefined);
+    getOrgMembers.mockResolvedValueOnce([
+      { user_id: 'u1', email: 'gone@example.com', role: 'member', first_name: 'A', last_name: 'B' },
+    ]);
+
+    render(<MemoryRouter><AdminPage /></MemoryRouter>);
+    expect(await screen.findByText('Provider Usage')).toBeInTheDocument();
+
+    await user.click(await screen.findByRole('button', { name: /^remove$/i }));
+
+    expect(removeOrgMember).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog).toBeInTheDocument();
+    expect(dialog).toHaveAttribute('aria-modal', 'true');
+    expect(dialog).toHaveTextContent('gone@example.com');
+
+    const confirmButton = screen.getAllByRole('button', { name: /^remove$/i }).at(-1);
+    if (!confirmButton) throw new Error('confirm button missing');
+    await user.click(confirmButton);
+
+    expect(removeOrgMember).toHaveBeenCalledWith('u1');
+  });
+
   it('refreshes provider usage and triggers both sync buttons with loading-safe handlers', async () => {
     const user = userEvent.setup();
 

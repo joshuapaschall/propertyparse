@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useAuthControls } from '../App';
 import AppShell from '../components/AppShell';
+import { useModalA11y } from '../hooks/useModalA11y';
 import Button from '../components/ui/Button';
 import { useToast } from '../components/ui/ToastProvider';
 import Card, { SectionHeader } from '../components/ui/Card';
@@ -25,6 +26,10 @@ import {
 } from '../lib/api';
 
 const roleOptions = ['member', 'manager', 'admin', 'owner'];
+
+// Conservative email shape check — backend is source of truth.
+// Only blocks obvious typos (no @, no dot in domain, whitespace).
+const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const formatDisplayValue = (value: string | number | boolean | null | undefined, fallback = '—') => {
   if (value === null || value === undefined || value === '') return fallback;
@@ -248,6 +253,10 @@ export default function AdminPage() {
 
   const [removingByUserId, setRemovingByUserId] = useState<Record<string, boolean>>({});
   const [resettingByUserId, setResettingByUserId] = useState<Record<string, boolean>>({});
+  const [removeConfirmTarget, setRemoveConfirmTarget] = useState<{
+    userId: string;
+    email: string;
+  } | null>(null);
 
   const [googleUsageStatus, setGoogleUsageStatus] = useState<ProviderUsageGoogleStatus | null>(null);
   const [openAiUsageSummary, setOpenAiUsageSummary] = useState<ProviderUsageOpenAiSummary | null>(null);
@@ -259,7 +268,7 @@ export default function AdminPage() {
 
   const loadProviderUsage = async () => {
     setProviderUsageLoading(true);
-    setOpenAiUsageError(null);
+    setGoogleUsageError(null);
     setOpenAiUsageError(null);
     const [googleResult, openAiResult] = await Promise.allSettled([
       getGoogleProviderUsageStatus(),
@@ -320,6 +329,13 @@ export default function AdminPage() {
 
     if (!firstName || !lastName || !email) {
       const message = 'First name, last name, and email are required.';
+      setTeamError({ message, endpoint: '/org/invite' });
+      showToast({ title: message, variant: 'error' });
+      return;
+    }
+
+    if (!EMAIL_PATTERN.test(email)) {
+      const message = 'Please enter a valid email address.';
       setTeamError({ message, endpoint: '/org/invite' });
       showToast({ title: message, variant: 'error' });
       return;
@@ -460,11 +476,17 @@ export default function AdminPage() {
     }
   };
 
-  const handleRemove = async (userId: string, email: string) => {
+  const handleRemove = (userId: string, email: string) => {
     if (!canManageTeam) return;
-    if (!window.confirm(`Remove ${email} from this organization?`)) {
-      return;
-    }
+    setRemoveConfirmTarget({ userId, email });
+  };
+
+  const confirmRemove = async () => {
+    if (!canManageTeam) return;
+    const target = removeConfirmTarget;
+    if (!target) return;
+    const { userId } = target;
+    setRemoveConfirmTarget(null);
     setTeamError(null);
     setTeamMessage(null);
     setRemovingByUserId((prev) => ({ ...prev, [userId]: true }));
@@ -783,6 +805,14 @@ export default function AdminPage() {
         </div>
       )}
 
+      {removeConfirmTarget ? (
+        <RemoveConfirmDialog
+          email={removeConfirmTarget.email}
+          onCancel={() => setRemoveConfirmTarget(null)}
+          onConfirm={() => void confirmRemove()}
+        />
+      ) : null}
+
       {editingMemberId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
           <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-800 dark:bg-slate-950">
@@ -831,5 +861,53 @@ export default function AdminPage() {
         </div>
       ) : null}
     </AppShell>
+  );
+}
+
+
+type RemoveConfirmDialogProps = {
+  email: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+};
+
+function RemoveConfirmDialog({ email, onConfirm, onCancel }: RemoveConfirmDialogProps) {
+  const dialogRef = useModalA11y<HTMLDivElement>(true, onCancel);
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 dark:bg-slate-950/70"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onCancel();
+      }}
+      data-testid="remove-confirm-backdrop"
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="remove-confirm-title"
+        tabIndex={-1}
+        className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950 dark:shadow-slate-950/50 focus:outline-none"
+      >
+        <h3
+          id="remove-confirm-title"
+          className="text-lg font-semibold text-slate-800 dark:text-slate-100"
+        >
+          Remove team member?
+        </h3>
+        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+          Remove <span className="font-semibold">{email}</span> from this organization?
+          They will lose access immediately.
+        </p>
+        <div className="mt-6 flex justify-end gap-2">
+          <Button type="button" variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+          <Button type="button" variant="destructive" onClick={onConfirm}>
+            Remove
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
