@@ -3787,7 +3787,13 @@ How to fix: ${fixHint}` : ''}`;
                   Add a file to start parsing addresses.
                 </p>
               </div>
-              <FileUploadCard file={file} onChange={setFile} />
+              <FileUploadCard
+  file={file}
+  onChange={setFile}
+  onReject={(rejection) => {
+    setError(rejection.message);
+  }}
+/>
             </div>
             <div className="flex flex-col gap-4">
               <div className="space-y-4">
