@@ -101,6 +101,24 @@ const ResultsTableSkeleton = () => (
 );
 const LAST_JOB_STORAGE_KEY = 'pp-parse-last-job';
 const LAST_JOB_STORAGE_VERSION = 1;
+function safeUuid(): string {
+  try {
+    const randomUuid = typeof crypto !== 'undefined'
+      ? (crypto as Crypto & { randomUUID?: () => string })['randomUUID']
+      : undefined;
+    if (typeof randomUuid === 'function') {
+      return randomUuid.call(crypto);
+    }
+  } catch {
+    // Fall through to Math.random fallback. Native UUID generation can throw in
+    // non-secure contexts (older browsers, embedded webviews, plain-HTTP).
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 type CanonicalAddressComponents = {
   street_address?: string;
@@ -133,7 +151,7 @@ type PersistedLastJobState = {
 type ReviewTabKey = 'needs_review' | 'out_of_scope' | 'skipped';
 
 const createId = (row: Record<string, unknown>, index: number) =>
-  (row.id as string) || (row.uuid as string) || `${crypto.randomUUID?.() ?? `row-${index}`}`;
+  (row.id as string) || (row.uuid as string) || `${safeUuid()}-${index}`;
 
 const stringifyValue = (value: unknown) => {
   if (typeof value === 'string') return value;
@@ -840,6 +858,8 @@ export default function ParsePage() {
   const etaSecondsRef = useRef<number | null>(null);
   const activeProgressJobIdRef = useRef<string | null>(null);
   const resetInProgressRef = useRef(false);
+  const mountedRef = useRef(true);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const reviewInputRef = useRef<HTMLInputElement | null>(null);
   const downloadSuccessTimerRef = useRef<number | null>(null);
   const rowResultsRef = useRef<RowResult[]>([]);
@@ -893,7 +913,11 @@ export default function ParsePage() {
   }, [parseSummary]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
+      abortControllerRef.current?.abort();
+      abortControllerRef.current = null;
       if (pollingRef.current !== null) {
         window.clearInterval(pollingRef.current);
         pollingRef.current = null;
@@ -2168,7 +2192,9 @@ How to fix: ${fixHint}` : ''}`;
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         try {
           const detail = await getJobDetail(completedJobId);
+          if (!mountedRef.current) return;
           const results = await getJobResults(completedJobId).catch(() => null);
+          if (!mountedRef.current) return;
           const hasDurableDetail = Boolean(detail?.job && Object.keys(detail.job).length);
           const hasRows = Boolean(results?.row_results && results.row_results.length > 0);
           if (hasDurableDetail || hasRows) {
@@ -2188,13 +2214,16 @@ How to fix: ${fixHint}` : ''}`;
               },
               { fresh: true },
             );
+            if (!mountedRef.current) return;
             return;
           }
         } catch {
           // keep retrying in background
         }
         await new Promise((resolve) => window.setTimeout(resolve, 1200 * (attempt + 1)));
+        if (!mountedRef.current) return;
       }
+      if (!mountedRef.current) return;
       setPersistenceWarningActive(true);
       writeLocalParsePersistenceState({ jobId: completedJobId, persistenceWarning: true });
     },
@@ -2507,6 +2536,7 @@ How to fix: ${fixHint}` : ''}`;
   const hydrateSummaryFromJobDetail = useCallback(
     async (completedJobId: string, fallbackRowsReceived: number | null) => {
       const jobDetail = await getJobDetail(completedJobId);
+      if (!mountedRef.current) return null;
       const mergedJob: JobRecord = {
         ...(jobDetail.summary ?? {}),
         ...(jobDetail.job ?? {}),
@@ -2546,10 +2576,12 @@ How to fix: ${fixHint}` : ''}`;
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         try {
           const results = await getJobResults(completedJobId, { fresh: true });
+          if (!mountedRef.current) return false;
           if (!hasHydratedResultsPayload(results, { minimumRowsReceived: fallbackRowsReceived })) {
             throw new Error('Results not ready yet.');
           }
           applyParsedResponse(results as unknown as Record<string, unknown>, fallbackRowsReceived);
+          if (!mountedRef.current) return false;
           setResultsFinalizing(false);
           publishJobUpdate({ kind: 'job-updated', jobId: completedJobId });
           publishJobUpdate({ kind: 'metrics-updated', jobId: completedJobId });
@@ -2564,8 +2596,10 @@ How to fix: ${fixHint}` : ''}`;
           }
           const delayMs = RESULTS_HYDRATION_BASE_DELAY_MS * 2 ** attempt;
           await new Promise((resolve) => window.setTimeout(resolve, delayMs));
+          if (!mountedRef.current) return false;
         }
       }
+      if (!mountedRef.current) return false;
       if (maxAttempts > 1) {
         setResultsFinalizing(false);
         throw lastError instanceof Error ? lastError : new Error('Finalizing results timed out.');
@@ -2636,7 +2670,7 @@ How to fix: ${fixHint}` : ''}`;
       const createdJobId =
         pickString(parsedRecord as JobRecord, ['job_id', 'jobId', 'id']) ??
         pickString((parsedRecord.metadata as JobRecord) ?? {}, ['job_id', 'jobId', 'id']) ??
-        crypto.randomUUID();
+        safeUuid();
       setJobId(createdJobId);
       setIsJobReload(false);
       setFileId(uploadFileId);
@@ -2730,11 +2764,16 @@ How to fix: ${fixHint}` : ''}`;
   const handleParse = async () => {
     if (!file) return;
     resetForFreshParse();
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const { signal } = controller;
     try {
-      const newJobId = crypto.randomUUID();
-      setJobId(newJobId);
+      const newJobId = safeUuid();
       const trimmedCampaignName = campaignName.trim();
       const upload = await uploadFile(file, trimmedCampaignName || undefined);
+      if (!mountedRef.current || signal.aborted) return;
+      setJobId(newJobId);
       setFileId(upload.fileId);
       setRowsReceived(upload.rowsReceived ?? null);
       setProgressStep(1);
@@ -2750,14 +2789,17 @@ How to fix: ${fixHint}` : ''}`;
           onFinished: async () => {
             try {
               await hydrateSummaryFromJobDetail(newJobId, upload.rowsReceived ?? null);
+              if (!mountedRef.current || signal.aborted) return;
               publishLiveUpdate('job-updated', newJobId);
               publishLiveUpdate('metrics-updated', newJobId);
               setBusy(false);
               await hydrateCompletedAsyncJob(newJobId, upload.rowsReceived ?? null);
+              if (!mountedRef.current || signal.aborted) return;
               publishLiveUpdate('job-updated', newJobId);
               publishLiveUpdate('metrics-updated', newJobId);
               void reconcileDurableJob(newJobId);
             } catch (hydrationError) {
+              if (!mountedRef.current || signal.aborted) return;
               setBusy(false);
               setResultsFinalizing(false);
               setError((hydrationError as Error).message ?? 'Unable to finalize parse results.');
@@ -2778,6 +2820,7 @@ How to fix: ${fixHint}` : ''}`;
           jobId: newJobId,
           jobName: trimmedCampaignName || undefined,
         });
+        if (!mountedRef.current || signal.aborted) return;
         applyParsedResponse(parsed as unknown as Record<string, unknown>, upload.rowsReceived ?? null);
         setResultsFinalizing(false);
         publishLiveUpdate('job-updated', newJobId);
@@ -2799,6 +2842,7 @@ How to fix: ${fixHint}` : ''}`;
         campaignName: trimmedCampaignName,
       });
     } catch (err) {
+      if (!mountedRef.current || signal.aborted) return;
       setError((err as Error).message ?? 'Parsing failed.');
       stopPolling();
       setBusy(false);
