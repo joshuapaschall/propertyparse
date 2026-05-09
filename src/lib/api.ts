@@ -403,22 +403,6 @@ export type ParseResponse = {
   metadata?: Record<string, JsonValue>;
 };
 
-export async function searchStates(query: string, limit = 1000, signal?: AbortSignal) {
-  const params = new URLSearchParams({ limit: String(limit) });
-  const res = await postJson<ApiResponse<string[]>>(`/states/search?${params.toString()}`, { query }, { signal });
-  return res.items ?? (res.data as string[]) ?? [];
-}
-
-export async function searchCounties(state: string, query: string, limit = 5000, signal?: AbortSignal) {
-  const params = new URLSearchParams({ limit: String(limit) });
-  const res = await postJson<ApiResponse<string[]>>(
-    `/counties/search?${params.toString()}`,
-    { state, query },
-    { signal },
-  );
-  return res.items ?? (res.data as string[]) ?? [];
-}
-
 export async function uploadFile(file: File, displayName?: string) {
   const fd = new FormData();
   fd.append('file', file);

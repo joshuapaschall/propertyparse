@@ -315,6 +315,11 @@ export default function AdminPage() {
     }
   };
 
+  const editMemberDialogRef = useModalA11y<HTMLDivElement>(
+    Boolean(editingMemberId),
+    () => setEditingMemberId(null),
+  );
+
   useEffect(() => {
     if (!canAccessAdmin) return;
     void Promise.all([loadMembers(), loadProviderUsage()]);
@@ -814,9 +819,21 @@ export default function AdminPage() {
       ) : null}
 
       {editingMemberId ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
-          <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-800 dark:bg-slate-950">
-            <h3 className="text-lg font-semibold">Edit team member</h3>
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setEditingMemberId(null);
+          }}
+        >
+          <div
+            ref={editMemberDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="edit-member-dialog-title"
+            tabIndex={-1}
+            className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-xl dark:border-slate-800 dark:bg-slate-950 focus:outline-none"
+          >
+            <h3 id="edit-member-dialog-title" className="text-lg font-semibold">Edit team member</h3>
             <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Update name and role for this user.</p>
             <form className="mt-4 space-y-4" onSubmit={handleEditMember}>
               <div className="grid gap-3 sm:grid-cols-2">
