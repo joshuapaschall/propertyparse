@@ -419,16 +419,6 @@ export async function searchCounties(state: string, query: string, limit = 5000,
   return res.items ?? (res.data as string[]) ?? [];
 }
 
-export async function searchCities(state: string, county: string, query: string, limit = 50000, signal?: AbortSignal) {
-  const params = new URLSearchParams({ limit: String(limit) });
-  const res = await postJson<ApiResponse<string[]>>(
-    `/cities/search?${params.toString()}`,
-    { state, county, query },
-    { signal },
-  );
-  return res.items ?? (res.data as string[]) ?? [];
-}
-
 export async function uploadFile(file: File, displayName?: string) {
   const fd = new FormData();
   fd.append('file', file);
