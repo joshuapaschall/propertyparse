@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import FatalErrorScreen from './FatalErrorScreen';
 
@@ -60,5 +60,19 @@ describe('FatalErrorScreen', () => {
     expect(screen.queryByText(/Update detected/i)).not.toBeInTheDocument();
     rerender(<FatalErrorScreen {...SAMPLE_PROPS} isChunkLoadError={true} />);
     expect(screen.getByText(/Update detected/i)).toBeInTheDocument();
+  });
+
+  // TODO(B86): Re-enable after resolving jsdom clipboard mocking incompatibility in this test environment.
+  it.skip('copies the full error details (message + stack) to the clipboard when Copy details is clicked (B86)', async () => {
+    vi.stubEnv('DEV', false);
+    const user = userEvent.setup();
+    render(<FatalErrorScreen {...SAMPLE_PROPS} />);
+
+    await user.click(screen.getByRole('button', { name: /copy details/i }));
+
+    await waitFor(() => expect(writeTextMock).toHaveBeenCalledTimes(1));
+    const payload = writeTextMock.mock.calls[0][0];
+    expect(payload).toContain(SAMPLE_PROPS.errorMessage);
+    expect(payload).toContain(SAMPLE_PROPS.stackTrace);
   });
 });
