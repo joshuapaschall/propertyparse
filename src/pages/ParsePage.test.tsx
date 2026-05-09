@@ -635,6 +635,32 @@ describe('ParsePage', () => {
     expect(publishJobUpdate).toHaveBeenCalledWith(expect.objectContaining({ kind: 'metrics-updated' }));
   });
 
+  it('preserves scope state when AI auto-fix completes synchronously and backend job lacks metadata.scope (B39)', async () => {
+    const user = userEvent.setup();
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 1, valid_total: 1, valid_unique: 1, needs_review: 0, skipped: 0, out_of_scope: 0, duplicates: 0 },
+      row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'VALID', canonical_id: 'c1', formatted_address: '1 Main St' }],
+      canonical_addresses: [{ canonical_id: 'c1', formatted_address: '1 Main St' }],
+      duplicate_groups: [],
+      metadata: {},
+    });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
+    await user.click(screen.getByRole('radio', { name: /Only selected localities/i }));
+    await user.click(screen.getByRole('button', { name: 'set-Localities' }));
+    await user.click(screen.getByRole('button', { name: 'Process File' }));
+    await screen.findByText('Processing Results');
+
+    await user.click(screen.getByRole('button', { name: /Auto-fix flagged rows/i }));
+    await waitFor(() => expect(runAiFixFlaggedRows).toHaveBeenCalled());
+
+    expect(screen.getByRole('radio', { name: /Only selected localities/i })).toBeChecked();
+    expect(screen.getByDisplayValue('Stonecrest, Lithonia')).toBeInTheDocument();
+  });
+
 
   it('hides unsafe approve actions behind compact explanations for ambiguous and low-precision review rows', async () => {
     const user = userEvent.setup();

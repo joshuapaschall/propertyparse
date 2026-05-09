@@ -148,6 +148,50 @@ type PersistedLastJobState = {
   campaignName: string;
 };
 
+/**
+ * Build a complete PersistedLastJobState from current scope state.
+ *
+ * Closes B39. The five inline callsites of `loadJobResults` that build a
+ * fresh storedState inline (handleRetryUpdates, handleAutoFixFlaggedRows,
+ * reconcileDurableJob) previously varied in which fields they included —
+ * three of them silently omitted `scopeMode` and `selectedLocalities`,
+ * which TypeScript permits because those are optional on the type. When
+ * backend job metadata.scope is absent, loadJobResults falls back to the
+ * storedState arg for scope hydration; an incomplete arg collapses the
+ * user's scope on reload.
+ *
+ * Funnelling all five through this builder makes scope fields required
+ * at the call site — TypeScript now rejects future regressions of B39.
+ *
+ * Note: PersistedLastJobState keeps scopeMode/selectedLocalities optional
+ * because legacy localStorage payloads written by older clients may lack
+ * them. The optionality is for the read path (line ~677), not the write
+ * path. This builder is the canonical write path and always populates
+ * both fields.
+ */
+type PersistedJobStateScopeInput = {
+  jobId: string;
+  stateValue: string;
+  selectedCounties: string[];
+  cityValue: string;
+  scopeMode: ScopeMode;
+  selectedLocalities: string[];
+  campaignName: string;
+};
+
+const buildPersistedJobStateFromScope = (
+  input: PersistedJobStateScopeInput,
+): PersistedLastJobState => ({
+  version: LAST_JOB_STORAGE_VERSION,
+  jobId: input.jobId,
+  stateValue: input.stateValue,
+  counties: input.selectedCounties,
+  cityValue: input.cityValue,
+  scopeMode: input.scopeMode,
+  selectedLocalities: input.selectedLocalities,
+  campaignName: input.campaignName,
+});
+
 type ReviewTabKey = 'needs_review' | 'out_of_scope' | 'skipped';
 
 const createId = (row: Record<string, unknown>, index: number) =>
@@ -2202,16 +2246,15 @@ How to fix: ${fixHint}` : ''}`;
             writeLocalParsePersistenceState({ jobId: completedJobId, persistenceWarning: false });
             await loadJobResults(
               completedJobId,
-              {
-                version: LAST_JOB_STORAGE_VERSION,
+              buildPersistedJobStateFromScope({
                 jobId: completedJobId,
                 stateValue,
-                counties: selectedCounties,
+                selectedCounties,
                 cityValue,
                 scopeMode,
                 selectedLocalities,
                 campaignName,
-              },
+              }),
               { fresh: true },
             );
             if (!mountedRef.current) return;
@@ -3024,14 +3067,15 @@ How to fix: ${fixHint}` : ''}`;
         });
         await loadJobResults(
           jobId,
-          {
-            version: LAST_JOB_STORAGE_VERSION,
+          buildPersistedJobStateFromScope({
             jobId,
             stateValue,
-            counties: selectedCounties,
+            selectedCounties,
             cityValue,
+            scopeMode,
+            selectedLocalities,
             campaignName,
-          },
+          }),
           { fresh: true },
         );
         return;
@@ -3041,14 +3085,15 @@ How to fix: ${fixHint}` : ''}`;
     if (freshReload && jobId) {
       await loadJobResults(
         jobId,
-        {
-          version: LAST_JOB_STORAGE_VERSION,
+        buildPersistedJobStateFromScope({
           jobId,
           stateValue,
-          counties: selectedCounties,
+          selectedCounties,
           cityValue,
+          scopeMode,
+          selectedLocalities,
           campaignName,
-        },
+        }),
         { fresh: true },
       );
     }
@@ -3547,16 +3592,15 @@ How to fix: ${fixHint}` : ''}`;
           onFinished: async () => {
             await loadJobResults(
               jobId,
-              {
-                version: LAST_JOB_STORAGE_VERSION,
+              buildPersistedJobStateFromScope({
                 jobId,
                 stateValue,
-                counties: selectedCounties,
+                selectedCounties,
                 cityValue,
                 scopeMode,
                 selectedLocalities,
                 campaignName,
-              },
+              }),
               { fresh: true },
             );
             setBusy(false);
@@ -3585,14 +3629,19 @@ How to fix: ${fixHint}` : ''}`;
 
       publishLiveUpdate('job-updated');
       publishLiveUpdate('metrics-updated');
-      await loadJobResults(jobId, {
-        version: LAST_JOB_STORAGE_VERSION,
+      await loadJobResults(
         jobId,
-        stateValue,
-        counties: selectedCounties,
-        cityValue,
-        campaignName,
-      }, { fresh: true });
+        buildPersistedJobStateFromScope({
+          jobId,
+          stateValue,
+          selectedCounties,
+          cityValue,
+          scopeMode,
+          selectedLocalities,
+          campaignName,
+        }),
+        { fresh: true },
+      );
     } catch (err) {
       setBusy(false);
       showToast({
