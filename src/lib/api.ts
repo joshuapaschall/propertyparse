@@ -133,6 +133,19 @@ export type ProviderUsageSyncResponse = {
   [key: string]: JsonValue | undefined;
 };
 
+
+export type CacheWarning = {
+  code: string;
+  message: string;
+};
+
+export type ValidateApiKeysResponse = {
+  google_key_present: boolean;
+  openai: boolean;
+  cache_enabled: boolean;
+  cache_backend: 'supabase' | 'sqlite' | 'unavailable';
+  cache_warning?: CacheWarning;
+};
 export type ApiErrorInfo = {
   message: string;
   endpoint: string;
@@ -633,8 +646,11 @@ export async function acceptInvitation(): Promise<{ ok: boolean }> {
   });
 }
 
-export async function validateApiKeys() {
-  return requestJson<JsonValue>('/validate-api-keys', { method: 'GET', headers: getAuthHeaders() });
+export async function validateApiKeys(): Promise<ValidateApiKeysResponse> {
+  return requestJson<ValidateApiKeysResponse>('/validate-api-keys', {
+    method: 'GET',
+    headers: getAuthHeaders(),
+  });
 }
 
 export async function getJobs(query: JobsQuery = {}): Promise<JobsResponse> {
