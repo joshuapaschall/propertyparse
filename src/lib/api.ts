@@ -634,7 +634,7 @@ export async function acceptInvitation(): Promise<{ ok: boolean }> {
 }
 
 export async function validateApiKeys() {
-  return requestJson<JsonValue>('/validate-api-keys', { method: 'GET' });
+  return requestJson<JsonValue>('/validate-api-keys', { method: 'GET', headers: getAuthHeaders() });
 }
 
 export async function getJobs(query: JobsQuery = {}): Promise<JobsResponse> {
