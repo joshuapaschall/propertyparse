@@ -10,9 +10,6 @@ export default defineConfig({
   define: {
     global: {},
   },
-  optimizeDeps: {
-    exclude: ['chunk-KQVXTJIT.js']
-  },
   server: {
     host: '127.0.0.1',
     port: 3010

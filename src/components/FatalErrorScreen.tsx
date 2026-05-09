@@ -70,9 +70,15 @@ export default function FatalErrorScreen({ errorMessage, stackTrace, isChunkLoad
           <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-slate-200">Details</summary>
           <div className="border-t border-slate-700 px-4 py-3">
             <p className="text-xs text-slate-300">{errorMessage || 'Unknown error message'}</p>
-            <pre className="mt-3 max-h-[320px] overflow-auto whitespace-pre-wrap text-xs text-slate-400">
-              {stackTrace || 'No component stack trace available.'}
-            </pre>
+            {import.meta.env.DEV ? (
+              <pre className="mt-3 max-h-[320px] overflow-auto whitespace-pre-wrap text-xs text-slate-400">
+                {stackTrace || 'No component stack trace available.'}
+              </pre>
+            ) : (
+              <p className="mt-3 text-xs text-slate-500">
+                Use &ldquo;Copy details&rdquo; above to capture the full diagnostic for support.
+              </p>
+            )}
           </div>
         </details>
       </div>
