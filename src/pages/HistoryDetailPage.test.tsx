@@ -414,7 +414,7 @@ describe('HistoryDetailPage summary normalization', () => {
     );
 
     expect(await screen.findByText('Job geocoding calls')).toBeInTheDocument();
-    expect(screen.getByText('9')).toBeInTheDocument();
+    expect(await screen.findByText('9')).toBeInTheDocument();
     expect(screen.queryByText('41')).not.toBeInTheDocument();
   });
 
