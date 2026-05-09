@@ -16,6 +16,7 @@ import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import type { ExportCatalogItem } from '../types/exports';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
 import { formatHistoryRowCost } from '../lib/costTelemetry';
+import { useDebouncedValue } from '../hooks/useDebouncedValue';
 
 type StatusFilter = 'ALL' | 'DONE' | 'RUNNING' | 'FAILED';
 
@@ -83,6 +84,7 @@ export default function HistoryPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState(() => searchParams.get('search') ?? '');
+  const debouncedSearch = useDebouncedValue(search, 250);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => {
     const rawStatus = (searchParams.get('status') ?? 'ALL').toUpperCase();
     return (['ALL', 'DONE', 'RUNNING', 'FAILED'] as const).includes(rawStatus as StatusFilter)
@@ -108,7 +110,7 @@ export default function HistoryPage() {
 
   useEffect(() => {
     const nextParams = new URLSearchParams(searchParams);
-    if (search.trim()) nextParams.set('search', search.trim());
+    if (debouncedSearch.trim()) nextParams.set('search', debouncedSearch.trim());
     else nextParams.delete('search');
 
     if (statusFilter !== 'ALL') nextParams.set('status', statusFilter);
@@ -123,7 +125,7 @@ export default function HistoryPage() {
     if (nextParams.toString() !== searchParams.toString()) {
       setSearchParams(nextParams, { replace: true });
     }
-  }, [page, pageSize, search, searchParams, setSearchParams, statusFilter]);
+  }, [page, pageSize, debouncedSearch, searchParams, setSearchParams, statusFilter]);
 
   const loadJobs = useCallback(async () => {
     const hasExistingJobs = hasLoadedJobsRef.current;
@@ -137,7 +139,7 @@ export default function HistoryPage() {
       const response = await getJobs({
         limit: pageSize,
         offset: (page - 1) * pageSize,
-        search: search.trim() || undefined,
+        search: debouncedSearch.trim() || undefined,
         status: statusFilter === 'ALL' ? undefined : statusFilter,
       });
       setJobs(response.items ?? []);
@@ -151,7 +153,7 @@ export default function HistoryPage() {
       setInitialLoading(false);
       setRefreshing(false);
     }
-  }, [page, pageSize, search, showToast, statusFilter]);
+  }, [page, pageSize, debouncedSearch, showToast, statusFilter]);
 
   useEffect(() => {
     void loadJobs();
