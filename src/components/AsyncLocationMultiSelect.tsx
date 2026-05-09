@@ -16,7 +16,7 @@ type AsyncLocationMultiSelectProps = {
   cacheScope?: string;
   noOptionsMessage?: (inputValue: string) => string;
   formatCreateLabel?: (inputValue: string) => string;
-  loadOptions: (inputValue: string) => Promise<string[]>;
+  loadOptions: (inputValue: string, signal?: AbortSignal) => Promise<string[]>;
   onChange: (values: string[]) => void;
 };
 
@@ -47,6 +47,8 @@ export default function AsyncLocationMultiSelect({
   const [recentCustomOptions, setRecentCustomOptions] = useState<Option[]>([]);
   const cacheRef = useRef<Map<string, OptionGroup[]>>(new Map());
   const debounceRef = useRef<number | null>(null);
+  const debounceResolverRef = useRef<((options: OptionGroup[]) => void) | null>(null);
+  const debounceAbortRef = useRef<AbortController | null>(null);
 
   const toOptions = useCallback(
     (entries: string[], kind: Option['kind']) =>
@@ -62,6 +64,14 @@ export default function AsyncLocationMultiSelect({
 
   useEffect(() => () => {
     if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    if (debounceResolverRef.current) {
+      debounceResolverRef.current([]);
+      debounceResolverRef.current = null;
+    }
+    if (debounceAbortRef.current) {
+      debounceAbortRef.current.abort();
+      debounceAbortRef.current = null;
+    }
   }, []);
 
   const toGroupedOptions = useCallback((officialValues: string[], query: string) => {
@@ -84,17 +94,41 @@ export default function AsyncLocationMultiSelect({
     const cacheKey = `${cacheScope}|${query.toLowerCase()}`;
     const cached = cacheRef.current.get(cacheKey);
     if (cached) return Promise.resolve(cached);
-    if (debounceRef.current !== null) window.clearTimeout(debounceRef.current);
+    if (debounceRef.current !== null) {
+      window.clearTimeout(debounceRef.current);
+      debounceRef.current = null;
+    }
+    if (debounceAbortRef.current) {
+      debounceAbortRef.current.abort();
+      debounceAbortRef.current = null;
+    }
+    if (debounceResolverRef.current) {
+      debounceResolverRef.current([]);
+      debounceResolverRef.current = null;
+    }
     return new Promise<OptionGroup[]>((resolve) => {
+      debounceResolverRef.current = resolve;
+      const controller = new AbortController();
+      debounceAbortRef.current = controller;
       debounceRef.current = window.setTimeout(async () => {
         try {
-          const result = await loadOptions(query);
+          const result = await loadOptions(query, controller.signal);
           const grouped = toGroupedOptions(result, query);
           cacheRef.current.set(cacheKey, grouped);
           if (!query) setDefaultOptions(grouped);
-          resolve(grouped);
+          if (debounceResolverRef.current === resolve) {
+            debounceResolverRef.current = null;
+            debounceAbortRef.current = null;
+            debounceRef.current = null;
+            resolve(grouped);
+          }
         } catch {
-          resolve([]);
+          if (debounceResolverRef.current === resolve) {
+            debounceResolverRef.current = null;
+            debounceAbortRef.current = null;
+            debounceRef.current = null;
+            resolve([]);
+          }
         }
       }, 250);
     });

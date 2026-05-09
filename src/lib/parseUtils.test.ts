@@ -351,7 +351,7 @@ describe('parseUtils filters', () => {
       onClear: () => undefined,
     }));
 
-    await waitFor(() => expect(loadOptions).toHaveBeenCalledWith(''));
+    await waitFor(() => expect(loadOptions).toHaveBeenCalledWith('', expect.any(AbortSignal)));
     expect(screen.getByText('Atlanta')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /Use custom locality/i }));

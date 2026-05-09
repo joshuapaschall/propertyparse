@@ -922,24 +922,27 @@ export default function ParsePage() {
 
   const dedupedMatched = useMemo(() => dedupeRows(legacyMatchedRows), [legacyMatchedRows]);
   const dedupedUnmatched = useMemo(() => dedupeRows(legacyUnmatchedRows), [legacyUnmatchedRows]);
-  const loadStateOptions = useCallback(async (inputValue: string) => searchStates(inputValue), []);
+  const loadStateOptions = useCallback(
+    async (inputValue: string, signal?: AbortSignal) => searchStates(inputValue, 100, signal),
+    [],
+  );
 
   const loadCountyOptions = useCallback(
-    async (inputValue: string) => {
+    async (inputValue: string, signal?: AbortSignal) => {
       if (!stateValue) return [];
-      return searchCounties(stateValue, inputValue);
+      return searchCounties(stateValue, inputValue, 5000, signal);
     },
     [stateValue],
   );
 
   const loadCityOptions = useCallback(
-    async (inputValue: string) => {
+    async (inputValue: string, signal?: AbortSignal) => {
       if (!stateValue) return [];
       // Pass a single county hint only when exactly one is selected.
       // Multi-county scopes do statewide city search (matches backend's
       // _build_geocode_query county-hint logic).
       const countyHint = selectedCounties.length === 1 ? selectedCounties[0] : undefined;
-      return searchCities(stateValue, inputValue, countyHint);
+      return searchCities(stateValue, inputValue, countyHint, 50000, signal);
     },
     [selectedCounties, stateValue],
   );
