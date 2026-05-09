@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 import type { RowResult } from '../types/parse';
 import { retryJobBatch, retryJobRow, runNeedsReviewAiFix } from '../lib/api';
 import {
@@ -128,6 +129,9 @@ export default function ProcessingReportModal({
   const [runningAiFix, setRunningAiFix] = useState(false);
   const [aiFixRowsProcessed, setAiFixRowsProcessed] = useState<number | null>(null);
   const [aiFixEstimatedCost, setAiFixEstimatedCost] = useState<number | null>(null);
+
+  const reportDialogRef = useModalA11y<HTMLDivElement>(open, onClose);
+  const editDialogRef = useModalA11y<HTMLDivElement>(Boolean(editingRow), () => setEditingRow(null));
 
   useEffect(() => {
     if (!open) return;
@@ -305,11 +309,23 @@ export default function ProcessingReportModal({
 
   return (
     <>
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 dark:bg-slate-950/70">
-        <div className="flex w-full max-w-6xl flex-col gap-4 rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950">
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 dark:bg-slate-950/70"
+        onClick={(event) => {
+          if (event.target === event.currentTarget) onClose();
+        }}
+      >
+        <div
+          ref={reportDialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="processing-report-modal-title"
+          tabIndex={-1}
+          className="flex w-full max-w-6xl flex-col gap-4 rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950"
+        >
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+              <h3 id="processing-report-modal-title" className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                 Processing Report
               </h3>
               <p className="text-sm text-slate-500 dark:text-slate-400">
@@ -489,10 +505,22 @@ export default function ProcessingReportModal({
       </div>
 
       {editingRow ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 px-4 py-8 dark:bg-slate-950/80">
-          <div className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950 dark:shadow-slate-950/50">
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/60 px-4 py-8 dark:bg-slate-950/80"
+          onClick={(event) => {
+            if (event.target === event.currentTarget) setEditingRow(null);
+          }}
+        >
+          <div
+            ref={editDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="processing-report-edit-title"
+            tabIndex={-1}
+            className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950 dark:shadow-slate-950/50"
+          >
             <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+              <h3 id="processing-report-edit-title" className="text-lg font-semibold text-slate-800 dark:text-slate-100">
                 Edit full address
               </h3>
               <button

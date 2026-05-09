@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useModalA11y } from '../hooks/useModalA11y';
 
 export type ParsedRow = {
   id: string;
@@ -27,6 +28,7 @@ type EditRowModalProps = {
 
 export default function EditRowModal({ open, row, onClose, onSave }: EditRowModalProps) {
   const [draft, setDraft] = useState<ParsedRow | null>(row);
+  const dialogRef = useModalA11y<HTMLDivElement>(open, onClose);
 
   useEffect(() => {
     setDraft(row);
@@ -41,10 +43,25 @@ export default function EditRowModal({ open, row, onClose, onSave }: EditRowModa
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 dark:bg-slate-950/70">
-      <div className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950 dark:shadow-slate-950/50">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 px-4 py-8 dark:bg-slate-950/70"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+      data-testid="edit-row-modal-backdrop"
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="edit-row-modal-title"
+        tabIndex={-1}
+        className="w-full max-w-2xl rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950 dark:shadow-slate-950/50 focus:outline-none"
+      >
         <div className="flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+          <h3
+            id="edit-row-modal-title"
+            className="text-lg font-semibold text-slate-800 dark:text-slate-100"
+          >
             Edit Parsed Row
           </h3>
           <button
