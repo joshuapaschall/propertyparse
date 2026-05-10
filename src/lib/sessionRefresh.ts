@@ -2,6 +2,8 @@ import { supabase } from './supabase';
 import { getAuthHeaderState, mergeAuthHeaderState } from './authState';
 
 export const AUTH_FAILURE_MESSAGE = 'We couldn’t verify your session. Sign in again.';
+export const MEMBERSHIP_LOST_MESSAGE =
+  'Your access to this workspace was removed. Contact your admin to be re-invited.';
 export const AUTH_REFRESHING_MESSAGE = 'Refreshing your session…';
 
 export type RefreshedSessionContext = {

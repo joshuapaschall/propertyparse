@@ -6,7 +6,7 @@ import type {
   RowResult,
 } from '../types/parse';
 import { getAuthHeaderState } from './authState';
-import { AUTH_FAILURE_MESSAGE, ensureFreshSession } from './sessionRefresh';
+import { AUTH_FAILURE_MESSAGE, MEMBERSHIP_LOST_MESSAGE, ensureFreshSession } from './sessionRefresh';
 import type { ExportCatalogResponseItem } from '../types/exports';
 import { supabase } from './supabase';
 
@@ -222,8 +222,21 @@ const createApiError = (info: ApiErrorInfo): ApiError => {
 };
 
 const AUTH_FAILURE_STATUSES = new Set([401, 403]);
+const RETRYABLE_AUTH_STATUSES = new Set([401]);
+
+const isMembershipLostDetail = (detail: string): boolean => {
+  const lowered = detail.toLowerCase();
+  return (
+    lowered.includes('/auth/bootstrap') ||
+    lowered.includes('no org membership') ||
+    lowered.includes('no workspace access')
+  );
+};
 
 const toFriendlyAuthMessage = (status: number, detail: string) => {
+  if (status === 403 && isMembershipLostDetail(detail)) {
+    return MEMBERSHIP_LOST_MESSAGE;
+  }
   const lowered = detail.toLowerCase();
   if (
     AUTH_FAILURE_STATUSES.has(status) &&
@@ -267,7 +280,7 @@ const performAuthedFetch = async (path: string, options: RequestInit, retryOnAut
     throw error;
   }
 
-  if (retryOnAuthFailure && AUTH_FAILURE_STATUSES.has(res.status)) {
+  if (retryOnAuthFailure && RETRYABLE_AUTH_STATUSES.has(res.status)) {
     try {
       const refreshedHeaders = await refreshAuthHeadersFromSession();
       res = await execute(refreshedHeaders);
@@ -283,8 +296,9 @@ const performAuthedFetch = async (path: string, options: RequestInit, retryOnAut
     }
 
     if (AUTH_FAILURE_STATUSES.has(res.status)) {
+      const detail = await getErrorMessage(res);
       throw createApiError({
-        message: AUTH_FAILURE_MESSAGE,
+        message: toFriendlyAuthMessage(res.status, detail),
         endpoint: path,
         status: res.status,
       });
