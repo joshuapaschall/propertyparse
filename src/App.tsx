@@ -23,19 +23,9 @@ import { acceptInvitation, getMe } from './lib/api';
 import { clearAuthHeaderState, setAuthHeaderState } from './lib/authState';
 import { AUTH_FAILURE_MESSAGE, AUTH_REFRESHING_MESSAGE } from './lib/sessionRefresh';
 import { supabase } from './lib/supabase';
+import { joinUrl } from './lib/joinUrl';
 import { getSiteUrl } from './lib/siteUrl';
 import './App.css';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
-
-if (!API_BASE_URL) {
-  throw new Error('VITE_API_BASE_URL is not set.');
-}
-
-const normalizedApiBaseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
-const joinUrl = (path: string) =>
-  new URL(path.startsWith('/') ? path.slice(1) : path, normalizedApiBaseUrl).toString();
-
 
 function useAuth() {
   const ctx = useContext(AuthContext);
