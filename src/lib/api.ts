@@ -9,12 +9,7 @@ import { getAuthHeaderState } from './authState';
 import { AUTH_FAILURE_MESSAGE, MEMBERSHIP_LOST_MESSAGE, ensureFreshSession } from './sessionRefresh';
 import type { ExportCatalogResponseItem } from '../types/exports';
 import { supabase } from './supabase';
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
-
-if (!API_BASE_URL) {
-  throw new Error('VITE_API_BASE_URL is not set.');
-}
+import { joinUrl } from './joinUrl';
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -154,10 +149,6 @@ export type ApiErrorInfo = {
 };
 
 type ApiError = Error & { apiErrorInfo?: ApiErrorInfo };
-
-const normalizedApiBaseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_BASE_URL}/`;
-const joinUrl = (path: string) =>
-  new URL(path.startsWith('/') ? path.slice(1) : path, normalizedApiBaseUrl).toString();
 
 const getAuthHeaders = () => {
   const { accessToken, orgId, userId } = getAuthHeaderState();
