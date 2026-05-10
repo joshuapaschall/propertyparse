@@ -88,6 +88,17 @@ const ASYNC_PARSE_FILE_SIZE_THRESHOLD = 5 * 1024 * 1024;
 const ASYNC_PARSE_MIME_PREFIXES = ['application/pdf', 'image/'];
 const ASYNC_PARSE_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'tiff', 'tif', 'bmp', 'heic', 'heif'];
 
+
+/**
+ * How frequently the active-parse poll loop hits `/jobs/{id}`.
+ *
+ * Tuned for "feels live" UX without hammering the API. Lower values
+ * (≤900ms) generate noticeably more requests during long parses without
+ * a perceptible progress-bar smoothness gain. Higher values (≥3000ms)
+ * make the progress bar feel laggy on fast jobs.
+ */
+const PARSE_POLL_INTERVAL_MS = 1500;
+
 const ResultsTableSkeleton = () => (
   <Card className="overflow-hidden p-4">
     <div className="space-y-3">
@@ -2476,7 +2487,7 @@ How to fix: ${fixHint}` : ''}`;
     void runPoll();
     pollingRef.current = window.setInterval(() => {
       void runPoll();
-    }, 900);
+    }, PARSE_POLL_INTERVAL_MS);
   };
 
   const applyParsedResponse = useCallback(
