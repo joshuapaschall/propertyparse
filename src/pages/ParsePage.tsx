@@ -1222,6 +1222,7 @@ export default function ParsePage() {
           updateJobQueryParam(jobIdToLoad);
         }
       } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') return;
         const errorInfo = getApiErrorInfo(err);
         if (errorInfo?.status === 404) {
           resetParseUi({ showMissingJobToast: true });
@@ -2303,7 +2304,10 @@ How to fix: ${fixHint}` : ''}`;
       if (pollingInFlightRef.current) return;
       pollingInFlightRef.current = true;
       try {
-        const { job } = await getJobWithStatus(jobIdToWatch);
+        const { job } = await getJobWithStatus(jobIdToWatch, abortControllerRef.current?.signal);
+        if (activeProgressJobIdRef.current !== jobIdToWatch) {
+          return;
+        }
         const phase = normalizePhase(job.phase);
         const status = normalizePhase(job.status);
         const done =
@@ -2458,6 +2462,7 @@ How to fix: ${fixHint}` : ''}`;
           }
         }
       } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') return;
         const errorInfo = getApiErrorInfo(err);
         if (errorInfo?.status === 404 && !busyRef.current) {
           resetParseUi({ showMissingJobToast: true });
@@ -2834,7 +2839,7 @@ How to fix: ${fixHint}` : ''}`;
     try {
       const newJobId = safeUuid();
       const trimmedCampaignName = campaignName.trim();
-      const upload = await uploadFile(file, trimmedCampaignName || undefined);
+      const upload = await uploadFile(file, trimmedCampaignName || undefined, signal);
       if (!mountedRef.current || signal.aborted) return;
       setJobId(newJobId);
       setFileId(upload.fileId);
@@ -2905,6 +2910,7 @@ How to fix: ${fixHint}` : ''}`;
         campaignName: trimmedCampaignName,
       });
     } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') return;
       if (!mountedRef.current || signal.aborted) return;
       setError((err as Error).message ?? 'Parsing failed.');
       stopPolling();

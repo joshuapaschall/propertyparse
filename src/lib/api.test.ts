@@ -185,6 +185,55 @@ describe('API error handling', () => {
     expect(headers.get('Authorization')).toBe('Bearer token-123');
     expect(headers.get('X-Org-Id')).toBe('org-123');
   });
+
+  it('uploadFile forwards AbortSignal to fetch', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ fileId: 'f1' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { uploadFile } = await import('./api');
+    const controller = new AbortController();
+    const mockFile = new File(['a'], 'sample.csv', { type: 'text/csv' });
+    await uploadFile(mockFile, undefined, controller.signal);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ signal: controller.signal });
+  });
+
+  it('uploadFile rejects immediately when signal is already aborted', async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { uploadFile } = await import('./api');
+    const controller = new AbortController();
+    controller.abort();
+    const mockFile = new File(['a'], 'sample.csv', { type: 'text/csv' });
+
+    await expect(uploadFile(mockFile, undefined, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('getJobWithStatus forwards AbortSignal to fetch', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ job: { job_id: 'job-123', status: 'RUNNING' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { getJobWithStatus } = await import('./api');
+    const controller = new AbortController();
+    await getJobWithStatus('job-123', controller.signal);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ signal: controller.signal });
+  });
+
 });
 
 describe('export APIs', () => {

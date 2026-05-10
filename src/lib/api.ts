@@ -408,7 +408,10 @@ export type ParseResponse = {
   metadata?: Record<string, JsonValue>;
 };
 
-export async function uploadFile(file: File, displayName?: string) {
+export async function uploadFile(file: File, displayName?: string, signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
   const fd = new FormData();
   fd.append('file', file);
   if (displayName) {
@@ -418,6 +421,7 @@ export async function uploadFile(file: File, displayName?: string) {
     method: 'POST',
     body: fd,
     headers: getAuthHeaders(),
+    signal,
   });
 }
 
@@ -780,10 +784,14 @@ export async function getJob(jobId: string) {
   return (res.job ?? res.data ?? res.items ?? res) as JobRecord;
 }
 
-export async function getJobWithStatus(jobId: string) {
+export async function getJobWithStatus(jobId: string, signal?: AbortSignal) {
+  if (signal?.aborted) {
+    throw new DOMException('Aborted', 'AbortError');
+  }
   const path = `/jobs/${jobId}`;
   const res = await performAuthedFetch(path, {
     method: 'GET',
+    signal,
   });
   if (import.meta.env.DEV) {
     console.info(`[poll] GET /jobs/${jobId} -> ${res.status}`);
