@@ -171,7 +171,7 @@ describe('AdminPage provider usage sync section', () => {
     render(<MemoryRouter><AdminPage /></MemoryRouter>);
     expect(await screen.findByText('Provider Usage')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Refresh' }));
+    await user.click(await screen.findByRole('button', { name: 'Refresh' }));
     await waitFor(() => {
       expect(getGoogleProviderUsageStatus).toHaveBeenCalledTimes(2);
       expect(getOpenAiProviderUsageSummary).toHaveBeenCalledTimes(2);
