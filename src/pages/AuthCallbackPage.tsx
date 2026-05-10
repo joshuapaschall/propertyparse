@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import LoadingSpinner from '../LoadingSpinner';
-import { useAuthControls } from '../App';
+import { useAuthControls } from '../contexts/AuthContext';
 import { acceptInvitation } from '../lib/api';
 import { consumeSupabaseAuthRedirect } from '../lib/supabaseAuthRedirect';
 

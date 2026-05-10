@@ -14,14 +14,14 @@ const subscribeJobUpdates = vi.fn();
 const authState = { role: 'admin' };
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
-vi.mock('../App', () => ({ useAuthControls: () => authState }));
+vi.mock('../contexts/AuthContext', () => ({ useAuthControls: () => authState }));
 vi.mock('../components/TablePagination', () => ({ default: ({ totalCount, rangeContext }: { totalCount: number; rangeContext?: string }) => <div>{`pagination: ${totalCount}${rangeContext ? ` ${rangeContext}` : ''}`}</div> }));
 vi.mock('../components/exports/ExportPanel', () => ({
   default: ({ catalog, onDownload }: { catalog: Array<{ type: string; label: string }>; onDownload: (type: any, label: string) => void }) => (
     <div>{catalog.map((item) => <button key={item.type} type="button" onClick={() => onDownload(item.type as any, item.label)}>{`download-${item.type}`}</button>)}</div>
   ),
 }));
-vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast }) }));
+vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast }) }));
 vi.mock('../lib/liveUpdates', () => ({ subscribeJobUpdates: (...args: unknown[]) => subscribeJobUpdates(...args) }));
 vi.mock('../lib/api', () => ({
   getJobDetail: (...args: unknown[]) => getJobDetail(...args),

@@ -25,7 +25,7 @@ const selectedFileFactory = vi.fn(() => new File(['a'], 'sample.csv', { type: 't
 const authState = { role: 'admin' };
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
-vi.mock('../App', () => ({ useAuthControls: () => authState }));
+vi.mock('../contexts/AuthContext', () => ({ useAuthControls: () => authState }));
 vi.mock('../components/AccountedRowsIndicator', () => ({ default: () => <div>accounted</div> }));
 vi.mock('../components/FileUploadCard', () => ({
   default: ({ onChange }: { onChange: (file: File) => void }) => (
@@ -103,7 +103,7 @@ vi.mock('../components/exports/ExportPanel', () => ({
     </div>
   ),
 }));
-vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast }) }));
+vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast }) }));
 vi.mock('../lib/locationApi', () => ({ searchCities: vi.fn(), searchCounties: vi.fn(), searchStates: vi.fn() }));
 vi.mock('../lib/liveUpdates', () => ({ publishJobUpdate: (...args: unknown[]) => publishJobUpdate(...args) }));
 vi.mock('../lib/api', () => ({

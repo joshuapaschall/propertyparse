@@ -9,8 +9,8 @@ const readLocalParsePersistenceState = vi.fn();
 const authState = { role: 'member' };
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
-vi.mock('../App', () => ({ useAuthControls: () => authState }));
-vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
+vi.mock('../contexts/AuthContext', () => ({ useAuthControls: () => authState }));
+vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
 vi.mock('../lib/api', () => ({
   getMetricsSummary: (...args: unknown[]) => getMetricsSummary(...args),
   getApiErrorInfo: vi.fn(() => null),

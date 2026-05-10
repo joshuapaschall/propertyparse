@@ -1,6 +1,6 @@
 import { FormEvent, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
-import { useAuthControls } from '../App';
+import { useAuthControls } from '../contexts/AuthContext';
 import { supabase } from '../lib/supabase';
 
 export default function SetPasswordOnboardingPage() {

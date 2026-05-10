@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { useAuthControls } from '../App';
+import { useAuthControls } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
-import { useToast } from '../components/ui/ToastProvider';
+import { useToast } from '../contexts/ToastContext';
 import { supabase } from '../lib/supabase';
 
 export default function AccountSecurityPage() {

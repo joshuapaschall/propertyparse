@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AsyncCreatableSelect from 'react-select/async-creatable';
 import type { GroupBase, MultiValue } from 'react-select';
-import { normalizeLocalityInput, readRecentCustomValues, writeRecentCustomValue } from './AsyncLocationSelect';
+import { normalizeLocalityInput, readRecentCustomValues, writeRecentCustomValue } from '../lib/localityNormalize';
 
 type Option = { value: string; label: string; kind?: 'official' | 'recent-custom' | 'custom'; __isNew__?: boolean };
 type OptionGroup = GroupBase<Option>;

@@ -14,8 +14,8 @@ const showToast = vi.fn();
 const authState = { role: 'owner' };
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
-vi.mock('../App', () => ({ useAuthControls: () => authState }));
-vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast }) }));
+vi.mock('../contexts/AuthContext', () => ({ useAuthControls: () => authState }));
+vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast }) }));
 vi.mock('../lib/api', () => ({
   getApiErrorInfo: (error: unknown) => (error && typeof error === 'object' && 'apiErrorInfo' in (error as Record<string, unknown>)
     ? (error as { apiErrorInfo: unknown }).apiErrorInfo

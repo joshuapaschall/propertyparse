@@ -1,7 +1,8 @@
 import { ReactNode, useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import StatusIndicators from './StatusIndicators';
-import { useAuthControls, useThemeControls } from '../App';
+import { useAuthControls } from '../contexts/AuthContext';
+import { useThemeControls } from '../contexts/ThemeContext';
 
 type AppShellProps = {
   title: string;

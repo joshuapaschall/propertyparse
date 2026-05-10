@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
-import { useAuthControls } from '../App';
+import { useAuthControls } from '../contexts/AuthContext';
 import { getSiteUrl } from '../lib/siteUrl';
 
 const features = [

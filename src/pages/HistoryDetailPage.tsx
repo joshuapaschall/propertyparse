@@ -1,6 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useAuthControls } from '../App';
+import { useAuthControls } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
 import TablePagination from '../components/TablePagination';
 import InternalCostPanel from '../components/InternalCostPanel';
@@ -25,7 +25,7 @@ import {
   isHeaderOnlyCsv,
   isTemporaryResultsUnavailableError,
 } from '../lib/parseUtils';
-import { useToast } from '../components/ui/ToastProvider';
+import { useToast } from '../contexts/ToastContext';
 import ExportPanel from '../components/exports/ExportPanel';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
 import { flattenUsageSummary, mergeUsageSummary } from '../lib/usageSummary';

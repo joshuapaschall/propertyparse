@@ -20,9 +20,9 @@ const buildJob = (index: number, status: 'DONE' | 'RUNNING' | 'FAILED' = 'DONE')
 });
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
-vi.mock('../App', () => ({ useAuthControls: () => authState }));
+vi.mock('../contexts/AuthContext', () => ({ useAuthControls: () => authState }));
 const showToast = vi.fn();
-vi.mock('../components/ui/ToastProvider', () => ({ useToast: () => ({ showToast }) }));
+vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast }) }));
 vi.mock('../components/exports/ExportPanel', () => ({
   default: ({ disabled, onDownload }: { disabled?: boolean; onDownload: (type: 'unique_valid', label: string) => void }) => (
     <button type="button" disabled={disabled} onClick={() => onDownload('unique_valid', 'Unique Valid')}>

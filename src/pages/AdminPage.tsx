@@ -1,9 +1,9 @@
 import { FormEvent, useEffect, useState } from 'react';
-import { useAuthControls } from '../App';
+import { useAuthControls } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
 import { useModalA11y } from '../hooks/useModalA11y';
 import Button from '../components/ui/Button';
-import { useToast } from '../components/ui/ToastProvider';
+import { useToast } from '../contexts/ToastContext';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import {

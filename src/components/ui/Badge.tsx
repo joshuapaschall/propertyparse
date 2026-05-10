@@ -1,16 +1,7 @@
 import { ReactNode } from 'react';
 import clsx from 'clsx';
 
-type BadgeVariant =
-  | 'neutral'
-  | 'running'
-  | 'done'
-  | 'failed'
-  | 'valid'
-  | 'needs_review'
-  | 'skipped'
-  | 'duplicate'
-  | 'out_of_scope';
+import type { BadgeVariant } from './badgeVariant';
 
 type BadgeProps = {
   children: ReactNode;
@@ -33,18 +24,6 @@ const variantClasses: Record<BadgeVariant, string> = {
     'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-700/50 dark:bg-fuchsia-900/30 dark:text-fuchsia-300',
 };
 
-export function getBadgeVariant(value: string | null | undefined): BadgeVariant {
-  const normalized = (value ?? '').toUpperCase();
-  if (normalized.includes('FAIL')) return 'failed';
-  if (normalized.includes('DONE') || normalized.includes('COMPLETE') || normalized.includes('SUCCESS')) return 'done';
-  if (normalized.includes('RUN') || normalized.includes('PENDING') || normalized.includes('PROCESS')) return 'running';
-  if (normalized === 'VALID') return 'valid';
-  if (normalized === 'NEEDS_REVIEW') return 'needs_review';
-  if (normalized === 'SKIPPED') return 'skipped';
-  if (normalized === 'DUPLICATE') return 'duplicate';
-  if (normalized.startsWith('OUT_OF_SCOPE')) return 'out_of_scope';
-  return 'neutral';
-}
 
 export default function Badge({ children, variant = 'neutral', className }: BadgeProps) {
   return (
