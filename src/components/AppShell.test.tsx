@@ -6,8 +6,10 @@ import AppShell from './AppShell';
 const authState = { role: 'member', logout: vi.fn() };
 const themeState = { theme: 'light', toggleTheme: vi.fn() };
 
-vi.mock('../App', () => ({
+vi.mock('../contexts/AuthContext', () => ({
   useAuthControls: () => authState,
+}));
+vi.mock('../contexts/ThemeContext', () => ({
   useThemeControls: () => themeState,
 }));
 vi.mock('./StatusIndicators', () => ({ default: () => <div /> }));

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import type { Session } from '@supabase/supabase-js';
 import AuthPage from './pages/AuthPage';
@@ -13,65 +13,18 @@ import SetPasswordOnboardingPage from './pages/SetPasswordOnboardingPage';
 import AccountSecurityPage from './pages/AccountSecurityPage';
 import LoadingSpinner from './LoadingSpinner';
 import { ToastProvider } from './components/ui/ToastProvider';
+import { AuthContext } from './contexts/AuthContext';
+import type { AuthContextValue } from './contexts/AuthContext';
+import { ThemeContext } from './contexts/ThemeContext';
+import type { ThemeContextValue, ThemeMode } from './contexts/ThemeContext';
+import type { BootstrapGuidanceResponse } from './lib/authBootstrap';
+import { bootstrapAuthSessionRequest, isBootstrapGuidance } from './lib/authBootstrap';
 import { acceptInvitation, getMe } from './lib/api';
 import { clearAuthHeaderState, setAuthHeaderState } from './lib/authState';
-import { AUTH_FAILURE_MESSAGE, AUTH_REFRESHING_MESSAGE, ensureFreshSession } from './lib/sessionRefresh';
+import { AUTH_FAILURE_MESSAGE, AUTH_REFRESHING_MESSAGE } from './lib/sessionRefresh';
 import { supabase } from './lib/supabase';
 import { getSiteUrl } from './lib/siteUrl';
 import './App.css';
-
-type AuthContextValue = {
-  session: Session | null;
-  accessToken: string | null;
-  orgId: string | null;
-  userId: string | null;
-  role: string | null;
-  pendingInvitation: BootstrapGuidanceResponse['invitation'] | null;
-  isAuthenticated: boolean;
-  isReady: boolean;
-  isSessionLoading: boolean;
-  isBootstrapping: boolean;
-  bootstrapError: string | null;
-  hasPendingInvitation: boolean;
-  requiresPasswordSetup: boolean;
-  loginWithPassword: (email: string, password: string) => Promise<void>;
-  loginWithMagicLink: (email: string, emailRedirectTo?: string) => Promise<void>;
-  signUpWithPassword: (email: string, password: string) => Promise<{ needsEmailConfirmation: boolean }>;
-  logout: () => Promise<void>;
-  refreshBootstrap: () => Promise<void>;
-  acceptPendingInvitation: () => Promise<void>;
-};
-
-type ThemeMode = 'light' | 'dark';
-
-type ThemeContextValue = {
-  theme: ThemeMode;
-  toggleTheme: () => void;
-};
-
-type BootstrapSuccessResponse = {
-  orgId: string;
-  userId: string;
-  role: string;
-};
-
-type BootstrapGuidanceResponse = {
-  noMembership: true;
-  hasPendingInvitation: boolean;
-  invitation?: {
-    orgId?: string;
-    orgName?: string;
-    email?: string;
-    role?: string;
-  };
-};
-
-type BootstrapResponse = BootstrapSuccessResponse | BootstrapGuidanceResponse;
-
-const isBootstrapGuidance = (
-  resp: BootstrapResponse,
-): resp is BootstrapGuidanceResponse =>
-  'noMembership' in resp && resp.noMembership === true;
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string | undefined;
 
@@ -83,38 +36,6 @@ const normalizedApiBaseUrl = API_BASE_URL.endsWith('/') ? API_BASE_URL : `${API_
 const joinUrl = (path: string) =>
   new URL(path.startsWith('/') ? path.slice(1) : path, normalizedApiBaseUrl).toString();
 
-const AuthContext = createContext<AuthContextValue | undefined>(undefined);
-const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
-
-
-export const bootstrapAuthSessionRequest = async (currentSession: Session) => {
-  const executeBootstrap = async (accessToken: string) =>
-    fetch(joinUrl('/auth/bootstrap'), {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-
-  let accessToken = currentSession.access_token;
-  let response = await executeBootstrap(accessToken);
-
-  if (response.status === 401 || response.status === 403) {
-    const refreshed = await ensureFreshSession(accessToken);
-    accessToken = refreshed.accessToken;
-    response = await executeBootstrap(accessToken);
-  }
-
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Bootstrap failed with ${response.status}`);
-  }
-
-  return {
-    data: (await response.json()) as BootstrapResponse,
-    accessToken,
-  };
-};
 
 function useAuth() {
   const ctx = useContext(AuthContext);
@@ -626,18 +547,6 @@ function AppRoutes() {
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
-}
-
-export function useAuthControls() {
-  return useAuth();
-}
-
-export function useThemeControls() {
-  const ctx = useContext(ThemeContext);
-  if (!ctx) {
-    throw new Error('useThemeControls must be used within ThemeProvider.');
-  }
-  return ctx;
 }
 
 function App() {

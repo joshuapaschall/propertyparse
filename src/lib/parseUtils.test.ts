@@ -3,7 +3,8 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import type { RowResult } from '../types/parse';
-import AsyncLocationSelect, { normalizeLocalityInput } from '../components/AsyncLocationSelect';
+import AsyncLocationSelect from '../components/AsyncLocationSelect';
+import { normalizeLocalityInput } from './localityNormalize';
 import AsyncLocationMultiSelect from '../components/AsyncLocationMultiSelect';
 import {
   buildLocalCsvForExport,

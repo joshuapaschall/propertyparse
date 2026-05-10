@@ -16,7 +16,7 @@ import Card from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import Skeleton from '../components/ui/Skeleton';
 import ExportPanel from '../components/exports/ExportPanel';
-import { useToast } from '../components/ui/ToastProvider';
+import { useToast } from '../contexts/ToastContext';
 import {
   getReasonMetadata,
   isErrorRow,

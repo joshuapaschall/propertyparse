@@ -49,7 +49,7 @@ describe('bootstrapAuthSessionRequest', () => {
         ),
     );
 
-    const { bootstrapAuthSessionRequest } = await import('./App');
+    const { bootstrapAuthSessionRequest } = await import('./lib/authBootstrap');
     const result = await bootstrapAuthSessionRequest({ access_token: 'stale-token', user: { id: 'user-1' } } as any);
 
     expect(result.accessToken).toBe('fresh-token');

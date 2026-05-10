@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAuthControls } from '../App';
+import { useAuthControls } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import InternalCostPanel from '../components/InternalCostPanel';
 import { getApiErrorInfo, getMetricsSummary, MetricsRange, MetricsSummary } from '../lib/api';
-import { useToast } from '../components/ui/ToastProvider';
+import { useToast } from '../contexts/ToastContext';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
 import { flattenUsageSummary } from '../lib/usageSummary';

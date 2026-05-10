@@ -1,25 +1,13 @@
-import { createContext, ReactNode, useCallback, useContext, useMemo, useState } from 'react';
-
-type ToastVariant = 'success' | 'error' | 'info';
-
-type ToastInput = {
-  title: string;
-  description?: string;
-  variant?: ToastVariant;
-};
+import { ReactNode, useCallback, useMemo, useState } from 'react';
+import { ToastContext } from '../../contexts/ToastContext';
+import type { ToastContextValue, ToastInput, ToastVariant } from '../../contexts/ToastContext';
 
 type ToastItem = ToastInput & {
   id: string;
   variant: ToastVariant;
 };
 
-type ToastContextValue = {
-  showToast: (input: ToastInput) => void;
-};
-
 const TOAST_DURATION_MS = 3500;
-
-const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 
 const variantStyles: Record<ToastVariant, string> = {
   success: 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/80 dark:text-emerald-200',
@@ -45,7 +33,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     [dismissToast],
   );
 
-  const value = useMemo(() => ({ showToast }), [showToast]);
+  const value = useMemo<ToastContextValue>(() => ({ showToast }), [showToast]);
 
   return (
     <ToastContext.Provider value={value}>
@@ -64,12 +52,4 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       </div>
     </ToastContext.Provider>
   );
-}
-
-export function useToast() {
-  const ctx = useContext(ToastContext);
-  if (!ctx) {
-    throw new Error('useToast must be used within ToastProvider.');
-  }
-  return ctx;
 }

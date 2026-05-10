@@ -1,7 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { useAuthControls } from '../App';
+import { useAuthControls } from '../contexts/AuthContext';
 import { consumeSupabaseAuthRedirect } from '../lib/supabaseAuthRedirect';
 
 export default function ResetPasswordPage() {

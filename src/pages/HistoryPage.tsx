@@ -1,13 +1,14 @@
 import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuthControls } from '../App';
+import { useAuthControls } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
-import Badge, { getBadgeVariant } from '../components/ui/Badge';
+import Badge from '../components/ui/Badge';
+import { getBadgeVariant } from '../components/ui/badgeVariant';
 import Button from '../components/ui/Button';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import { downloadJobExport, getJobExportCatalog, JobExportType, JobRecord, getJobs, updateJobMetadata } from '../lib/api';
-import { useToast } from '../components/ui/ToastProvider';
+import { useToast } from '../contexts/ToastContext';
 import ExportPanel from '../components/exports/ExportPanel';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
 import { normalizeJobSummary } from '../lib/jobSummary';
