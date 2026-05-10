@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuthControls } from '../contexts/AuthContext';
+import { joinUrl } from '../lib/joinUrl';
 import { getSiteUrl } from '../lib/siteUrl';
 
 const features = [
@@ -405,7 +406,7 @@ export default function AuthPage() {
               <p>You are signed in, but backend bootstrap failed. Check API diagnostics.</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 <a
-                  href={`${import.meta.env.VITE_API_BASE_URL}/system/diagnostics`}
+                  href={joinUrl('/system/diagnostics')}
                   target="_blank"
                   rel="noreferrer"
                   className="rounded-lg border border-amber-200/50 px-3 py-1.5 text-xs font-semibold hover:bg-amber-200/10"
