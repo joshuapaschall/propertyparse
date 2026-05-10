@@ -113,13 +113,55 @@ describe('API error handling', () => {
       vi
         .fn()
         .mockResolvedValueOnce(new Response('jwt expired', { status: 401 }))
-        .mockResolvedValueOnce(new Response('still forbidden', { status: 403 })),
+        .mockResolvedValueOnce(new Response('jwt expired', { status: 401 })),
     );
 
     const { getMetricsSummary } = await import('./api');
     await expect(getMetricsSummary('today')).rejects.toMatchObject({
       message: 'We couldn’t verify your session. Sign in again.',
     });
+  });
+
+  it('does not refresh on 403 when org membership was lost (B42)', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ detail: 'User has no org membership. Call /auth/bootstrap' }),
+          { status: 403, headers: { 'content-type': 'application/json' } },
+        ),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { getMetricsSummary } = await import('./api');
+    await expect(getMetricsSummary('today')).rejects.toMatchObject({
+      message: 'Your access to this workspace was removed. Contact your admin to be re-invited.',
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(refreshSession).not.toHaveBeenCalled();
+  });
+
+  it('surfaces membership-lost message after refresh races with membership change (B42)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response('jwt expired', { status: 401 }))
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({ detail: 'User has no org membership. Call /auth/bootstrap' }),
+            { status: 403, headers: { 'content-type': 'application/json' } },
+          ),
+        ),
+    );
+
+    const { getMetricsSummary } = await import('./api');
+    await expect(getMetricsSummary('today')).rejects.toMatchObject({
+      message: 'Your access to this workspace was removed. Contact your admin to be re-invited.',
+    });
+
+    expect(refreshSession).toHaveBeenCalledTimes(1);
   });
 
   it('sends Authorization + X-Org-Id headers for validateApiKeys (audit B76)', async () => {
