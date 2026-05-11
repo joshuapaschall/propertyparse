@@ -1554,6 +1554,9 @@ export default function ParsePage() {
     if (softProgressOutage && busy) {
       return progressInfo.unavailableReason || 'Processing is still running. Live progress will appear when available.';
     }
+    if (progressInfo.phase === 'DONE') {
+      return null;
+    }
     const done = progressInfo.done;
     const total = progressInfo.total;
     const backendDetail = progressInfo.detail;
@@ -1579,7 +1582,18 @@ export default function ParsePage() {
   }, [busy, isStartingParse, progressInfo, softProgressOutage]);
 
   const shouldShowProgress = useMemo(
-    () => busy || resultsFinalizing || progressInfo.phase !== null || progressPercent !== null || parseSummary !== null,
+    () => {
+      // Hide the live progress panel once the job has settled into a
+      // success summary. The KPI tiles + "Ready" lifecycle pill on the
+      // Processing Results header are the source of truth at that point.
+      if (parseSummary && !busy && !resultsFinalizing) return false;
+      return (
+        busy ||
+        resultsFinalizing ||
+        progressInfo.phase !== null ||
+        progressPercent !== null
+      );
+    },
     [busy, parseSummary, progressInfo.phase, progressPercent, resultsFinalizing],
   );
 
@@ -2452,6 +2466,8 @@ How to fix: ${fixHint}` : ''}`;
         if (isCompletionLikePhase(status) || isCompletionLikePhase(phase)) {
           setProgressPercent(100);
           setProgressStep(mapPhaseToStep('DONE'));
+          etaSecondsRef.current = null;
+          progressSamplesRef.current = [];
           stopPolling();
           await summaryHydrationPromiseRef.current;
           if (resultsHydrationPromiseRef.current) {
@@ -2622,12 +2638,18 @@ How to fix: ${fixHint}` : ''}`;
       setParseSummary(displayedSummary);
       setRowsReceived(resolvedRowsReceived);
       setMetadata(Object.keys(mergedJob).length ? mergedJob : null);
-      setProgressInfo((prev) => ({
-        ...prev,
-        phase: prev.phase && !isCompletionLikePhase(prev.phase) ? prev.phase : 'DONE',
+      setProgressInfo({
+        phase: 'DONE',
         done: resolvedRowsReceived,
         total: resolvedRowsReceived,
-      }));
+        detail: null,
+        cacheHits: null,
+        googleCallsUsed: null,
+        eta: null,
+        unavailableReason: null,
+      });
+      etaSecondsRef.current = null;
+      progressSamplesRef.current = [];
       setProgressPercent(100);
       publishJobUpdate({ kind: 'job-updated', jobId: completedJobId });
       publishJobUpdate({ kind: 'metrics-updated', jobId: completedJobId });
@@ -2698,6 +2720,7 @@ How to fix: ${fixHint}` : ''}`;
     setProgressStep(0);
     setProgressPercent(null);
     etaSecondsRef.current = null;
+    progressSamplesRef.current = [];
     setPollError(null);
     setPollErrorCount(0);
     setSoftProgressOutage(false);
