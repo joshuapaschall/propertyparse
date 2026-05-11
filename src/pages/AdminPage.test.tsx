@@ -14,6 +14,15 @@ const showToast = vi.fn();
 const authState = { role: 'owner' };
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
+vi.mock('../components/StatusIndicators', () => ({
+  default: () => (
+    <div>
+      <div data-testid="status-pill-api-health">API Health</div>
+      <div data-testid="status-pill-api-keys">API Keys</div>
+      <button type="button">Status Refresh</button>
+    </div>
+  ),
+}));
 vi.mock('../contexts/AuthContext', () => ({ useAuthControls: () => authState }));
 vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast }) }));
 vi.mock('../lib/api', () => ({
@@ -80,6 +89,30 @@ describe('AdminPage provider usage sync section', () => {
     expect(screen.getByText(/Missing env vars: GOOGLE_CLOUD_PROJECT_ID, GOOGLE_BILLING_ACCOUNT_ID/i)).toBeInTheDocument();
     expect(screen.getByText(/Project-local request logging is working, but billing-account sync has not populated provider snapshots yet/i)).toBeInTheDocument();
     expect(screen.getByText('proj_123')).toBeInTheDocument();
+  });
+
+  it('renders System status above Provider Usage for admin roles', async () => {
+    authState.role = 'admin';
+    render(<MemoryRouter><AdminPage /></MemoryRouter>);
+
+    const systemStatusHeading = await screen.findByText('System status');
+    expect(systemStatusHeading).toBeInTheDocument();
+    expect(screen.getByTestId('status-pill-api-health')).toBeInTheDocument();
+    expect(screen.getByTestId('status-pill-api-keys')).toBeInTheDocument();
+
+    const providerUsageHeading = await screen.findByText('Provider Usage');
+    expect(providerUsageHeading).toBeInTheDocument();
+    expect(systemStatusHeading.compareDocumentPosition(providerUsageHeading) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('does not render System status for non-admin roles', async () => {
+    authState.role = 'member';
+    render(<MemoryRouter><AdminPage /></MemoryRouter>);
+
+    expect(await screen.findByText('Not authorized')).toBeInTheDocument();
+    expect(screen.queryByText('System status')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('status-pill-api-health')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('status-pill-api-keys')).not.toBeInTheDocument();
   });
 
 

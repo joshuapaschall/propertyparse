@@ -12,8 +12,6 @@ vi.mock('../contexts/AuthContext', () => ({
 vi.mock('../contexts/ThemeContext', () => ({
   useThemeControls: () => themeState,
 }));
-vi.mock('./StatusIndicators', () => ({ default: () => <div /> }));
-
 describe('AppShell', () => {
   it('hides the Admin link from non-privileged roles (B59)', () => {
     authState.role = 'member';
@@ -37,5 +35,16 @@ describe('AppShell', () => {
     authState.role = 'member';
     render(<MemoryRouter><AppShell title="x">child</AppShell></MemoryRouter>);
     expect(screen.getByRole('link', { name: /account security/i })).toBeInTheDocument();
+  });
+
+  it('does not render status indicators in the header', () => {
+    render(<MemoryRouter><AppShell title="x">child</AppShell></MemoryRouter>);
+    expect(screen.queryByTestId('status-pill-api-health')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('status-pill-api-keys')).not.toBeInTheDocument();
+  });
+
+  it('keeps the mobile Menu button in the header', () => {
+    render(<MemoryRouter><AppShell title="x">child</AppShell></MemoryRouter>);
+    expect(screen.getByRole('button', { name: 'Menu' })).toBeInTheDocument();
   });
 });

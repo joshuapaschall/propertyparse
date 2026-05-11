@@ -1,6 +1,5 @@
 import { ReactNode, useState } from 'react';
 import { NavLink } from 'react-router-dom';
-import StatusIndicators from './StatusIndicators';
 import { useAuthControls } from '../contexts/AuthContext';
 import { useThemeControls } from '../contexts/ThemeContext';
 
@@ -142,7 +141,7 @@ export default function AppShell({ title, subtitle, actions, children, contentFu
         <div className="flex min-h-screen flex-1 flex-col">
           <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
             <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-between gap-4 px-6 py-4">
-              <div className="flex items-center gap-3">
+              <div>
                 <button
                   type="button"
                   onClick={() => setSidebarOpen(true)}
@@ -150,7 +149,6 @@ export default function AppShell({ title, subtitle, actions, children, contentFu
                 >
                   Menu
                 </button>
-                <StatusIndicators />
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 {actions}

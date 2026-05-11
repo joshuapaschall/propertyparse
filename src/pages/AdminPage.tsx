@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from 'react';
 import { useAuthControls } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
+import StatusIndicators from '../components/StatusIndicators';
 import { useModalA11y } from '../hooks/useModalA11y';
 import Button from '../components/ui/Button';
 import { useToast } from '../contexts/ToastContext';
@@ -558,6 +559,15 @@ export default function AdminPage() {
         </Card>
       ) : (
         <div className="space-y-6">
+          <Card>
+            <SectionHeader
+              title="System status"
+              subtitle="API health and credential checks for this environment."
+            />
+            <div className="mt-4">
+              <StatusIndicators />
+            </div>
+          </Card>
           <Card>
             <SectionHeader
               title="Provider Usage"
