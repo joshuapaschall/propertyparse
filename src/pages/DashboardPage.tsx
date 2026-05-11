@@ -1,16 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useAuthControls } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
-import InternalCostPanel from '../components/InternalCostPanel';
 import { getApiErrorInfo, getMetricsSummary, MetricsRange, MetricsSummary } from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
-import { flattenUsageSummary } from '../lib/usageSummary';
-import { buildAdminCostSections, buildProductSafeCostItems } from '../lib/costTelemetry';
-import { hasLocalOnlyBillingWarning, LOCAL_ONLY_BILLING_WARNING } from '../lib/telemetryWarnings';
 
 const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
   { key: 'today', label: 'Today' },
@@ -23,8 +18,6 @@ const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
 const toNumber = (value: unknown) => (typeof value === 'number' ? value : Number(value ?? 0) || 0);
 
 export default function DashboardPage() {
-  const { role } = useAuthControls();
-  const isPrivileged = role === 'admin' || role === 'owner';
   const { showToast } = useToast();
   const [range, setRange] = useState<MetricsRange | 'custom'>('today');
   const [customStart, setCustomStart] = useState('');
@@ -104,17 +97,16 @@ export default function DashboardPage() {
     return () => window.clearInterval(timer);
   }, [loadMetrics]);
 
-  const usageMetrics = useMemo(() => (metrics ? flattenUsageSummary(metrics as Record<string, unknown>) : null), [metrics]);
 
   const kpis = useMemo(() => {
     const spend = toNumber(metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd);
     return [
-      ['Files Uploaded', toNumber(metrics?.files_uploaded ?? metrics?.uploads)],
-      ['Potential Properties', toNumber(metrics?.potential_properties ?? metrics?.leads)],
-      ['Unique Valid', toNumber(metrics?.valid_unique)],
-      ['Review Queue', toNumber(metrics?.review_queue_total ?? metrics?.needs_review)],
+      ['Files', toNumber(metrics?.files_uploaded ?? metrics?.uploads)],
+      ['Addresses In', toNumber(metrics?.potential_properties ?? metrics?.leads)],
+      ['Verified Unique', toNumber(metrics?.valid_unique)],
+      ['Needs Review', toNumber(metrics?.review_queue_total ?? metrics?.needs_review)],
       ['Exports', toNumber(metrics?.exports)],
-      ['Total Cost', spend.toLocaleString(undefined, { style: 'currency', currency: 'USD' })],
+      ['Cost This Period', spend.toLocaleString(undefined, { style: 'currency', currency: 'USD' })],
     ];
   }, [metrics]);
 
@@ -140,32 +132,8 @@ export default function DashboardPage() {
     );
   }, [metrics]);
 
-  const costPanelSections = useMemo(
-    () =>
-      isPrivileged
-        ? buildAdminCostSections({
-            usage: usageMetrics ?? {},
-            estimatedJobCost: metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd,
-            estimatedMonthlyTotal: metrics?.google_month_to_date_actual_or_estimated_cost_usd ?? metrics?.estimated_monthly_total_usd ?? metrics?.estimated_monthly_cost_usd ?? metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd,
-            jobGeocodingCalls: (metrics as Record<string, unknown>)?.job_geocoding_calls ?? metrics?.googleCalls,
-          }).filter((section) => section.title === 'Month to date')
-        : undefined,
-    [isPrivileged, metrics, usageMetrics],
-  );
 
-  const showLocalOnlyBillingWarning = useMemo(
-    () => hasLocalOnlyBillingWarning(usageMetrics ?? {}),
-    [usageMetrics],
-  );
 
-  const costPanelItems = useMemo(
-    () => buildProductSafeCostItems({
-      usage: usageMetrics ?? {},
-      estimatedJobCost: metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd,
-      creditsUsed: metrics?.exports,
-    }),
-    [metrics, usageMetrics],
-  );
 
   return (
     <AppShell title="Dashboard" subtitle="Workflow-first metrics across your parsing pipeline.">
@@ -213,7 +181,7 @@ export default function DashboardPage() {
                 <div key={label} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
                   <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
                   <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">{value as any}</p>
-                  {label === 'Review Queue' ? (
+                  {label === 'Needs Review' ? (
                     <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Rows still requiring review or correction.</p>
                   ) : null}
                 </div>
@@ -232,23 +200,22 @@ export default function DashboardPage() {
                 Dashboard metrics only include saved jobs. Your last run may be missing until backend persistence is restored.
               </p>
             ) : null}
-            <div className="mt-6">
-              {showLocalOnlyBillingWarning ? (
-                <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-100">
-                  {LOCAL_ONLY_BILLING_WARNING}
-                </div>
-              ) : null}
-              <InternalCostPanel
-                title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
-                subtitle={
-                  isPrivileged
-                    ? 'Visible to admin and owner roles only.'
-                    : 'A product-safe estimate without internal vendor details.'
-                }
-                items={costPanelItems}
-                sections={costPanelSections}
-                isPrivileged={isPrivileged}
-              />
+            <div className="mt-6 grid gap-4 sm:grid-cols-3">
+              <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">This month</p>
+                <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">Files processed</p>
+                <p className="mt-1 text-2xl font-semibold">{toNumber(metrics?.files_uploaded ?? metrics?.uploads)}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">This month</p>
+                <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">Addresses verified</p>
+                <p className="mt-1 text-2xl font-semibold">{toNumber(metrics?.valid_unique)}</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+                <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">This month</p>
+                <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">Cost</p>
+                <p className="mt-1 text-2xl font-semibold">{(toNumber(metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd)).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</p>
+              </div>
             </div>
           </>
         )}

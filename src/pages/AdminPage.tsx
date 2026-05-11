@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuthControls } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
 import StatusIndicators from '../components/StatusIndicators';
@@ -7,14 +7,17 @@ import Button from '../components/ui/Button';
 import { useToast } from '../contexts/ToastContext';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
+import InternalCostPanel from '../components/InternalCostPanel';
 import {
   ApiErrorInfo,
   getApiErrorInfo,
   getGoogleProviderUsageStatus,
+  getMetricsSummary,
   getOpenAiProviderUsageSummary,
   getOrgMembers,
   getSystemDiagnostics,
   inviteOrgMember,
+  MetricsSummary,
   OrgMember,
   ProviderUsageGoogleStatus,
   ProviderUsageOpenAiSummary,
@@ -25,6 +28,9 @@ import {
   SystemDiagnostics,
   updateOrgMember,
 } from '../lib/api';
+import { buildAdminCostSections } from '../lib/costTelemetry';
+import { hasLocalOnlyBillingWarning, LOCAL_ONLY_BILLING_WARNING } from '../lib/telemetryWarnings';
+import { flattenUsageSummary } from '../lib/usageSummary';
 
 const roleOptions = ['member', 'manager', 'admin', 'owner'];
 
@@ -267,6 +273,10 @@ export default function AdminPage() {
   const [googleSyncLoading, setGoogleSyncLoading] = useState(false);
   const [openAiSyncLoading, setOpenAiSyncLoading] = useState(false);
 
+  const [adminMetrics, setAdminMetrics] = useState<MetricsSummary | null>(null);
+  const [adminMetricsLoading, setAdminMetricsLoading] = useState(false);
+  const [adminMetricsError, setAdminMetricsError] = useState<string | null>(null);
+
   const loadProviderUsage = async () => {
     setProviderUsageLoading(true);
     setGoogleUsageError(null);
@@ -294,6 +304,19 @@ export default function AdminPage() {
 
     setProviderUsageLoading(false);
   };
+
+  const loadAdminMetrics = useCallback(async () => {
+    setAdminMetricsLoading(true);
+    setAdminMetricsError(null);
+    try {
+      const data = await getMetricsSummary('month');
+      setAdminMetrics(data);
+    } catch (err) {
+      setAdminMetricsError((err as Error).message ?? 'Unable to load admin metrics.');
+    } finally {
+      setAdminMetricsLoading(false);
+    }
+  }, []);
 
   const loadMembers = async () => {
     setTeamLoading(true);
@@ -323,8 +346,8 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!canAccessAdmin) return;
-    void Promise.all([loadMembers(), loadProviderUsage()]);
-  }, [canAccessAdmin]);
+    void Promise.all([loadMembers(), loadProviderUsage(), loadAdminMetrics()]);
+  }, [canAccessAdmin, loadAdminMetrics]);
 
   const sendInvite = async ({ resend = false }: { resend?: boolean } = {}) => {
     if (!canManageTeam) return;
@@ -548,6 +571,25 @@ export default function AdminPage() {
   const googleBillingSyncConfigured = getGoogleBillingSyncConfigured(googleUsageStatus);
   const showLocalOnlyExplanation = googleUsageStatus?.billing_snapshot_missing === true && googleBillingSyncConfigured !== true;
 
+  const adminUsageMetrics = useMemo(
+    () => (adminMetrics ? flattenUsageSummary(adminMetrics as Record<string, unknown>) : null),
+    [adminMetrics],
+  );
+  const adminCostSections = useMemo(
+    () => buildAdminCostSections({
+      usage: adminUsageMetrics ?? {},
+      estimatedJobCost: adminMetrics?.total_cost_usd ?? adminMetrics?.spend_usd ?? adminMetrics?.spendUsd,
+      estimatedMonthlyTotal: adminMetrics?.google_month_to_date_actual_or_estimated_cost_usd ?? adminMetrics?.estimated_monthly_total_usd ?? adminMetrics?.estimated_monthly_cost_usd ?? adminMetrics?.total_cost_usd ?? adminMetrics?.spend_usd ?? adminMetrics?.spendUsd,
+      jobGeocodingCalls: (adminMetrics as Record<string, unknown>)?.job_geocoding_calls ?? adminMetrics?.googleCalls,
+    }),
+    [adminMetrics, adminUsageMetrics],
+  );
+  const showAdminLocalOnlyWarning = useMemo(
+    () => hasLocalOnlyBillingWarning(adminUsageMetrics ?? {}),
+    [adminUsageMetrics],
+  );
+
+
   return (
     <AppShell title="Admin" subtitle="Manage your organization team.">
       {!hasRoleInfo || !canAccessAdmin ? (
@@ -659,6 +701,36 @@ export default function AdminPage() {
                 </div>
               </div>
             )}
+          </Card>
+
+          <Card>
+            <SectionHeader
+              title="Cost transparency"
+              subtitle="Internal cost detail for testing and reconciliation. Not shown to non-admin users."
+              action={
+                <Button type="button" variant="secondary" onClick={() => void loadAdminMetrics()} disabled={adminMetricsLoading}>
+                  {adminMetricsLoading ? 'Refreshing...' : 'Refresh'}
+                </Button>
+              }
+            />
+            {adminMetricsError ? (
+              <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
+                {adminMetricsError}
+              </div>
+            ) : null}
+            {showAdminLocalOnlyWarning ? (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-100">
+                {LOCAL_ONLY_BILLING_WARNING}
+              </div>
+            ) : null}
+            <div className="mt-4">
+              <InternalCostPanel
+                title="Internal cost transparency"
+                subtitle="Visible to admin and owner roles only."
+                sections={adminCostSections}
+                isPrivileged
+              />
+            </div>
           </Card>
 
           <Card>
