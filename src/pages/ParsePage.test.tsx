@@ -465,8 +465,8 @@ describe('ParsePage', () => {
     expect(screen.getByText('One candidate found')).toBeInTheDocument();
     expect(screen.getAllByText('Internal diagnostics').length).toBeGreaterThan(0);
     expect(screen.getByText(/wrapper_text_single_candidate/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/Approval unavailable/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText('House number conflict').length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/House number conflict/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/manual check before it can be approved/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText('789 Legacy Ln').length).toBeGreaterThan(0);
   });
 
@@ -509,9 +509,9 @@ describe('ParsePage', () => {
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await user.click(screen.getByRole('button', { name: /^Needs Review \(/i }));
-    expect(await screen.findByText(/Route Alias \/ Route Mismatch:/)).toBeInTheDocument();
+    expect(await screen.findByText(/3 rows need a quick check/i)).toBeInTheDocument();
     expect(screen.getByText(/Grouped by issue so repeated copies do not inflate workload./)).toBeInTheDocument();
-    expect(screen.getByText(/Route Alias \/ Route Mismatch:/)).toBeInTheDocument();
+    expect(screen.getByText(/1 is street name didn't match cleanly/i)).toBeInTheDocument();
 
   });
 
@@ -698,12 +698,12 @@ describe('ParsePage', () => {
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await user.click(screen.getByRole('button', { name: /^Needs Review \(/i }));
-    expect(await screen.findByText(/Approval unavailable/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/manual check before it can be approved/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Multiple in-scope candidates remain/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Approve matched' })).not.toBeInTheDocument();
 
     await user.click(screen.getAllByRole('button', { name: /^Out of Scope/i })[0]);
-    expect(await screen.findByText(/Approval requires verified address/i)).toBeInTheDocument();
+    expect((await screen.findAllByText(/Approval requires verified address/i)).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Approve matched' })).not.toBeInTheDocument();
   });
 
@@ -945,15 +945,80 @@ describe('ParsePage', () => {
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
     await user.click(await screen.findByRole('button', { name: /Needs Review \(1 issues · 1 rows\)/i }));
 
-    expect(screen.getByText('Approval unavailable')).toBeInTheDocument();
+    expect(screen.getAllByText(/manual check before it can be approved/i).length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: 'Review' }));
 
-    expect(await screen.findByText(/Approval unavailable\./i)).toBeInTheDocument();
+    expect(screen.getAllByText(/manual check before it can be approved/i).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Approve & Next' })).toBeDisabled();
     expect(approveMatchedJobRow).not.toHaveBeenCalled();
   });
 
 
+
+
+  it('renders plain-English needs review breakdown and humanized blocker copy with diagnostics preserved', async () => {
+    const user = userEvent.setup();
+    const summary = {
+      rows_received: 8,
+      valid_total: 0,
+      valid_unique: 0,
+      needs_review: 8,
+      skipped: 0,
+      duplicates: 0,
+      out_of_scope: 0,
+      matched: 0,
+      attention_total: 8,
+    };
+    const countyRows = Array.from({ length: 7 }, (_, idx) => ({
+      source_row_id: `county-${idx + 1}`,
+      source_row_index: idx + 1,
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      detected_address: `${idx + 1} County Ln`,
+      reason_code: 'missing_county_from_result',
+      manual_actions: { blocker: 'missing_county_from_result' },
+      candidate_count_in_scope: 1,
+      place_id: 'p1',
+    }));
+    const routeRow = {
+      source_row_id: 'route-1',
+      source_row_index: 8,
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      detected_address: '8 Route St',
+      reason_code: 'route_alias',
+      manual_actions: { blocker: 'route_mismatch' },
+      candidate_count_in_scope: 1,
+      place_id: 'p2',
+    };
+    const rows = [...countyRows, routeRow];
+    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+    await user.click(await screen.findByRole('button', { name: /Needs Review \(8 issues · 8 rows\)/i }));
+
+    expect(screen.getByText('8 rows need a quick check')).toBeInTheDocument();
+    expect(screen.getByText("7 are county couldn't be confirmed")).toBeInTheDocument();
+    expect(screen.getByText("1 is street name didn't match cleanly")).toBeInTheDocument();
+    expect(screen.queryByText('Route Alias / Route Mismatch')).not.toBeInTheDocument();
+    expect(screen.queryByText(/Street Number Not Verified/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/House Number Mismatch/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Low Precision: 0/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Other$/i)).not.toBeInTheDocument();
+
+    expect(screen.getAllByText('County not confirmed').length).toBeGreaterThan(0);
+    expect(screen.getAllByText("We couldn't confirm a county for this address. Edit the address or override to valid if you're sure.").length).toBeGreaterThan(0);
+
+    expect(screen.queryByText('{}')).not.toBeInTheDocument();
+
+    await user.click(screen.getAllByRole('button', { name: 'Review' })[0]);
+    await user.click(screen.getAllByText('Internal diagnostics')[0]);
+    expect(await screen.findByText('Reason code:')).toBeInTheDocument();
+    expect(screen.getByText('missing_county_from_result')).toBeInTheDocument();
+  });
 
   it('toggles locality picker visibility based on explicit scope mode', async () => {
     const user = userEvent.setup();

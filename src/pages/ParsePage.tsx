@@ -79,6 +79,7 @@ import { deriveDisplayedParseSummary, deriveDisplayedRowsReceived, normalizeJobS
 import { writeLocalParsePersistenceState } from '../lib/persistenceStatus';
 import type { ExportCatalogItem } from '../types/exports';
 import { publishJobUpdate } from '../lib/liveUpdates';
+import { humanizeBlocker, blockerLabel, blockerSentence } from '../lib/blockerCopy';
 
 const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Verifying', 'AI fixing', 'Finalizing'];
 
@@ -2093,8 +2094,15 @@ How to fix: ${fixHint}` : ''}`;
     if (!canApprove) {
       return (
         <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-left text-[11px] text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-          <div className="font-semibold text-slate-600 dark:text-slate-200">Approval unavailable</div>
-          <div className="mt-0.5">{capabilities.blocker ?? 'Manual approval is not safe for this review case.'}</div>
+          {(() => {
+            const { label, sentence } = humanizeBlocker(capabilities.blocker);
+            return (
+              <>
+                <div className="font-semibold text-slate-600 dark:text-slate-200">{label}</div>
+                <div className="mt-0.5">{sentence}</div>
+              </>
+            );
+          })()}
         </div>
       );
     }
@@ -3244,7 +3252,7 @@ How to fix: ${fixHint}` : ''}`;
       ? capabilities.canApproveWithScopeOverride
       : capabilities.canApproveMatched;
     if (!canApprove) {
-      showToast({ title: capabilities.blocker ?? 'Approval unavailable for this row.', variant: 'error' });
+      showToast({ title: blockerSentence(capabilities.blocker) || 'Approval unavailable for this row.', variant: 'error' });
       return;
     }
 
@@ -3309,7 +3317,7 @@ How to fix: ${fixHint}` : ''}`;
     }
     const capabilities = getApprovalCapabilities(row);
     if (!capabilities.canForceOverride) {
-      showToast({ title: capabilities.blocker ?? 'Override unavailable for this row.', variant: 'error' });
+      showToast({ title: blockerSentence(capabilities.blocker) || 'Override unavailable for this row.', variant: 'error' });
       return false;
     }
     const confirmed = window.confirm(
@@ -4574,16 +4582,32 @@ How to fix: ${fixHint}` : ''}`;
                 ) : null}
                 {activeTab === 'needs_review' ? (
                   <>
-                  <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold">Route Alias / Route Mismatch: {reviewBreakdown.route_alias}</span>
-                      <span>Street Number Not Verified: {reviewBreakdown.missing_street_number}</span>
-                      <span>House Number Mismatch: {reviewBreakdown.house_number}</span>
-                      <span>County Rescue Needed: {reviewBreakdown.county_rescue}</span>
-                      <span>Low Precision: {reviewBreakdown.low_precision}</span>
-                      <span>Other: {reviewBreakdown.other}</span>
-                    </div>
-                  </div>
+                  {(() => {
+                    const totalRows = (computedParseSummary?.needs_review ?? 0);
+                    const entries: Array<{ count: number; label: string }> = [
+                      { count: reviewBreakdown.county_rescue, label: "county couldn't be confirmed" },
+                      { count: reviewBreakdown.missing_street_number, label: 'missing a house number' },
+                      { count: reviewBreakdown.house_number, label: "house number didn't match" },
+                      { count: reviewBreakdown.route_alias, label: "street name didn't match cleanly" },
+                      { count: reviewBreakdown.low_precision, label: 'match was approximate' },
+                      { count: reviewBreakdown.other, label: 'other review issues' },
+                    ].filter((entry) => entry.count > 0);
+                    if (entries.length === 0) return null;
+                    return (
+                      <div className="mb-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200">
+                        <p className="font-semibold text-slate-800 dark:text-slate-100">
+                          {totalRows} {totalRows === 1 ? 'row needs' : 'rows need'} a quick check
+                        </p>
+                        <ul className="mt-1 list-disc space-y-0.5 pl-4 text-slate-600 dark:text-slate-300">
+                          {entries.map((entry) => (
+                            <li key={entry.label}>
+                              {entry.count} {entry.count === 1 ? 'is' : 'are'} {entry.label}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })()}
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                     <p className="text-xs text-slate-500 dark:text-slate-400">Grouped by issue so repeated copies do not inflate workload.</p>
                     <select
@@ -4671,7 +4695,7 @@ How to fix: ${fixHint}` : ''}`;
                                         className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                                         disabled={!groupCapabilities.canApproveMatched}
                                         checked={groupSelected}
-                                        title={groupCapabilities.canApproveMatched ? 'Select for bulk approve' : groupCapabilities.blocker ?? 'Approval unavailable'}
+                                        title={groupCapabilities.canApproveMatched ? 'Select for bulk approve' : blockerLabel(groupCapabilities.blocker) || 'Approval unavailable'}
                                         onChange={(event) => {
                                           setSelectedNeedsReviewRowIds((prev) => {
                                             const next = new Set(prev);
@@ -4937,7 +4961,7 @@ How to fix: ${fixHint}` : ''}`;
                                         className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
                                         disabled={!groupCapabilities.canApproveWithScopeOverride}
                                         checked={group.memberRowIds.every((rowId) => selectedOutOfScopeRowIds.has(rowId))}
-                                        title={groupCapabilities.canApproveWithScopeOverride ? 'Select for bulk approve' : groupCapabilities.blocker ?? 'Approval unavailable'}
+                                        title={groupCapabilities.canApproveWithScopeOverride ? 'Select for bulk approve' : blockerLabel(groupCapabilities.blocker) || 'Approval unavailable'}
                                         onChange={(event) => {
                                           setSelectedOutOfScopeRowIds((prev) => {
                                             const next = new Set(prev);
@@ -5284,7 +5308,7 @@ How to fix: ${fixHint}` : ''}`;
                 {!canReviewApprove && !canReviewForceOverride && reviewApprovalBlocker ? (
                   <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
                     <span className="font-semibold text-slate-700 dark:text-slate-200">Approval unavailable.</span>{' '}
-                    {reviewApprovalBlocker}
+                    {blockerSentence(reviewApprovalCapabilities?.blocker)}
                   </div>
                 ) : null}
                 {canReviewForceOverride ? (
