@@ -222,6 +222,28 @@ describe('parseUtils filters', () => {
     );
   });
 
+
+  it('includes reason code in resolver details only when present', () => {
+    const withReason = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      detected_address: '123 Main St',
+      normalized_compare_input: '123 MAIN ST',
+      reason_code: 'missing_county_from_result',
+    });
+    const withoutReason = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      detected_address: '123 Main St',
+      normalized_compare_input: '123 MAIN ST',
+      reason_code: '   ',
+    });
+
+    expect(getResolverDetails(withReason)).toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: 'Reason code', value: 'missing_county_from_result' })]),
+    );
+    expect(getResolverDetails(withoutReason)).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ label: 'Reason code' })]),
+    );
+  });
   it('keeps legacy rows backwards-compatible without resolver metadata', () => {
     const row = buildRow({
       status: 'UNMATCHED_NEEDS_REVIEW',
@@ -230,7 +252,7 @@ describe('parseUtils filters', () => {
     });
 
     expect(getReviewExplanation(row)).toBe('Street details need confirmation');
-    expect(getResolverDetails(row)).toEqual([{ label: 'Original', value: '789 Oak Ave' }]);
+    expect(getResolverDetails(row)).toEqual(expect.arrayContaining([{ label: 'Original', value: '789 Oak Ave' }, { label: 'Reason code', value: 'ROUTE_ALIAS' }]));
     expect(getManualApprovalBlocker(row)).toBe('No street-level candidate was resolved');
   });
 

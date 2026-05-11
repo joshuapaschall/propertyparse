@@ -719,6 +719,8 @@ export const getResolverDetails = (row: RowResult) => {
   const compareInput = getCompareInputDisplay(row);
   if (compareInput.original) details.push({ label: 'Original', value: compareInput.original });
   if (compareInput.showNormalized) details.push({ label: 'Compared as', value: compareInput.normalized });
+  const reason = asTrimmedString(row.reason_code);
+  if (reason) details.push({ label: 'Reason code', value: reason });
   if (asTrimmedString(row.resolver_strategy)) details.push({ label: 'Resolver', value: asTrimmedString(row.resolver_strategy) });
   if (asTrimmedString(row.decision_tier)) details.push({ label: 'Decision tier', value: asTrimmedString(row.decision_tier) });
   if (getCandidateCount(row) !== null) details.push({ label: 'In-scope candidates', value: String(getCandidateCount(row)) });
