@@ -1,0 +1,127 @@
+/**
+ * Tests for stitchImagesIntoPdf.
+ *
+ * Uses real pdf-lib (which works in jsdom). Minimal valid 1×1 JPEG /
+ * PNG byte fixtures live at the top of the file so the tests don't
+ * depend on any external image asset.
+ */
+import { describe, expect, it } from 'vitest';
+import { PDFDocument } from 'pdf-lib';
+import { stitchImagesIntoPdf } from './pdfStitcher';
+
+// jsdom v24 does not implement Blob.prototype.arrayBuffer. Real browsers do.
+// We're not allowed to modify src/setupTests.ts (spec rule), so the
+// polyfill lives at module-load time inside each test file that exercises
+// the real stitcher path. Uses FileReader, which jsdom does ship.
+if (typeof Blob.prototype.arrayBuffer !== 'function') {
+  (Blob.prototype as unknown as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer =
+    function arrayBuffer(this: Blob): Promise<ArrayBuffer> {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as ArrayBuffer);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsArrayBuffer(this);
+      });
+    };
+}
+
+// Minimal valid 1×1 white JPEG (134 bytes) — courtesy of the canonical
+// "smallest valid JPEG" reference. Confirmed parseable by pdf-lib's
+// embedJpg in jsdom.
+const MINIMAL_JPEG = new Uint8Array([
+  0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01,
+  0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xff, 0xdb, 0x00, 0x43,
+  0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09,
+  0x09, 0x08, 0x0a, 0x0c, 0x14, 0x0d, 0x0c, 0x0b, 0x0b, 0x0c, 0x19, 0x12,
+  0x13, 0x0f, 0x14, 0x1d, 0x1a, 0x1f, 0x1e, 0x1d, 0x1a, 0x1c, 0x1c, 0x20,
+  0x24, 0x2e, 0x27, 0x20, 0x22, 0x2c, 0x23, 0x1c, 0x1c, 0x28, 0x37, 0x29,
+  0x2c, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1f, 0x27, 0x39, 0x3d, 0x38, 0x32,
+  0x3c, 0x2e, 0x33, 0x34, 0x32, 0xff, 0xc0, 0x00, 0x0b, 0x08, 0x00, 0x01,
+  0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xff, 0xc4, 0x00, 0x1f, 0x00, 0x00,
+  0x01, 0x05, 0x01, 0x01, 0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00,
+  0x00, 0x00, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+  0x09, 0x0a, 0x0b, 0xff, 0xc4, 0x00, 0xb5, 0x10, 0x00, 0x02, 0x01, 0x03,
+  0x03, 0x02, 0x04, 0x03, 0x05, 0x05, 0x04, 0x04, 0x00, 0x00, 0x01, 0x7d,
+  0x01, 0x02, 0x03, 0x00, 0x04, 0x11, 0x05, 0x12, 0x21, 0x31, 0x41, 0x06,
+  0x13, 0x51, 0x61, 0x07, 0x22, 0x71, 0x14, 0x32, 0x81, 0x91, 0xa1, 0x08,
+  0x23, 0x42, 0xb1, 0xc1, 0x15, 0x52, 0xd1, 0xf0, 0x24, 0x33, 0x62, 0x72,
+  0x82, 0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0xfb,
+  0xd0, 0xff, 0xd9,
+]);
+
+// Minimal valid 1×1 transparent PNG (67 bytes).
+const MINIMAL_PNG = new Uint8Array([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+  0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
+  0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+]);
+
+const makeJpegInput = (filename: string) => ({
+  blob: new Blob([MINIMAL_JPEG], { type: 'image/jpeg' }),
+  filename,
+});
+
+const makePngInput = (filename: string) => ({
+  blob: new Blob([MINIMAL_PNG], { type: 'image/png' }),
+  filename,
+});
+
+describe('stitchImagesIntoPdf', () => {
+  it('stitches a single JPEG into a one-page PDF', async () => {
+    const result = await stitchImagesIntoPdf([makeJpegInput('foo.jpg')]);
+
+    expect(result.pdfBlob.type).toBe('application/pdf');
+    expect(result.bytes).toBe(result.pdfBlob.size);
+    expect(result.pageManifest).toEqual([
+      { pageIndex: 0, sourceFilename: 'foo.jpg' },
+    ]);
+
+    const reopened = await PDFDocument.load(await result.pdfBlob.arrayBuffer());
+    expect(reopened.getPageCount()).toBe(1);
+  });
+
+  it('stitches mixed PNG and JPEG into a 3-page PDF in input order', async () => {
+    const inputs = [
+      makeJpegInput('a.jpg'),
+      makePngInput('b.png'),
+      makeJpegInput('c.jpg'),
+    ];
+    const result = await stitchImagesIntoPdf(inputs);
+
+    expect(result.pageManifest).toEqual([
+      { pageIndex: 0, sourceFilename: 'a.jpg' },
+      { pageIndex: 1, sourceFilename: 'b.png' },
+      { pageIndex: 2, sourceFilename: 'c.jpg' },
+    ]);
+
+    const reopened = await PDFDocument.load(await result.pdfBlob.arrayBuffer());
+    expect(reopened.getPageCount()).toBe(3);
+  });
+
+  it('throws when given an empty image list', async () => {
+    await expect(stitchImagesIntoPdf([])).rejects.toThrow(/at least one image required/);
+  });
+
+  it('throws on unsupported MIME types and includes the filename in the error', async () => {
+    const input = {
+      blob: new Blob([new Uint8Array(64)], { type: 'image/webp' }),
+      filename: 'bad.webp',
+    };
+    await expect(stitchImagesIntoPdf([input])).rejects.toThrow(/bad\.webp/);
+    await expect(stitchImagesIntoPdf([input])).rejects.toThrow(/image\/webp/);
+  });
+
+  it('page count matches input count for a longer batch', async () => {
+    const inputs = Array.from({ length: 5 }, (_unused, i) =>
+      makeJpegInput(`page-${i}.jpg`),
+    );
+    const result = await stitchImagesIntoPdf(inputs);
+
+    const reopened = await PDFDocument.load(await result.pdfBlob.arrayBuffer());
+    expect(reopened.getPageCount()).toBe(inputs.length);
+    expect(result.pageManifest).toHaveLength(inputs.length);
+  });
+});

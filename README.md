@@ -127,3 +127,12 @@ This project is private and proprietary. All rights reserved.
 ## 🤝 Support
 
 For support, please contact [Your Contact Information].
+
+## Recent changes
+
+### Phase B1 — image batch utilities (foundation only)
+
+- New utilities in `src/lib/`: `imageCompressor.ts` (canvas → JPEG with maxDimension + quality), `pdfStitcher.ts` (pdf-lib-based N-image → PDF + page manifest), `pdfChunker.ts` (greedy probe-and-roll-back packer that splits N images into M PDFs ≤ 20 MB each).
+- Added `pdf-lib@^1.17.1` dependency.
+- 19 new test cases across 3 co-located test files; no existing files modified.
+- No UI changes — Phase B2 wires these into the batch upload flow.
