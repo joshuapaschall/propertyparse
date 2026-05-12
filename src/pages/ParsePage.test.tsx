@@ -32,6 +32,13 @@ vi.mock('../components/FileUploadCard', () => ({
     <button type="button" onClick={() => onChange(selectedFileFactory())}>select-file</button>
   ),
 }));
+vi.mock('../components/BatchUploadCard', () => ({
+  default: ({ files }: { files: File[] }) => (
+    <div data-testid="batch-upload-card-mock">batch-card: {files.length} file(s)</div>
+  ),
+}));
+vi.mock('../lib/imageCompressor', () => ({ compressImage: vi.fn() }));
+vi.mock('../lib/pdfChunker', () => ({ chunkImagesIntoPdfs: vi.fn() }));
 vi.mock('../components/AsyncLocationSelect', () => ({
   default: ({
     label,
@@ -114,6 +121,7 @@ vi.mock('../lib/api', () => ({
   getAllJobRows: (...args: unknown[]) => getAllJobRows(...args),
   getJobResults: (...args: unknown[]) => getJobResults(...args),
   getJobWithStatus: (...args: unknown[]) => getJobWithStatus(...args),
+  createBatch: vi.fn(),
   parseFile: (...args: unknown[]) => parseFile(...args),
   parseFileAsync: (...args: unknown[]) => parseFileAsync(...args),
   approveMatchedJobRow: (...args: unknown[]) => approveMatchedJobRow(...args),
@@ -1195,5 +1203,42 @@ describe('ParsePage', () => {
 
   it.skip('aborts handleParse on unmount (B72) TODO(cluster-s-a): stabilize act timing for delayed upload resolution', async () => {});
   it.skip('hydration setX calls are skipped after unmount (B73) TODO(cluster-s-a): stabilize delayed job detail hydration assertions', async () => {});
+
+  // ---- Phase B2a: upload mode toggle wiring ----
+
+  it('defaults to single mode: single tab is active, FileUploadCard mock renders, BatchUploadCard does not', () => {
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+
+    const singleTab = screen.getByTestId('upload-mode-single');
+    const batchTab = screen.getByTestId('upload-mode-batch');
+    expect(singleTab.getAttribute('aria-selected')).toBe('true');
+    expect(batchTab.getAttribute('aria-selected')).toBe('false');
+
+    expect(screen.getByText('select-file')).toBeInTheDocument();
+    expect(screen.queryByTestId('batch-upload-card-mock')).not.toBeInTheDocument();
+  });
+
+  it('clicking the batch tab swaps which upload card renders', async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+
+    await user.click(screen.getByTestId('upload-mode-batch'));
+
+    expect(screen.getByTestId('upload-mode-batch').getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('upload-mode-single').getAttribute('aria-selected')).toBe('false');
+    expect(screen.getByTestId('batch-upload-card-mock')).toBeInTheDocument();
+    expect(screen.queryByText('select-file')).not.toBeInTheDocument();
+  });
+
+  it('mode toggle tabs render with disabled state wired to busy/in-flight conditions', () => {
+    // Without a file/scope, busy is false at first render — tabs are
+    // enabled. This pins the wiring so a future regression that flips
+    // disabled-by-default would be caught.
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    const singleTab = screen.getByTestId('upload-mode-single') as HTMLButtonElement;
+    const batchTab = screen.getByTestId('upload-mode-batch') as HTMLButtonElement;
+    expect(singleTab.disabled).toBe(false);
+    expect(batchTab.disabled).toBe(false);
+  });
 
 });

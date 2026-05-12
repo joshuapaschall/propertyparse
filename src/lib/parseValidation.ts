@@ -33,3 +33,17 @@ export function canStartParse(
 ): boolean {
   return Boolean(file && hasValidLocation(state, counties, scopeMode, localities));
 }
+
+/**
+ * Phase B2a — gate for the batch upload flow. Requires ≥1 selected image
+ * and a valid scope. Otherwise mirrors canStartParse exactly.
+ */
+export function canStartBatchParse(
+  files: File[],
+  state: string,
+  counties: string[],
+  scopeMode: ScopeMode,
+  localities: string[],
+): boolean {
+  return files.length > 0 && hasValidLocation(state, counties, scopeMode, localities);
+}

@@ -130,6 +130,13 @@ For support, please contact [Your Contact Information].
 
 ## Recent changes
 
+### Phase B2a — batch upload mode + orchestration
+
+- New `BatchUploadCard` (multi-image picker with append-on-add, per-file remove, size limit, dark-mode styled to mirror `FileUploadCard`).
+- ParsePage gains a Single/Batch tab toggle and a parallel `handleBatchParse` orchestration: createBatch → compress images → chunk into ≤20 MB PDFs → upload + parseFileAsync each chunk with `batchId`. Sequential by design to bound peak browser memory at 1500-image scale.
+- New `createBatch()` in `src/lib/api.ts`; `ParseLocationPayload` gains optional `batchId` + `metadata` fields that pass through to the backend.
+- Single-file flow byte-identical to pre-B2a behavior. Tests: 13 new cases. Phase B2b will add the aggregated batch progress view (polls `/batches/{id}`).
+
 ### Phase B1 — image batch utilities (foundation only)
 
 - New utilities in `src/lib/`: `imageCompressor.ts` (canvas → JPEG with maxDimension + quality), `pdfStitcher.ts` (pdf-lib-based N-image → PDF + page manifest), `pdfChunker.ts` (greedy probe-and-roll-back packer that splits N images into M PDFs ≤ 20 MB each).

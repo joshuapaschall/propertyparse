@@ -527,4 +527,57 @@ describe('parse payload APIs', () => {
       }),
     );
   });
+
+  it('createBatch posts the payload to /batches with auth headers', async () => {
+    const fakeBatch = {
+      id: 'batch-abc',
+      org_id: 'org-123',
+      user_id: 'user-123',
+      name: 'Friday screenshots',
+      status: 'PENDING',
+      state: 'Georgia',
+      county: 'DeKalb County',
+      counties: ['DeKalb County'],
+      city: null,
+      localities: [],
+      scope_mode: 'county_wide',
+      campaign_name: null,
+      metadata: {},
+      created_at: '2026-05-12T00:00:00Z',
+      updated_at: '2026-05-12T00:00:00Z',
+    };
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(fakeBatch), {
+        status: 201,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const { createBatch } = await import('./api');
+    const result = await createBatch({
+      name: 'Friday screenshots',
+      state: 'Georgia',
+      counties: ['DeKalb County'],
+      scope_mode: 'county_wide',
+    });
+
+    expect(result).toEqual(fakeBatch);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.example.com/batches');
+    expect(init.method).toBe('POST');
+    expect(init.body).toBe(
+      JSON.stringify({
+        name: 'Friday screenshots',
+        state: 'Georgia',
+        counties: ['DeKalb County'],
+        scope_mode: 'county_wide',
+      }),
+    );
+    // Auth headers from getAuthHeaders() should be present.
+    const headers = init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer token-123');
+    expect(headers['X-Org-Id']).toBe('org-123');
+  });
 });

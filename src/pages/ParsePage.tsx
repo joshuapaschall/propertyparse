@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import AccountedRowsIndicator from '../components/AccountedRowsIndicator';
 import FileUploadCard from '../components/FileUploadCard';
+import BatchUploadCard from '../components/BatchUploadCard';
 import AsyncLocationSelect from '../components/AsyncLocationSelect';
 import AsyncLocationMultiSelect from '../components/AsyncLocationMultiSelect';
 import ProcessingReportModal, {
@@ -40,7 +41,9 @@ import {
   hasHydratedResultsPayload,
   isTemporaryResultsUnavailableError,
 } from '../lib/parseUtils';
-import { canStartParse, hasValidLocation } from '../lib/parseValidation';
+import { canStartBatchParse, canStartParse, hasValidLocation } from '../lib/parseValidation';
+import { compressImage } from '../lib/imageCompressor';
+import { chunkImagesIntoPdfs } from '../lib/pdfChunker';
 import { buildScopeSummary, stripCountySuffix } from '../lib/scopeSummary';
 import { groupRows, type GroupedRow } from '../lib/groupRows';
 import {
@@ -53,6 +56,7 @@ import {
   getJobWithStatus,
   JobExportType,
   JobRecord,
+  createBatch,
   parseFile,
   parseFileAsync,
   approveMatchedJobRow,
@@ -820,6 +824,18 @@ export default function ParsePage() {
   const [campaignName, setCampaignName] = useState('');
   const { showToast } = useToast();
   const [file, setFile] = useState<File | null>(null);
+  // Phase B2a: parallel state for the batch upload flow. `single` is the
+  // default and matches the historical behavior byte-for-byte.
+  const [uploadMode, setUploadMode] = useState<'single' | 'batch'>('single');
+  const [batchFiles, setBatchFiles] = useState<File[]>([]);
+  const [batchProgress, setBatchProgress] = useState<{
+    phase: 'idle' | 'creating-batch' | 'compressing' | 'chunking' | 'uploading' | 'submitting' | 'done' | 'error';
+    current: number;
+    total: number;
+    message: string;
+    batchId: string | null;
+    jobIds: string[];
+  } | null>(null);
   const [fileId, setFileId] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [parseTimestamp, setParseTimestamp] = useState<string | null>(null);
@@ -925,7 +941,11 @@ export default function ParsePage() {
   const hasLocation = hasValidLocation(stateValue, selectedCounties, scopeMode, selectedLocalities);
   const canRerunSameUpload = Boolean(fileId) && hasLocation && !busy && !rehydrating;
   const showLocationValidation = Boolean(stateValue) && !hasLocation;
-  const canParse = canStartParse(file, stateValue, selectedCounties, scopeMode, selectedLocalities) && !busy;
+  // Phase B2a: gate is mode-aware. Single uses canStartParse (existing
+  // behavior); batch uses canStartBatchParse (≥1 image + valid scope).
+  const canParseSingle = canStartParse(file, stateValue, selectedCounties, scopeMode, selectedLocalities);
+  const canParseBatch = canStartBatchParse(batchFiles, stateValue, selectedCounties, scopeMode, selectedLocalities);
+  const canParse = (uploadMode === 'single' ? canParseSingle : canParseBatch) && !busy;
   const parseCtaLabel = useMemo(() => {
     if (busy) return 'Processing…';
     if (!hasFileSelected) return 'Select a file to process';
@@ -2950,6 +2970,139 @@ How to fix: ${fixHint}` : ''}`;
     }
   };
 
+  // Phase B2a: batch upload orchestration.
+  //
+  //   1. createBatch         — POST /batches, get parse_batches.id
+  //   2. compressImage (xN)  — sequential to bound peak memory
+  //   3. chunkImagesIntoPdfs — split N images into M PDFs <= 20 MB each
+  //   4. for each chunk:
+  //        a. uploadFile      — POST /upload/file (multipart)
+  //        b. parseFileAsync  — POST /parse?async_mode=true with batchId
+  //
+  // Output: 1 parse_batch + M parse_jobs, all linked via batchId.
+  // Phase B2b will replace the inline progress panel with a polled
+  // aggregated view via GET /batches/{id}.
+  const handleBatchParse = async () => {
+    if (batchFiles.length === 0) return;
+    resetForFreshParse();
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const { signal } = controller;
+
+    setBusy(true);
+    setError(null);
+
+    try {
+      setBatchProgress({
+        phase: 'creating-batch',
+        current: 0,
+        total: 0,
+        message: 'Creating batch…',
+        batchId: null,
+        jobIds: [],
+      });
+      const trimmedCampaignName = campaignName.trim();
+      const batch = await createBatch({
+        name: trimmedCampaignName || `Batch of ${batchFiles.length}`,
+        state: stateValue,
+        counties: selectedCounties,
+        localities: selectedLocalities,
+        scope_mode: scopeMode,
+        campaign_name: trimmedCampaignName || undefined,
+      });
+      if (!mountedRef.current || signal.aborted) return;
+
+      // Compression: sequential. At 1500 images, Promise.all here would
+      // exhaust browser memory. Phase B3 may revisit with a concurrency
+      // cap; B2a stays sequential for safety.
+      const compressed: { blob: Blob; filename: string }[] = [];
+      for (let i = 0; i < batchFiles.length; i += 1) {
+        if (!mountedRef.current || signal.aborted) return;
+        setBatchProgress({
+          phase: 'compressing',
+          current: i + 1,
+          total: batchFiles.length,
+          message: `Compressing image ${i + 1} of ${batchFiles.length}…`,
+          batchId: batch.id,
+          jobIds: [],
+        });
+        const result = await compressImage(batchFiles[i]);
+        compressed.push({ blob: result.blob, filename: batchFiles[i].name });
+      }
+
+      setBatchProgress({
+        phase: 'chunking',
+        current: 0,
+        total: 0,
+        message: `Stitching ${compressed.length} images into PDFs…`,
+        batchId: batch.id,
+        jobIds: [],
+      });
+      const chunkResult = await chunkImagesIntoPdfs(compressed);
+      if (!mountedRef.current || signal.aborted) return;
+
+      const jobIds: string[] = [];
+      for (let i = 0; i < chunkResult.chunks.length; i += 1) {
+        if (!mountedRef.current || signal.aborted) return;
+        const chunk = chunkResult.chunks[i];
+        const chunkFile = new File(
+          [chunk.pdfBlob],
+          `batch-${batch.id.slice(0, 8)}-part-${i + 1}-of-${chunkResult.chunks.length}.pdf`,
+          { type: 'application/pdf' },
+        );
+        setBatchProgress({
+          phase: 'uploading',
+          current: i + 1,
+          total: chunkResult.chunks.length,
+          message: `Uploading PDF ${i + 1} of ${chunkResult.chunks.length}…`,
+          batchId: batch.id,
+          jobIds: jobIds.slice(),
+        });
+        const upload = await uploadFile(chunkFile, trimmedCampaignName || undefined, signal);
+        if (!mountedRef.current || signal.aborted) return;
+
+        setBatchProgress({
+          phase: 'submitting',
+          current: i + 1,
+          total: chunkResult.chunks.length,
+          message: `Submitting parse job ${i + 1} of ${chunkResult.chunks.length}…`,
+          batchId: batch.id,
+          jobIds: jobIds.slice(),
+        });
+        const newJobId = safeUuid();
+        await parseFileAsync(upload.fileId, {
+          ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
+          force_refresh: forceRefresh,
+          jobId: newJobId,
+          jobName: trimmedCampaignName || undefined,
+          batchId: batch.id,
+        });
+        jobIds.push(newJobId);
+      }
+
+      if (!mountedRef.current || signal.aborted) return;
+      setBatchProgress({
+        phase: 'done',
+        current: chunkResult.chunks.length,
+        total: chunkResult.chunks.length,
+        message: `Batch submitted: ${batchFiles.length} image${batchFiles.length === 1 ? '' : 's'} across ${chunkResult.chunks.length} parse job${chunkResult.chunks.length === 1 ? '' : 's'}. Track progress in the dashboard.`,
+        batchId: batch.id,
+        jobIds,
+      });
+      publishLiveUpdate('job-updated', batch.id);
+      publishLiveUpdate('metrics-updated', batch.id);
+      setBusy(false);
+    } catch (err) {
+      if ((err as { name?: string })?.name === 'AbortError') return;
+      if (!mountedRef.current || signal.aborted) return;
+      const message = (err as Error).message ?? 'Batch processing failed.';
+      setBatchProgress((prev) => (prev ? { ...prev, phase: 'error', message } : null));
+      setError(message);
+      setBusy(false);
+    }
+  };
+
   const handleEditSave = (updated: ParsedRow) => {
     setLegacyMatchedRows((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
     setLegacyUnmatchedRows((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
@@ -3893,13 +4046,86 @@ How to fix: ${fixHint}` : ''}`;
                   Add a file to start parsing addresses.
                 </p>
               </div>
-              <FileUploadCard
-  file={file}
-  onChange={setFile}
-  onReject={(rejection) => {
-    setError(rejection.message);
-  }}
-/>
+              {/* Phase B2a: mode toggle between single-file and batch-image flows.
+                  Disabled while a batch is mid-flight to prevent state corruption. */}
+              <div
+                className="flex gap-2 rounded-xl border border-slate-200 bg-slate-50 p-1 dark:border-slate-800 dark:bg-slate-900"
+                role="tablist"
+                aria-label="Upload mode"
+              >
+                <button
+                  type="button"
+                  onClick={() => setUploadMode('single')}
+                  disabled={
+                    busy ||
+                    batchProgress?.phase === 'uploading' ||
+                    batchProgress?.phase === 'submitting' ||
+                    batchProgress?.phase === 'compressing' ||
+                    batchProgress?.phase === 'chunking' ||
+                    batchProgress?.phase === 'creating-batch'
+                  }
+                  role="tab"
+                  aria-selected={uploadMode === 'single'}
+                  data-testid="upload-mode-single"
+                  className={[
+                    'flex-1 rounded-lg px-3 py-1.5 text-sm font-semibold transition',
+                    uploadMode === 'single'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-700 hover:bg-white dark:text-slate-200 dark:hover:bg-slate-800',
+                    'disabled:cursor-not-allowed disabled:opacity-60',
+                  ].join(' ')}
+                >
+                  Single file
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setUploadMode('batch')}
+                  disabled={
+                    busy ||
+                    batchProgress?.phase === 'uploading' ||
+                    batchProgress?.phase === 'submitting' ||
+                    batchProgress?.phase === 'compressing' ||
+                    batchProgress?.phase === 'chunking' ||
+                    batchProgress?.phase === 'creating-batch'
+                  }
+                  role="tab"
+                  aria-selected={uploadMode === 'batch'}
+                  data-testid="upload-mode-batch"
+                  className={[
+                    'flex-1 rounded-lg px-3 py-1.5 text-sm font-semibold transition',
+                    uploadMode === 'batch'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-700 hover:bg-white dark:text-slate-200 dark:hover:bg-slate-800',
+                    'disabled:cursor-not-allowed disabled:opacity-60',
+                  ].join(' ')}
+                >
+                  Batch upload
+                </button>
+              </div>
+              {uploadMode === 'single' ? (
+                <FileUploadCard
+                  file={file}
+                  onChange={setFile}
+                  onReject={(rejection) => {
+                    setError(rejection.message);
+                  }}
+                />
+              ) : (
+                <BatchUploadCard
+                  files={batchFiles}
+                  onChange={setBatchFiles}
+                  submitting={
+                    batchProgress?.phase === 'creating-batch' ||
+                    batchProgress?.phase === 'compressing' ||
+                    batchProgress?.phase === 'chunking' ||
+                    batchProgress?.phase === 'uploading' ||
+                    batchProgress?.phase === 'submitting'
+                  }
+                  onReject={(rejection) => {
+                    setError(rejection.message);
+                  }}
+                />
+              )}
             </div>
             <div className="flex flex-col gap-4">
               <div className="space-y-4">
@@ -4078,16 +4304,68 @@ How to fix: ${fixHint}` : ''}`;
                 <div className="flex flex-wrap justify-end gap-2">
                   <button
                     type="button"
-                    onClick={handleParse}
+                    onClick={uploadMode === 'batch' ? handleBatchParse : handleParse}
                     disabled={!canParse || busy || rehydrating}
                     className={`rounded-xl px-5 py-3 text-sm font-semibold transition ${
                       canParse && !busy && !rehydrating
                         ? 'bg-indigo-600 text-white hover:bg-indigo-700'
                         : 'bg-slate-200 text-slate-400 dark:bg-slate-800 dark:text-slate-500'
                     }`}
+                    data-testid="parse-cta"
                   >
-                    {parseCtaLabel}
+                    {uploadMode === 'batch'
+                      ? `Process batch (${batchFiles.length} file${batchFiles.length === 1 ? '' : 's'})`
+                      : parseCtaLabel}
                   </button>
+                  {batchProgress && uploadMode === 'batch' ? (
+                    <div
+                      className="w-full rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+                      data-testid="batch-progress-panel"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <h3 className="text-sm font-semibold">Batch progress</h3>
+                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            {batchProgress.message}
+                          </p>
+                          {batchProgress.batchId ? (
+                            <p className="mt-1 font-mono text-[0.65rem] text-slate-400 dark:text-slate-500">
+                              batch_id: {batchProgress.batchId}
+                            </p>
+                          ) : null}
+                        </div>
+                        {batchProgress.phase === 'done' || batchProgress.phase === 'error' ? (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setBatchProgress(null);
+                              setBatchFiles([]);
+                            }}
+                            className="rounded-lg border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-900"
+                            data-testid="batch-progress-clear"
+                          >
+                            Clear
+                          </button>
+                        ) : null}
+                      </div>
+                      {batchProgress.total > 0 ? (
+                        <div className="mt-3 h-2 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                          <div
+                            className={`h-full transition-all ${
+                              batchProgress.phase === 'error'
+                                ? 'bg-rose-500'
+                                : batchProgress.phase === 'done'
+                                  ? 'bg-emerald-500'
+                                  : 'bg-indigo-600'
+                            }`}
+                            style={{
+                              width: `${Math.min(100, (batchProgress.current / batchProgress.total) * 100)}%`,
+                            }}
+                          />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {hasPersistableResults ? (
                     <button
                       type="button"

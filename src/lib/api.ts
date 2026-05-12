@@ -434,6 +434,10 @@ export type ParseLocationPayload = {
   force_refresh?: boolean;
   jobId?: string;
   jobName?: string;
+  /** Phase B2a — links the parse_job to a parse_batch row created via POST /batches. */
+  batchId?: string;
+  /** Phase B2b will use this to embed the pageManifest in parse_jobs.metadata. */
+  metadata?: Record<string, unknown>;
 };
 
 export async function parseFile(
@@ -452,6 +456,42 @@ export async function parseFileAsync(
     { fileId, ...payload },
     { headers: getAuthHeaders() },
   );
+}
+
+// =====================================================================
+// Phase B2a — parse_batches client
+// =====================================================================
+
+export type BatchResponse = {
+  id: string;
+  org_id: string;
+  user_id: string | null;
+  name: string | null;
+  status: string;
+  state: string | null;
+  county: string | null;
+  counties: string[];
+  city: string | null;
+  localities: string[];
+  scope_mode: string | null;
+  campaign_name: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CreateBatchPayload = {
+  name?: string;
+  state: string;
+  counties: string[];
+  city?: string;
+  localities?: string[];
+  scope_mode?: 'county_wide' | 'locality_strict';
+  campaign_name?: string;
+};
+
+export async function createBatch(payload: CreateBatchPayload): Promise<BatchResponse> {
+  return postJson<BatchResponse>('/batches', payload, { headers: getAuthHeaders() });
 }
 
 export async function retryParseRow(payload: unknown) {
