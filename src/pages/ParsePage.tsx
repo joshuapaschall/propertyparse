@@ -3101,6 +3101,34 @@ How to fix: ${fixHint}` : ''}`;
       publishLiveUpdate('job-updated', batch.id);
       publishLiveUpdate('metrics-updated', batch.id);
       setBusy(false);
+
+      // Auto-load results for single-job batches (most common case:
+      // all images fit in one PDF chunk). Mirrors the async single-file
+      // path: set jobId, update URL, start polling for progress + results.
+      if (jobIds.length === 1) {
+        const singleJobId = jobIds[0];
+        setJobId(singleJobId);
+        updateJobQueryParam(singleJobId);
+        startPolling(singleJobId, {
+          onFinished: async () => {
+            try {
+              await hydrateSummaryFromJobDetail(singleJobId, null);
+              if (!mountedRef.current || signal.aborted) return;
+              publishLiveUpdate('job-updated', singleJobId);
+              publishLiveUpdate('metrics-updated', singleJobId);
+              setBusy(false);
+              await hydrateCompletedAsyncJob(singleJobId, null);
+              if (!mountedRef.current || signal.aborted) return;
+              publishLiveUpdate('job-updated', singleJobId);
+              publishLiveUpdate('metrics-updated', singleJobId);
+              void reconcileDurableJob(singleJobId);
+            } catch (hydrationError) {
+              if (!mountedRef.current || signal.aborted) return;
+              setBusy(false);
+            }
+          },
+        });
+      }
     } catch (err) {
       if ((err as { name?: string })?.name === 'AbortError') return;
       if (!mountedRef.current || signal.aborted) return;
@@ -4343,9 +4371,13 @@ How to fix: ${fixHint}` : ''}`;
                             </p>
                           )}
                           {batchProgress.phase === 'done' ? (
-                            <a href="/history" className="mt-1 inline-block text-xs text-indigo-600 underline hover:text-indigo-700 dark:text-indigo-400">
-                              View in History →
-                            </a>
+                            batchProgress.jobIds.length === 1 ? (
+                              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Results loading below…</p>
+                            ) : (
+                              <a href="/history" className="mt-1 inline-block text-xs text-indigo-600 underline hover:text-indigo-700 dark:text-indigo-400">
+                                View in History →
+                              </a>
+                            )
                           ) : null}
                         </div>
                         {batchProgress.phase === 'done' || batchProgress.phase === 'error' ? (
