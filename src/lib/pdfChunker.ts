@@ -1,22 +1,6 @@
 /**
- * Phase B1 — pure utility for splitting N images into M PDF chunks,
+ * Utility for splitting N images into M PDF chunks,
  * each ≤ a target size in bytes.
- *
- * Strategy: greedy packing with probe-and-roll-back. For each image:
- *   1. Add to pending list.
- *   2. Stitch a trial PDF.
- *   3. If trial > target AND pending has >1 image: drop the last
- *      image, finalize the previous (smaller) chunk, start a new
- *      chunk with the dropped image.
- *   4. If trial > target AND pending has only 1 image: keep it
- *      (single oversized images aren't dropped — we warn and ship).
- *   5. If pending hits maxPagesPerChunk: finalize.
- *
- * TODO (Phase B3): this re-stitches every probe step. For 1500
- * images that's ~1500 stitch operations. A size-estimation pass
- * (sum of blob.size + small constant for PDF overhead) would let
- * us pack without probing — at the cost of conservative slack.
- * Acceptable for B1; correctness > performance for now.
  */
 
 import { stitchImagesIntoPdf, type StitchInput, type StitchResult } from './pdfStitcher';
@@ -45,65 +29,49 @@ export async function chunkImagesIntoPdfs(
   const targetBytes = options.targetBytesPerChunk ?? DEFAULT_TARGET_BYTES;
   const maxPages = options.maxPagesPerChunk ?? DEFAULT_MAX_PAGES;
 
-  const chunks: StitchResult[] = [];
-  let pending: StitchInput[] = [];
-  let lastTrial: StitchResult | null = null;
+  // Estimate sizes from blob.size instead of stitching a trial PDF for every image.
+  const PDF_BASE_OVERHEAD = 8 * 1024;
+  const PDF_PAGE_OVERHEAD = 4 * 1024;
 
-  const finalizeChunk = async () => {
-    if (pending.length === 0) return;
-    // Re-use the most recent successful trial when possible; otherwise
-    // stitch one final time. (We stitch fresh when lastTrial is null,
-    // which only happens on the very first image where we haven't
-    // probed yet — but that path always has lastTrial set, so this
-    // is defensive.)
-    const finalized = lastTrial ?? (await stitchImagesIntoPdf(pending));
-    chunks.push(finalized);
-    pending = [];
-    lastTrial = null;
-  };
+  const chunkBoundaries: Array<[number, number]> = [];
+  let currentStart = 0;
+  let currentEstimate = PDF_BASE_OVERHEAD;
 
   for (let i = 0; i < images.length; i += 1) {
-    const image = images[i];
-    pending.push(image);
-    // Probe: stitch the current pending list to measure its real size.
-    const trial = await stitchImagesIntoPdf(pending);
+    const imageSize = images[i].blob.size;
+    const pageEstimate = imageSize + PDF_PAGE_OVERHEAD;
+    const pagesInChunk = i - currentStart + 1;
 
-    const overTargetSize = trial.bytes > targetBytes;
-    const atPageCap = pending.length >= maxPages;
+    const wouldExceed = currentEstimate + pageEstimate > targetBytes && pagesInChunk > 1;
+    const atPageCap = pagesInChunk > maxPages;
 
-    if (overTargetSize && pending.length > 1) {
-      // Roll back: drop the image we just added, finalize what fit,
-      // and start a fresh chunk with the dropped image.
-      pending.pop();
-      const reducedTrial = await stitchImagesIntoPdf(pending);
-      chunks.push(reducedTrial);
-      pending = [image];
-      lastTrial = await stitchImagesIntoPdf(pending);
-      continue;
-    }
-
-    if (overTargetSize && pending.length === 1) {
-      // Single image already over budget — emit it anyway, with a
-      // warning. We don't drop user data; the operator can see this
-      // in the console and split the source image manually if needed.
-      console.warn(
-        `chunkImagesIntoPdfs: single image "${image.filename}" stitched to ` +
-          `${trial.bytes} bytes, exceeds target ${targetBytes} bytes — emitting as own chunk`,
-      );
-      chunks.push(trial);
-      pending = [];
-      lastTrial = null;
-      continue;
-    }
-
-    lastTrial = trial;
-    if (atPageCap) {
-      await finalizeChunk();
+    if (wouldExceed || atPageCap) {
+      chunkBoundaries.push([currentStart, i - 1]);
+      currentStart = i;
+      currentEstimate = PDF_BASE_OVERHEAD + pageEstimate;
+    } else {
+      currentEstimate += pageEstimate;
     }
   }
 
-  // Flush whatever is left in pending into a final chunk.
-  await finalizeChunk();
+  if (currentStart < images.length) {
+    chunkBoundaries.push([currentStart, images.length - 1]);
+  }
+
+  const chunks: StitchResult[] = [];
+  for (const [start, end] of chunkBoundaries) {
+    const chunkImages = images.slice(start, end + 1);
+    const result = await stitchImagesIntoPdf(chunkImages);
+
+    if (result.bytes > targetBytes && chunkImages.length === 1) {
+      console.warn(
+        `chunkImagesIntoPdfs: single image "${chunkImages[0].filename}" stitched to ` +
+          `${result.bytes} bytes, exceeds target ${targetBytes} bytes — emitting as own chunk`,
+      );
+    }
+
+    chunks.push(result);
+  }
 
   const totalPages = chunks.reduce((sum, chunk) => sum + chunk.pageManifest.length, 0);
   return { chunks, totalPages };
