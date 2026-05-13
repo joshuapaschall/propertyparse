@@ -262,6 +262,11 @@ export default function HistoryPage() {
     return activeKey ? (activeKey.split(':')[1] as JobExportType) : null;
   };
 
+  const getBatchActiveDownloadType = (batchId: string) => {
+    const activeKey = Object.keys(downloading).find((key) => key.startsWith(`batch:${batchId}:`) && downloading[key]);
+    return activeKey ? (activeKey.split(':')[2] as JobExportType) : null;
+  };
+
   const handleDownload = async (jobId: string, type: JobExportType, label: string) => {
     const key = `${jobId}:${type}`;
     setDownloading((prev) => ({ ...prev, [key]: true }));
@@ -276,13 +281,13 @@ export default function HistoryPage() {
     }
   };
 
-  const handleBatchDownload = async (batchId: string) => {
-    const key = `batch:${batchId}`;
+  const handleBatchDownload = async (batchId: string, type: JobExportType, label: string) => {
+    const key = `batch:${batchId}:${type}`;
     setDownloading((prev) => ({ ...prev, [key]: true }));
     try {
-      const result = await downloadBatchExport(batchId, 'processing_report');
+      const result = await downloadBatchExport(batchId, type);
       triggerDownload(result.blob, result.filename);
-      showToast({ title: 'Batch export downloaded', variant: 'success' });
+      showToast({ title: `${label} downloaded`, variant: 'success' });
     } catch (err) {
       showToast({ title: (err as Error).message ?? 'Batch export failed.', variant: 'error' });
     } finally {
@@ -486,15 +491,14 @@ export default function HistoryPage() {
                             <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(entry.status)}>{entry.status}</Badge></td>
                             <td className="px-4 py-2.5 text-right">{formatHistoryRowCost(entry.rows.reduce((sum, row) => sum + (row.estimatedJobCost ?? row.spendUsd ?? 0), 0))}</td>
                             <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => void handleBatchDownload(entry.batchId)}
-                                disabled={downloading[`batch:${entry.batchId}`]}
-                              >
-                                {downloading[`batch:${entry.batchId}`] ? 'Exporting…' : 'Export'}
-                              </Button>
+                              <ExportPanel
+                                triggerLabel="Export"
+                                className="relative inline-block text-left"
+                                catalog={FALLBACK_EXPORT_CATALOG}
+                                onDownload={(type, label) => void handleBatchDownload(entry.batchId, type, label)}
+                                activeDownloadType={getBatchActiveDownloadType(entry.batchId)}
+                                excludeTypes={['original_file']}
+                              />
                             </td>
                             <td className="px-4 py-2.5 text-right" />
                           </tr>
