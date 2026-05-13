@@ -1201,8 +1201,6 @@ describe('ParsePage', () => {
     expect(getJobWithStatus).not.toHaveBeenCalled();
   });
 
-  it.skip('aborts handleParse on unmount (B72) TODO(cluster-s-a): stabilize act timing for delayed upload resolution', async () => {});
-  it.skip('hydration setX calls are skipped after unmount (B73) TODO(cluster-s-a): stabilize delayed job detail hydration assertions', async () => {});
 
   // ---- Phase B2a: upload mode toggle wiring ----
 

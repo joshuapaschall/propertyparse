@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import AppShell from '../components/AppShell';
 import Card, { SectionHeader } from '../components/ui/Card';
+import Badge from '../components/ui/Badge';
+import { getBadgeVariant } from '../components/ui/badgeVariant';
 import EmptyState from '../components/ui/EmptyState';
-import { getApiErrorInfo, getMetricsSummary, MetricsRange, MetricsSummary } from '../lib/api';
+import { BatchRollup, getApiErrorInfo, getBatches, getMetricsSummary, MetricsRange, MetricsSummary } from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
@@ -26,6 +28,9 @@ export default function DashboardPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [metrics, setMetrics] = useState<MetricsSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [batches, setBatches] = useState<BatchRollup[]>([]);
+  const [batchesLoading, setBatchesLoading] = useState(true);
+  const [batchesError, setBatchesError] = useState<string | null>(null);
   const [localParsePersistenceWarning, setLocalParsePersistenceWarning] = useState(false);
   const hasLoadedMetricsRef = useRef(false);
 
@@ -63,6 +68,30 @@ export default function DashboardPage() {
   useEffect(() => {
     void loadMetrics();
   }, [loadMetrics]);
+
+  useEffect(() => {
+    let active = true;
+    const loadBatches = async () => {
+      setBatchesLoading(true);
+      setBatchesError(null);
+      try {
+        const data = await getBatches({ limit: 5 });
+        if (!active) return;
+        setBatches(data.items);
+      } catch (err) {
+        if (!active) return;
+        const info = getApiErrorInfo(err);
+        const message = info?.message ?? (err as Error).message ?? 'Unable to load recent batches.';
+        setBatchesError(message);
+      } finally {
+        if (active) setBatchesLoading(false);
+      }
+    };
+    void loadBatches();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeJobUpdates(() => {
@@ -216,6 +245,39 @@ export default function DashboardPage() {
                 <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">Cost</p>
                 <p className="mt-1 text-2xl font-semibold">{(toNumber(metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd)).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</p>
               </div>
+            </div>
+            <div className="mt-8">
+              <SectionHeader title="Recent batches" subtitle="Latest batch uploads across your parsing pipeline." />
+              {batchesLoading ? (
+                <EmptyState className="mt-4" title="Loading batches" description="Fetching recent batch uploads..." />
+              ) : batchesError ? (
+                <EmptyState className="mt-4" title="Recent batches unavailable" description={batchesError} />
+              ) : batches.length === 0 ? (
+                <EmptyState className="mt-4" title="No batches yet" />
+              ) : (
+                <ul className="mt-4 divide-y divide-slate-200 rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+                  {batches.map((item) => {
+                    const batchName = item.batch.campaign_name || item.batch.name || 'Untitled batch';
+                    const createdAt = item.batch.created_at ? new Date(item.batch.created_at).toLocaleString() : '--';
+                    return (
+                      <li key={item.batch.id}>
+                        <a href="/history" className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{batchName}</p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                              {item.job_counts.total} {item.job_counts.total === 1 ? 'job' : 'jobs'} · {item.row_totals.total_rows} rows, {item.row_totals.matched_count} valid
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <Badge variant={getBadgeVariant(item.effective_status)}>{item.effective_status}</Badge>
+                            <span className="text-xs text-slate-500 dark:text-slate-400">{createdAt}</span>
+                          </div>
+                        </a>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
             </div>
           </>
         )}

@@ -4333,15 +4333,16 @@ How to fix: ${fixHint}` : ''}`;
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <h3 className="text-sm font-semibold">Batch progress</h3>
-                          <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                            {batchProgress.message}
-                          </p>
-                          {batchProgress.phase === 'done' && batchProgress.batchId ? (
+                          {batchProgress.phase === 'done' ? (
                             <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-400">
-                              ✓ Batch complete: {batchProgress.jobIds.length} jobs submitted
+                              ✓ Batch complete: {batchProgress.jobIds.length} {batchProgress.jobIds.length === 1 ? 'job' : 'jobs'} submitted
                             </p>
-                          ) : null}
-                          {batchProgress.phase === 'done' && batchProgress.batchId ? (
+                          ) : (
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                              {batchProgress.message}
+                            </p>
+                          )}
+                          {batchProgress.phase === 'done' ? (
                             <a href="/history" className="mt-1 inline-block text-xs text-indigo-600 underline hover:text-indigo-700 dark:text-indigo-400">
                               View in History →
                             </a>
