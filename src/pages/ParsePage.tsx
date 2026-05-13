@@ -1393,14 +1393,30 @@ export default function ParsePage() {
 
   const noAddressesDetected = useMemo(() => {
     if (zeroStateHydrationPending) return false;
+    // Suppress during/after batch auto-load — the warning is meaningless
+    // for stitched PDFs since the extraction pipeline always finds addresses
+    // in the OCR output. Any transient parseSummary with valid_total=0 during
+    // hydration is a race condition, not a real signal.
+    if (batchProgress && batchProgress.phase === 'done') return false;
     if (debugInfo?.no_addresses_detected === true) return true;
     if (!parseSummary) return false;
+    // Only conclude "no addresses" when results are fully hydrated.
+    // During async hydration, parseSummary may temporarily show zeros
+    // before the final result_payload arrives.
+    if (resultsFinalizing || busy) return false;
     return (
       parseSummary.rows_received > 0 &&
       parseSummary.valid_total === 0 &&
       parseSummary.needs_review === 0
     );
-  }, [debugInfo?.no_addresses_detected, parseSummary, zeroStateHydrationPending]);
+  }, [
+    batchProgress,
+    busy,
+    debugInfo?.no_addresses_detected,
+    parseSummary,
+    resultsFinalizing,
+    zeroStateHydrationPending,
+  ]);
 
 
 
