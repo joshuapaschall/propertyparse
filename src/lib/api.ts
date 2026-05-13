@@ -1004,6 +1004,26 @@ export async function downloadJobExport(jobId: string, type: JobExportType) {
   };
 }
 
+export async function downloadBatchExport(
+  batchId: string,
+  type: string = 'processing_report',
+): Promise<{ blob: Blob; filename: string }> {
+  const params = new URLSearchParams({ type });
+  const path = `/batches/${batchId}/export?${params.toString()}`;
+  const res = await performAuthedFetch(path, {
+    method: 'GET',
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error((body as { detail?: string }).detail ?? `Export failed (${res.status})`);
+  }
+  const disposition = res.headers.get('content-disposition') ?? '';
+  const match = disposition.match(/filename="?([^"]+)"?/);
+  const filename = match?.[1] ?? 'batch-export.csv';
+  const blob = await res.blob();
+  return { blob, filename };
+}
+
 export async function getJobExportCatalog(jobId: string) {
   const res = await requestJson<ApiResponse<ExportCatalogResponseItem[]> & { catalog?: ExportCatalogResponseItem[] }>(
     `/jobs/${jobId}/exports/catalog`,
