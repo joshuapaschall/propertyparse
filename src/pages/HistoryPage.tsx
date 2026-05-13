@@ -7,7 +7,15 @@ import { getBadgeVariant } from '../components/ui/badgeVariant';
 import Button from '../components/ui/Button';
 import Card, { SectionHeader } from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
-import { downloadJobExport, getJobExportCatalog, JobExportType, JobRecord, getJobs, updateJobMetadata } from '../lib/api';
+import {
+  downloadBatchExport,
+  downloadJobExport,
+  getJobExportCatalog,
+  JobExportType,
+  JobRecord,
+  getJobs,
+  updateJobMetadata,
+} from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
 import ExportPanel from '../components/exports/ExportPanel';
 import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCatalog';
@@ -268,6 +276,20 @@ export default function HistoryPage() {
     }
   };
 
+  const handleBatchDownload = async (batchId: string) => {
+    const key = `batch:${batchId}`;
+    setDownloading((prev) => ({ ...prev, [key]: true }));
+    try {
+      const result = await downloadBatchExport(batchId, 'processing_report');
+      triggerDownload(result.blob, result.filename);
+      showToast({ title: 'Batch export downloaded', variant: 'success' });
+    } catch (err) {
+      showToast({ title: (err as Error).message ?? 'Batch export failed.', variant: 'error' });
+    } finally {
+      setDownloading((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
   const beginEditCampaign = (jobId: string, currentName: string) => {
     setEditingJobId(jobId);
     setCampaignDraft(currentName === 'Untitled job' ? '' : currentName);
@@ -463,7 +485,17 @@ export default function HistoryPage() {
                             <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.duplicates, 0)}</td>
                             <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(entry.status)}>{entry.status}</Badge></td>
                             <td className="px-4 py-2.5 text-right">{formatHistoryRowCost(entry.rows.reduce((sum, row) => sum + (row.estimatedJobCost ?? row.spendUsd ?? 0), 0))}</td>
-                            <td className="px-4 py-2.5 text-right" />
+                            <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => void handleBatchDownload(entry.batchId)}
+                                disabled={downloading[`batch:${entry.batchId}`]}
+                              >
+                                {downloading[`batch:${entry.batchId}`] ? 'Exporting…' : 'Export'}
+                              </Button>
+                            </td>
                             <td className="px-4 py-2.5 text-right" />
                           </tr>
                           {expandedBatches.has(entry.batchId)
