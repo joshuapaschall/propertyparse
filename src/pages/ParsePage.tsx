@@ -136,6 +136,8 @@ function safeUuid(): string {
   });
 }
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 type CanonicalAddressComponents = {
   street_address?: string;
   street1?: string;
@@ -1131,6 +1133,11 @@ export default function ParsePage() {
       storedState: PersistedLastJobState | null,
       options?: { fresh?: boolean; syncUrlOnSuccess?: boolean },
     ) => {
+      if (!UUID_RE.test(jobIdToLoad)) {
+        console.warn('[ParsePage] Ignoring invalid job ID:', jobIdToLoad);
+        return;
+      }
+
       setRehydrating(true);
       setError(null);
       setPollError(null);
@@ -1267,7 +1274,8 @@ export default function ParsePage() {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const jobParam = params.get('job');
+    const rawJobParam = params.get('job');
+    const jobParam = rawJobParam && UUID_RE.test(rawJobParam) ? rawJobParam : null;
     const stored = readLastJobState();
     const resolvedJobId = jobParam ?? stored?.jobId ?? null;
     if (!resolvedJobId || busy || rehydrating || resetInProgressRef.current) return;
