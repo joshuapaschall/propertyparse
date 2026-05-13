@@ -1,4 +1,4 @@
-import { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuthControls } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
@@ -18,6 +18,7 @@ import type { ExportCatalogItem } from '../types/exports';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
 import { formatHistoryRowCost } from '../lib/costTelemetry';
 import { useDebouncedValue } from '../hooks/useDebouncedValue';
+import { groupJobsByBatch } from '../lib/batchGrouping';
 
 type StatusFilter = 'ALL' | 'DONE' | 'RUNNING' | 'FAILED';
 
@@ -213,10 +214,22 @@ export default function HistoryPage() {
           duplicates: summary.duplicates,
           spendUsd: summary.spendUsd ?? null,
           estimatedJobCost: usageSummary.estimated_job_cost_usd ?? pick(job, ['estimated_job_cost_usd', 'estimatedJobCostUsd']) ?? null,
+          batchId: pickString(job, ['batch_id', 'batchId']) ?? null,
         };
       }),
     [jobs],
   );
+
+  const groupedEntries = useMemo(() => groupJobsByBatch(rows), [rows]);
+  const [expandedBatches, setExpandedBatches] = useState<Set<string>>(new Set());
+  const toggleBatch = (batchId: string) => {
+    setExpandedBatches((prev) => {
+      const next = new Set(prev);
+      if (next.has(batchId)) next.delete(batchId);
+      else next.add(batchId);
+      return next;
+    });
+  };
 
   useEffect(() => {
     if (!rows.some((row) => row.status === 'RUNNING')) return;
@@ -391,43 +404,96 @@ export default function HistoryPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                    {rows.map((row) => (
-                      <tr key={row.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => row.hasId && navigate(`/history/${row.id}`)}>
-                        <td className="px-4 py-2.5">{formatDateTime(row.createdAt)}</td>
+                    {groupedEntries.map((entry) => (
+                      entry.type === 'standalone' ? (
+                      <tr key={entry.row.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => entry.row.hasId && navigate(`/history/${entry.row.id}`)}>
+                        <td className="px-4 py-2.5">{formatDateTime(entry.row.createdAt)}</td>
                         <td className="px-4 py-2.5">
-                          <div className="font-medium" style={twoLineClampStyle}>{row.name}</div>
-                          <div className="text-xs text-slate-500" style={twoLineClampStyle}>{row.filename}</div>
+                          <div className="font-medium" style={twoLineClampStyle}>{entry.row.name}</div>
+                          <div className="text-xs text-slate-500" style={twoLineClampStyle}>{entry.row.filename}</div>
                         </td>
-                        <td className="px-4 py-2.5">{row.location}</td>
-                        <td className="px-4 py-2.5 text-right">{row.rowsReceived}</td>
-                        <td className="px-4 py-2.5 text-right">{row.validUnique}</td>
-                        <td className="px-4 py-2.5 text-right">{row.needsReview}</td>
-                        <td className="px-4 py-2.5 text-right">{row.outOfScope}</td>
-                        <td className="px-4 py-2.5 text-right">{row.skipped}</td>
-                        <td className="px-4 py-2.5 text-right">{row.duplicates}</td>
-                        <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(row.status)}>{row.status}</Badge></td>
+                        <td className="px-4 py-2.5">{entry.row.location}</td>
+                        <td className="px-4 py-2.5 text-right">{entry.row.rowsReceived}</td>
+                        <td className="px-4 py-2.5 text-right">{entry.row.validUnique}</td>
+                        <td className="px-4 py-2.5 text-right">{entry.row.needsReview}</td>
+                        <td className="px-4 py-2.5 text-right">{entry.row.outOfScope}</td>
+                        <td className="px-4 py-2.5 text-right">{entry.row.skipped}</td>
+                        <td className="px-4 py-2.5 text-right">{entry.row.duplicates}</td>
+                        <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(entry.row.status)}>{entry.row.status}</Badge></td>
                         <td className="px-4 py-2.5 text-right">
-                          <div>{formatHistoryRowCost(row.estimatedJobCost ?? row.spendUsd)}</div>
-                          {isPrivileged && row.estimatedJobCost !== null && row.spendUsd !== row.estimatedJobCost ? (
-                            <div className="text-[11px] text-slate-400">Actual {formatHistoryRowCost(row.spendUsd)}</div>
+                          <div>{formatHistoryRowCost(entry.row.estimatedJobCost ?? entry.row.spendUsd)}</div>
+                          {isPrivileged && entry.row.estimatedJobCost !== null && entry.row.spendUsd !== entry.row.estimatedJobCost ? (
+                            <div className="text-[11px] text-slate-400">Actual {formatHistoryRowCost(entry.row.spendUsd)}</div>
                           ) : null}
                         </td>
-                        <td className="px-4 py-2.5 text-right" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.id); }}>
+                        <td className="px-4 py-2.5 text-right" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(entry.row.id); }}>
                           <ExportPanel
                             triggerLabel="Export"
                             className="relative inline-block text-left"
-                            catalog={catalogByJobId[row.id] ?? FALLBACK_EXPORT_CATALOG}
-                            onDownload={(type, label) => void handleDownload(row.id, type, label)}
-                            activeDownloadType={getRowActiveDownloadType(row.id)}
-                            disabled={!row.hasId}
+                            catalog={catalogByJobId[entry.row.id] ?? FALLBACK_EXPORT_CATALOG}
+                            onDownload={(type, label) => void handleDownload(entry.row.id, type, label)}
+                            activeDownloadType={getRowActiveDownloadType(entry.row.id)}
+                            disabled={!entry.row.hasId}
                           />
                         </td>
                         <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
-                          <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(row.id, row.name)} disabled={!row.hasId}>
+                          <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(entry.row.id, entry.row.name)} disabled={!entry.row.hasId}>
                             Edit name
                           </Button>
                         </td>
                       </tr>
+                      ) : (
+                        <Fragment key={`batch-group-${entry.batchId}`}>
+                          <tr
+                            key={`batch-${entry.batchId}`}
+                            className="cursor-pointer bg-indigo-50/50 hover:bg-indigo-100/40 dark:bg-indigo-950/20 dark:hover:bg-indigo-900/30"
+                            onClick={() => toggleBatch(entry.batchId)}
+                          >
+                            <td className="px-4 py-2.5">{formatDateTime(entry.createdAt)}</td>
+                            <td className="px-4 py-2.5">
+                              <div className="font-medium">{expandedBatches.has(entry.batchId) ? '▾' : '▸'} 📦 {entry.name}</div>
+                              <div className="text-xs text-slate-500">{entry.rows.length} jobs in batch</div>
+                            </td>
+                            <td className="px-4 py-2.5">{entry.rows[0]?.location ?? '--'}</td>
+                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.rowsReceived, 0)}</td>
+                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.validUnique, 0)}</td>
+                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.needsReview, 0)}</td>
+                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.outOfScope, 0)}</td>
+                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.skipped, 0)}</td>
+                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.duplicates, 0)}</td>
+                            <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(entry.status)}>{entry.status}</Badge></td>
+                            <td className="px-4 py-2.5 text-right">{formatHistoryRowCost(entry.rows.reduce((sum, row) => sum + (row.estimatedJobCost ?? row.spendUsd ?? 0), 0))}</td>
+                            <td className="px-4 py-2.5 text-right" />
+                            <td className="px-4 py-2.5 text-right" />
+                          </tr>
+                          {expandedBatches.has(entry.batchId)
+                            ? entry.rows.map((row) => (
+                              <tr key={row.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => row.hasId && navigate(`/history/${row.id}`)}>
+                                <td className="px-4 py-2.5 pl-8">{formatDateTime(row.createdAt)}</td>
+                                <td className="px-4 py-2.5">
+                                  <div className="font-medium" style={twoLineClampStyle}>{row.name}</div>
+                                  <div className="text-xs text-slate-500" style={twoLineClampStyle}>{row.filename}</div>
+                                </td>
+                                <td className="px-4 py-2.5">{row.location}</td>
+                                <td className="px-4 py-2.5 text-right">{row.rowsReceived}</td>
+                                <td className="px-4 py-2.5 text-right">{row.validUnique}</td>
+                                <td className="px-4 py-2.5 text-right">{row.needsReview}</td>
+                                <td className="px-4 py-2.5 text-right">{row.outOfScope}</td>
+                                <td className="px-4 py-2.5 text-right">{row.skipped}</td>
+                                <td className="px-4 py-2.5 text-right">{row.duplicates}</td>
+                                <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(row.status)}>{row.status}</Badge></td>
+                                <td className="px-4 py-2.5 text-right">{formatHistoryRowCost(row.estimatedJobCost ?? row.spendUsd)}</td>
+                                <td className="px-4 py-2.5 text-right" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.id); }}>
+                                  <ExportPanel triggerLabel="Export" className="relative inline-block text-left" catalog={catalogByJobId[row.id] ?? FALLBACK_EXPORT_CATALOG} onDownload={(type, label) => void handleDownload(row.id, type, label)} activeDownloadType={getRowActiveDownloadType(row.id)} disabled={!row.hasId} />
+                                </td>
+                                <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
+                                  <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(row.id, row.name)} disabled={!row.hasId}>Edit name</Button>
+                                </td>
+                              </tr>
+                            ))
+                            : null}
+                        </Fragment>
+                      )
                     ))}
                   </tbody>
                 </table>

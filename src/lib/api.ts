@@ -494,6 +494,40 @@ export async function createBatch(payload: CreateBatchPayload): Promise<BatchRes
   return postJson<BatchResponse>('/batches', payload, { headers: getAuthHeaders() });
 }
 
+export type BatchRollup = {
+  batch: BatchResponse;
+  job_counts: {
+    total: number;
+    pending: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+  };
+  row_totals: {
+    total_rows: number;
+    matched_count: number;
+    unmatched_count: number;
+  };
+  effective_status: string;
+};
+
+export async function getBatches(query: { limit?: number; offset?: number } = {}): Promise<{ items: BatchRollup[]; totalCount: number }> {
+  const params = new URLSearchParams();
+  if (typeof query.limit === 'number') params.set('limit', String(query.limit));
+  if (typeof query.offset === 'number') params.set('offset', String(query.offset));
+  const path = params.toString() ? `/batches?${params.toString()}` : '/batches';
+  const res = await requestJson<{ items: BatchRollup[]; total_count: number }>(path, { method: 'GET', headers: getAuthHeaders() });
+  return { items: res.items ?? [], totalCount: res.total_count ?? 0 };
+}
+
+export async function getBatchRollup(batchId: string): Promise<BatchRollup> {
+  return requestJson<BatchRollup>(`/batches/${batchId}`, { method: 'GET', headers: getAuthHeaders() });
+}
+
+export async function getBatchJobs(batchId: string): Promise<JobRecord[]> {
+  return requestJson<JobRecord[]>(`/batches/${batchId}/jobs`, { method: 'GET', headers: getAuthHeaders() });
+}
+
 export async function retryParseRow(payload: unknown) {
   return postJson<ParseResponse>('/parse/retry', payload);
 }
