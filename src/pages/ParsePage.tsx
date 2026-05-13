@@ -2319,7 +2319,7 @@ How to fix: ${fixHint}` : ''}`;
   const isSoftProgressStatus = (status?: number) => status === 404 || status === 503;
 
   const reconcileDurableJob = useCallback(
-    async (completedJobId: string, attempts = 4) => {
+    async (completedJobId: string, attempts = 6) => {
       for (let attempt = 0; attempt < attempts; attempt += 1) {
         try {
           const detail = await getJobDetail(completedJobId);
@@ -2350,7 +2350,7 @@ How to fix: ${fixHint}` : ''}`;
         } catch {
           // keep retrying in background
         }
-        await new Promise((resolve) => window.setTimeout(resolve, 1200 * (attempt + 1)));
+        await new Promise((resolve) => window.setTimeout(resolve, 2000 * (attempt + 1)));
         if (!mountedRef.current) return;
       }
       if (!mountedRef.current) return;
@@ -2586,7 +2586,14 @@ How to fix: ${fixHint}` : ''}`;
       const hydratedLocation = hydrateLocationScope({ ...responseMeta, state: stateValue, counties: selectedCounties, city: cityValue, selectedLocalities, scopeMode });
       setScopeMode(hydratedLocation.scopeMode);
       setSelectedLocalities(hydratedLocation.selectedLocalities);
-      const persistenceWarning = Boolean(
+      // During batch auto-load, the first hydration attempt often hits
+      // in-memory results because the backend DB write is still in-flight.
+      // reconcileDurableJob will retry and clear the warning once the
+      // durable write lands. Suppress the initial false positive.
+      const isBatchAutoLoad = Boolean(
+        batchProgress && batchProgress.phase === 'done' && batchProgress.jobIds.length === 1,
+      );
+      const persistenceWarning = !isBatchAutoLoad && Boolean(
         responseMeta.persistence_warning === true ||
           responseMeta.source === 'memory' ||
           responseMeta.schema_health === 'degraded',
@@ -2666,7 +2673,7 @@ How to fix: ${fixHint}` : ''}`;
         }
       }
     },
-    [cityValue, scopeMode, selectedCounties, selectedLocalities, stateValue],
+    [batchProgress, cityValue, scopeMode, selectedCounties, selectedLocalities, stateValue],
   );
 
   const hydrateSummaryFromJobDetail = useCallback(
@@ -3138,6 +3145,14 @@ How to fix: ${fixHint}` : ''}`;
               publishLiveUpdate('job-updated', singleJobId);
               publishLiveUpdate('metrics-updated', singleJobId);
               void reconcileDurableJob(singleJobId);
+              // Fallback: clear persistence warning after a generous delay
+              // if reconcileDurableJob hasn't already done so. For batch
+              // auto-load, the initial "source: memory" is always transient.
+              window.setTimeout(() => {
+                if (!mountedRef.current) return;
+                setPersistenceWarningActive(false);
+                writeLocalParsePersistenceState({ persistenceWarning: false });
+              }, 15000);
             } catch (hydrationError) {
               if (!mountedRef.current || signal.aborted) return;
               setBusy(false);
