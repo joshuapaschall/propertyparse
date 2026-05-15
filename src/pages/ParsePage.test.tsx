@@ -281,7 +281,7 @@ describe('ParsePage', () => {
     await user.click(screen.getByText('Override to Valid'));
     expect(approveMatchedJobRow).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ forceOverride: true, overrideReason: 'Reviewed by operator' }),
+      expect.objectContaining({ forceOverride: true, overrideReason: 'Manual review confirmed' }),
     );
     expect(approveMatchedJobRowsBatch).not.toHaveBeenCalled();
   });

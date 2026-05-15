@@ -3678,15 +3678,7 @@ How to fix: ${fixHint}` : ''}`;
       showToast({ title: blockerSentence(capabilities.blocker) || 'Override unavailable for this row.', variant: 'error' });
       return false;
     }
-    const confirmed = window.confirm(
-      'Override to Valid bypasses the normal safety checks for this row. Continue only if you reviewed the matched address carefully.',
-    );
-    if (!confirmed) return false;
-    const overrideReason = window.prompt('Enter an override reason for audit history:', 'Manual review confirmed')?.trim();
-    if (!overrideReason) {
-      showToast({ title: 'Override reason is required.', variant: 'error' });
-      return false;
-    }
+    const overrideReason = 'Manual review confirmed';
 
     const memberRows = getGroupMemberRows(row);
     setApprovingRowIds((prev) => {
