@@ -473,10 +473,9 @@ describe('ParsePage', () => {
       screen.getAllByText((_, element) => element?.textContent?.includes('3841 MONTICELLO ST') ?? false).length,
     ).toBeGreaterThan(0);
     expect(screen.getByText('One candidate found')).toBeInTheDocument();
-    expect(screen.getAllByText('Internal diagnostics').length).toBeGreaterThan(0);
-    expect(screen.getByText(/wrapper_text_single_candidate/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/House number conflict/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/House number conflict/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Internal diagnostics')).not.toBeInTheDocument();
+    expect(screen.getAllByText(/House number doesn\'t match/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/House number doesn\'t match/i).length).toBeGreaterThan(0);
     expect(screen.getAllByText('789 Legacy Ln').length).toBeGreaterThan(0);
   });
 
@@ -714,7 +713,7 @@ describe('ParsePage', () => {
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await user.click(screen.getByRole('button', { name: /^Needs Review \(/i }));
-    expect(screen.getAllByText(/Multiple in-scope candidates remain/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Multiple possible matches found/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole('button', { name: 'Approve matched' })).not.toBeInTheDocument();
 
     await user.click(screen.getAllByRole('button', { name: /^Out of Scope/i })[0]);
@@ -960,10 +959,10 @@ describe('ParsePage', () => {
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
     await user.click(await screen.findByRole('button', { name: /Needs Review \(1 issues · 1 rows\)/i }));
 
-    expect(screen.getAllByText(/House number conflict/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/House number doesn\'t match/i).length).toBeGreaterThan(0);
     await user.click(screen.getByRole('button', { name: 'Review' }));
 
-    expect(screen.getAllByText(/House number conflict/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/House number doesn\'t match/i).length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: 'Approve & Next' })).toBeDisabled();
     expect(approveMatchedJobRow).not.toHaveBeenCalled();
   });
@@ -1030,7 +1029,7 @@ describe('ParsePage', () => {
     expect(screen.queryByText(/openai/i)).toBeNull();
   });
 
-  it('keeps raw reason_code in the Internal diagnostics disclosure', async () => {
+  it('hides Internal diagnostics when debug mode is off', async () => {
     const user = userEvent.setup();
     const summary = { rows_received: 1, valid_total: 0, valid_unique: 0, needs_review: 1, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 1 };
     const row = {
@@ -1051,9 +1050,8 @@ describe('ParsePage', () => {
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
     await user.click(await screen.findByRole('button', { name: /Needs Review \(1 issues · 1 rows\)/i }));
     await user.click(screen.getByRole('button', { name: 'Review' }));
-    await user.click(screen.getByText('Internal diagnostics'));
-    expect((await screen.findAllByText('Reason code:')).length).toBeGreaterThan(0);
-    expect(screen.getByText('MISSING_COUNTY_FROM_RESULT')).toBeInTheDocument();
+    expect(screen.queryByText('Internal diagnostics')).not.toBeInTheDocument();
+    expect(screen.queryByText('MISSING_COUNTY_FROM_RESULT')).not.toBeInTheDocument();
   });
 
   it('toggles locality picker visibility based on explicit scope mode', async () => {

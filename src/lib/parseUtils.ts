@@ -54,27 +54,27 @@ type ReasonMetadata = {
 
 const REASON_METADATA: Record<string, ReasonMetadata> = {
   STREET_NUMBER_NOT_VERIFIED: {
-    label: "Street number couldn't be verified",
+    label: "Street number couldn\'t be verified",
     description: 'We found a street match but could not confidently verify the street number.',
     fix_hint: 'Confirm the street number and include unit, building, or suffix details.',
   },
   HOUSE_NUMBER_NOT_VERIFIED: {
-    label: "Street number couldn't be verified",
+    label: "Street number couldn\'t be verified",
     description: 'We found a street match but could not confidently verify the street number.',
     fix_hint: 'Confirm the street number and include unit, building, or suffix details.',
   },
   MISSING_STREET_NUMBER: {
-    label: "Street number couldn't be verified",
+    label: "Street number couldn\'t be verified",
     description: 'We found a street match but could not confidently verify the street number.',
     fix_hint: 'Confirm the street number and include unit, building, or suffix details.',
   },
   LOW_PRECISION_MATCH: {
-    label: 'We could not confirm a full street address',
+    label: 'Could not confirm exact address',
     description: 'We could only confirm this address at a broad area level.',
     fix_hint: 'Provide the full street address for a precise match.',
   },
   LOW_PRECISION: {
-    label: 'We could not confirm a full street address',
+    label: 'Could not confirm exact address',
     description: 'We could only confirm this address at a broad area level.',
     fix_hint: 'Provide the full street address for a precise match.',
   },
@@ -95,13 +95,13 @@ const REASON_METADATA: Record<string, ReasonMetadata> = {
     fix_hint: 'Replace with a physical street address that includes a house number when available.',
   },
   ADDRESS_NOT_FOUND: {
-    label: "Address couldn't be found",
-    description: "We couldn't verify this as a deliverable street address.",
+    label: "Address couldn\'t be found",
+    description: "We couldn\'t verify this as a deliverable street address.",
     fix_hint: 'Confirm the address and include street, city, and state.',
   },
   INVALID_ADDRESS: {
-    label: "Address couldn't be found",
-    description: "We couldn't verify this as a deliverable street address.",
+    label: "Address couldn\'t be found",
+    description: "We couldn\'t verify this as a deliverable street address.",
     fix_hint: 'Confirm the address and include street, city, and state.',
   },
   MISSING_ADDRESS: {
@@ -137,39 +137,163 @@ const REASON_METADATA: Record<string, ReasonMetadata> = {
 };
 
 const PUBLIC_REASON_METADATA: Record<string, ReasonMetadata> = {
-  ROUTE_MISMATCH: {
-    label: 'Street details need confirmation',
-    description: 'We found part of the address, but the street details still need confirmation.',
-    fix_hint: 'Confirm the street name and number, then retry.',
+  ROUTE_ALIAS_NOT_SAFE: {
+    label: 'Street name needs confirmation',
+    description: 'We found a close match, but the street name in your file differs slightly from the verified address.',
+    fix_hint: 'Compare the original and matched addresses. If the match looks correct, approve it. Otherwise, edit and retry.',
+  },
+  STREET_NUMBER_NOT_VERIFIED: {
+    label: 'Could not confirm house number',
+    description: 'We found the street, but could not confidently verify the house number.',
+    fix_hint: 'Check the house number is correct and retry, or override if you know it\'s valid.',
+  },
+  HOUSE_NUMBER_MISMATCH: {
+    label: 'House number doesn\'t match',
+    description: 'The house number in your file doesn\'t match what we found at this address.',
+    fix_hint: 'Verify the correct house number and edit the address, then retry.',
+  },
+  HOUSE_NUMBER_NOT_VERIFIED: {
+    label: 'Could not confirm house number',
+    description: 'We found the street, but could not confidently verify the house number.',
+    fix_hint: 'Check the house number is correct and retry, or override if you know it\'s valid.',
+  },
+  MISSING_STREET_NUMBER: {
+    label: 'Could not confirm house number',
+    description: 'We found the street, but could not confidently verify the house number.',
+    fix_hint: 'Check the house number is correct and retry, or override if you know it\'s valid.',
+  },
+  LOW_PRECISION_COUNTY_ONLY: {
+    label: 'Could not confirm exact address',
+    description: 'We could only match this to a general area, not a specific building.',
+    fix_hint: 'Provide the full street address including house number.',
+  },
+  LOW_PRECISION_MATCH: {
+    label: 'Could not confirm exact address',
+    description: 'We could only match this to a general area, not a specific building.',
+    fix_hint: 'Provide the full street address including house number.',
+  },
+  LOW_PRECISION: {
+    label: 'Could not confirm exact address',
+    description: 'We could only match this to a general area, not a specific building.',
+    fix_hint: 'Provide the full street address including house number.',
+  },
+  COUNTY_LINE_RESCUE_NEEDED: {
+    label: 'Address may be near a county border',
+    description: 'This address appears to be near a county line and may fall in a neighboring county.',
+    fix_hint: 'Verify which county this property is in, then retry or override.',
+  },
+  TYPO_SUFFIX_RESCUE_NEEDED: {
+    label: 'Possible typo in street name',
+    description: 'The street name may contain a typo or abbreviation we couldn\'t resolve automatically.',
+    fix_hint: 'Check the street name spelling and retry.',
+  },
+  MISSING_COUNTY: {
+    label: 'County not confirmed',
+    description: 'We couldn\'t find a county for this address.',
+    fix_hint: 'Edit the address to include more location detail, or override if you\'re sure.',
+  },
+  MISSING_CITY: {
+    label: 'City not confirmed',
+    description: 'We couldn\'t determine the city for this address.',
+    fix_hint: 'Edit the address to include the city, then retry.',
+  },
+  MISSING_COMPONENTS: {
+    label: 'Incomplete address',
+    description: 'This address is missing key components needed for verification.',
+    fix_hint: 'Add the missing street, city, or state information and retry.',
+  },
+  ADDRESS_NOT_FOUND: {
+    label: 'Address not found',
+    description: 'We couldn\'t find this address in our verification database.',
+    fix_hint: 'Double-check the full address and retry. If correct, override to accept it.',
+  },
+  INVALID_ADDRESS: {
+    label: 'Address not found',
+    description: 'We couldn\'t find this address in our verification database.',
+    fix_hint: 'Double-check the full address and retry.',
+  },
+  TOO_VAGUE: {
+    label: 'Address is too vague',
+    description: 'This entry doesn\'t contain enough detail to identify a specific property.',
+    fix_hint: 'Add a house number and street name, then retry.',
+  },
+  GOOGLE_NO_MATCH: {
+    label: 'No match found',
+    description: 'Our verification service couldn\'t find a match for this address.',
+    fix_hint: 'Verify the address is complete and correctly spelled, then retry.',
+  },
+  GOOGLE_ERROR: {
+    label: 'Verification service error',
+    description: 'An error occurred while verifying this address. This is usually temporary.',
+    fix_hint: 'Wait a moment and retry. If the error persists, contact support.',
+  },
+  MISSING_ADDRESS: {
+    label: 'No address found in row',
+    description: 'We couldn\'t find a usable address in this row of your file.',
+    fix_hint: 'Check that the address column is populated for this row.',
+  },
+  NO_ADDRESS_FOUND: {
+    label: 'No address found in row',
+    description: 'We couldn\'t find a usable address in this row of your file.',
+    fix_hint: 'Check that the address column is populated for this row.',
+  },
+  PO_BOX: {
+    label: 'PO Box (skipped)',
+    description: 'PO Boxes are skipped because they aren\'t physical property addresses.',
+    fix_hint: 'Replace with a physical street address if available.',
+  },
+  NON_ADDRESS_TEXT: {
+    label: 'Not an address (skipped)',
+    description: 'This row contains text like "RIGHT-OF-WAY" or "VACANT LOT" instead of a street address.',
+    fix_hint: 'Replace with a physical street address if this is a real property.',
+  },
+  OUT_OF_SCOPE: {
+    label: 'Outside your selected area',
+    description: 'This address is outside the location you selected for this job.',
+    fix_hint: 'Check your location settings, or override if the address is correct.',
+  },
+  OUT_OF_SCOPE_STATE: {
+    label: 'Outside your selected state',
+    description: 'This address appears to be in a different state than you selected.',
+    fix_hint: 'Verify the state is correct. If so, adjust your location settings and re-run.',
+  },
+  OUT_OF_SCOPE_COUNTY: {
+    label: 'Outside your selected county',
+    description: 'This address appears to be in a different county than you selected.',
+    fix_hint: 'Verify the county. If correct, add this county to your selection and re-run.',
+  },
+  OUT_OF_SCOPE_CITY: {
+    label: 'Outside your selected city',
+    description: 'This address appears to be in a different city than you selected.',
+    fix_hint: 'Verify the city. If correct, adjust your location settings and re-run.',
+  },
+  OUT_OF_SCOPE_MARKER: {
+    label: 'Flagged out of scope by file marker',
+    description: 'A column in your file indicates this address is outside your target area.',
+    fix_hint: 'Review the scope marker column. Override if the address should be included.',
   },
   COUNTY_MISMATCH: {
     label: 'Outside your selected county',
-    description: 'This record appears outside your selected area.',
-    fix_hint: 'Review the county selection or move this record to the correct area.',
+    description: 'This address appears to be in a different county than you selected.',
+    fix_hint: 'Verify the county. If correct, add this county to your selection and re-run.',
   },
   STATE_MISMATCH: {
     label: 'Outside your selected state',
-    description: 'This record appears outside your selected area.',
-    fix_hint: 'Review the state selection or move this record to the correct area.',
+    description: 'This address appears to be in a different state than you selected.',
+    fix_hint: 'Verify the state is correct. If so, adjust your location settings and re-run.',
   },
-  LOW_PRECISION_MATCH: REASON_METADATA.LOW_PRECISION_MATCH,
-  LOW_PRECISION: REASON_METADATA.LOW_PRECISION,
-  GOOGLE_ERROR: {
-    label: 'We could not verify this address automatically',
-    description: 'This address could not be verified automatically.',
-    fix_hint: 'Confirm the address details and retry.',
+  ROUTE_MISMATCH: {
+    label: 'Street name needs confirmation',
+    description: 'We found a close match, but the street name in your file differs slightly from the verified address.',
+    fix_hint: 'Compare the original and matched addresses. If the match looks correct, approve it. Otherwise, edit and retry.',
   },
-  OUT_OF_COUNTY: {
-    label: 'This record appears outside your selected area',
-    description: 'This record appears outside your selected area.',
-    fix_hint: 'Review the selected location or move this record to the correct area.',
-  },
-  OUT_OF_STATE: {
-    label: 'This record appears outside your selected area',
-    description: 'This record appears outside your selected area.',
-    fix_hint: 'Review the selected location or move this record to the correct area.',
+  OUT_OF_SCOPE_MARKER_VERIFICATION_FAILED: {
+    label: 'Flagged out of scope (verification also failed)',
+    description: 'A file marker flagged this row as out of scope, and verification couldn\'t find a match either.',
+    fix_hint: 'Review the address and scope marker. Edit and retry if needed.',
   },
 };
+
 
 const humanizeReasonCode = (code: string) => {
   if (!code) return '';
@@ -240,15 +364,15 @@ const formatBlockedByReason = (value: string) => {
   const normalized = value.trim().toLowerCase();
   switch (normalized) {
     case 'house_number_mismatch':
-      return 'House number conflict';
+      return "House number doesn\'t match";
     case 'multiple_viable_candidates':
-      return 'Multiple in-scope candidates remain';
+      return 'Multiple possible matches found';
     case 'low_precision_match':
-      return 'County-only candidate after rescue';
+      return 'Could not confirm exact address';
     case 'house_number_not_verified':
     case 'missing_street_number':
     case 'street_number_not_verified':
-      return 'Street number still not verified';
+      return 'Could not confirm house number';
     default:
       return humanizeReasonCode(value.trim().toUpperCase());
   }
@@ -303,37 +427,37 @@ export const getReviewExplanation = (row: RowResult) => {
   if (hasResolverMetadata(row)) {
     if (blocked.some((item) => item.toLowerCase() === 'house_number_mismatch') || hasHouseNumberConflict(row)) {
       return reason.includes('NOT_VERIFIED') || reason.includes('MISSING_STREET_NUMBER')
-        ? 'Street number still not verified'
-        : 'House number conflict';
+        ? 'Could not confirm house number'
+        : "House number doesn\'t match";
     }
     if (
       blocked.some((item) =>
         ['house_number_not_verified', 'missing_street_number', 'street_number_not_verified'].includes(item.toLowerCase()),
       )
     ) {
-      return 'Street number still not verified';
+      return 'Could not confirm house number';
     }
     if (strategy.includes('wrapper') && strategy.includes('single') && candidateCount === 1) {
-      return 'Wrapper text removed; one in-scope candidate found';
+      return 'Extra text removed — one match found';
     }
     if (strategy.includes('wrapper')) {
-      return 'Wrapper text removed';
+      return 'Extra text was removed before matching';
     }
     if (strategy.includes('trailing_house') || strategy.includes('house_number_recovered')) {
-      return 'Trailing house number recovered';
+      return 'House number was found at end of text';
     }
     if (candidateCount === 1) {
-      if (strategy.includes('county_only') || tier === 'low_precision') return 'County-only candidate after rescue';
-      return 'One in-scope candidate found';
+      if (strategy.includes('county_only') || tier === 'low_precision') return 'Could not confirm exact address';
+      return 'One possible match found';
     }
     if (candidateCount !== null && candidateCount > 1) {
-      return 'Multiple in-scope candidates remain';
+      return 'Multiple possible matches found';
     }
     if (blocked.some((item) => item.toLowerCase() === 'multiple_viable_candidates')) {
-      return 'Multiple in-scope candidates remain';
+      return 'Multiple possible matches found';
     }
     if (tier === 'low_precision' || blocked.some((item) => item.toLowerCase() === 'low_precision_match')) {
-      return 'County-only candidate after rescue';
+      return 'Could not confirm exact address';
     }
     if (ambiguity) {
       return ambiguity;
@@ -341,39 +465,39 @@ export const getReviewExplanation = (row: RowResult) => {
   }
 
   if (strategy.includes('typo') || tier.includes('typo') || compareHint.includes('typo correction')) {
-    return 'Unique in-scope typo correction';
+    return 'Possible typo was corrected';
   }
   if (strategy.includes('suffix') || tier.includes('suffix') || compareHint.includes('suffix correction')) {
-    return 'Unique in-scope suffix correction';
+    return 'Street suffix was adjusted';
   }
   if (hasHouseNumberConflict(row)) {
     return reason.includes('NOT_VERIFIED') || reason.includes('MISSING_STREET_NUMBER')
-      ? 'Street number still not verified'
-      : 'House number conflict';
+      ? 'Could not confirm house number'
+      : "House number doesn\'t match";
   }
   if (candidateCount !== null && candidateCount > 1) {
-    return `Still ambiguous: ${candidateCount} in-scope candidates`;
+    return 'Multiple possible matches found';
   }
   if (ambiguity) {
     return ambiguity;
   }
   if (strategy.includes('route_only')) {
-    return 'Route-only candidate; second-pass rescue failed';
+    return 'Could not confirm exact address';
   }
   if (strategy.includes('county_only')) {
-    return 'County-only candidate; second-pass rescue failed';
+    return 'Could not confirm exact address';
   }
   if (strategy.includes('locality_only')) {
-    return 'Locality-only candidate; second-pass rescue failed';
+    return 'Could not confirm exact address';
   }
   if (reason.includes('MISSING_STREET_NUMBER') || reason.includes('STREET_NUMBER_NOT_VERIFIED') || reason.includes('HOUSE_NUMBER_NOT_VERIFIED')) {
-    return 'Street number still not verified';
+    return 'Could not confirm house number';
   }
   if (reason.includes('LOW_PRECISION')) {
-    return 'We could not confirm a full street address';
+    return 'Could not confirm exact address';
   }
   if (reason.includes('ROUTE') || reason.includes('ALIAS')) {
-    return 'Street details need confirmation';
+    return 'Street name needs confirmation';
   }
   return row.reason_detail?.trim() || (reason ? humanizeReasonCode(reason) : 'Needs review');
 };
@@ -612,13 +736,13 @@ export const getManualApprovalBlocker = (row: RowResult) => {
   if (!getDisplaySafeMatchedAddress(row)) return 'No street-level candidate was resolved';
   if (!hasResolverMetadata(row)) return 'Approval requires backend resolver confirmation';
   if (candidateCount === null) return 'Approval requires a confirmed in-scope candidate count';
-  if (candidateCount > 1) return 'Multiple in-scope candidates remain';
+  if (candidateCount > 1) return 'Multiple possible matches found';
   if (competing.length > 1) return 'Multiple competing candidates remain';
   if (blocked.length) return formatBlockedByReason(blocked[0]);
   if (hasHouseNumberConflict(row)) return getReviewExplanation(row);
   if (ambiguity) return ambiguity;
-  if (tier === 'low_precision') return 'County-only candidate after rescue';
-  if (tier === 'house_conflict') return 'House number conflict';
+  if (tier === 'low_precision') return 'Could not confirm exact address';
+  if (tier === 'house_conflict') return "House number doesn\'t match";
   if (['route', 'route_only'].includes(precision)) return 'Route-only candidate cannot be approved';
   if (['county', 'county_only'].includes(precision)) return 'County-only candidate cannot be approved';
   if (['locality', 'locality_only'].includes(precision)) return 'Locality-only candidate cannot be approved';

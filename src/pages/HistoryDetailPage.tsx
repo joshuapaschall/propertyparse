@@ -15,8 +15,6 @@ import {
   isSkippedRow,
   stringifyPreview,
   getDisplaySafeMatchedAddress,
-  getResolverDetails,
-  getReviewDebugHint,
   getReviewExplanation,
   getReviewReasonBucket,
   shouldShowOneCandidateBadge,
@@ -446,22 +444,6 @@ export default function HistoryDetailPage() {
                         <span className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
                           One candidate found
                         </span>
-                      ) : null}
-                      {getReviewDebugHint(row) ? (
-                        <p className="text-[11px] text-slate-400 dark:text-slate-500">{getReviewDebugHint(row)}</p>
-                      ) : null}
-                      {getResolverDetails(row).length ? (
-                        <details className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-2.5 py-2 text-[11px] text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/80 dark:text-slate-300">
-                          <summary className="cursor-pointer list-none font-medium text-slate-600 marker:hidden dark:text-slate-200">Internal diagnostics</summary>
-                          <div className="mt-2 grid gap-1.5">
-                            {getResolverDetails(row).map((detail) => (
-                              <div key={`${detail.label}-${detail.value}`} className="flex flex-wrap gap-1">
-                                <span className="font-semibold text-slate-500 dark:text-slate-400">{detail.label}:</span>
-                                <span>{detail.value}</span>
-                              </div>
-                            ))}
-                          </div>
-                        </details>
                       ) : null}
                     </div>
                   </td>

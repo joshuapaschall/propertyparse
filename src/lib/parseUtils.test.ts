@@ -186,13 +186,13 @@ describe('parseUtils filters', () => {
       verification_precision: 'county',
     });
 
-    expect(getReviewExplanation(resolverRow)).toBe('Wrapper text removed; one in-scope candidate found');
+    expect(getReviewExplanation(resolverRow)).toBe('Extra text removed — one match found');
     expect(isSafeManualApprovalCandidate(resolverRow)).toBe(true);
-    expect(getReviewExplanation(ambiguousRow)).toBe('Multiple in-scope candidates remain');
-    expect(getManualApprovalBlocker(ambiguousRow)).toBe('Multiple in-scope candidates remain');
-    expect(getReviewExplanation(blockedLowPrecisionRow)).toBe('County-only candidate after rescue');
-    expect(getManualApprovalBlocker(blockedLowPrecisionRow)).toBe('County-only candidate after rescue');
-    expect(getReviewExplanation(legacyRow)).toBe('We could not confirm a full street address');
+    expect(getReviewExplanation(ambiguousRow)).toBe('Multiple possible matches found');
+    expect(getManualApprovalBlocker(ambiguousRow)).toBe('Multiple possible matches found');
+    expect(getReviewExplanation(blockedLowPrecisionRow)).toBe('Could not confirm exact address');
+    expect(getManualApprovalBlocker(blockedLowPrecisionRow)).toBe('Could not confirm exact address');
+    expect(getReviewExplanation(legacyRow)).toBe('Could not confirm exact address');
     expect(getReviewDebugHint(legacyRow)).toBe('Candidate is county-level only');
   });
 
@@ -251,7 +251,7 @@ describe('parseUtils filters', () => {
       reason_code: 'ROUTE_ALIAS',
     });
 
-    expect(getReviewExplanation(row)).toBe('Street details need confirmation');
+    expect(getReviewExplanation(row)).toBe('Street name needs confirmation');
     expect(getResolverDetails(row)).toEqual(expect.arrayContaining([{ label: 'Original', value: '789 Oak Ave' }, { label: 'Reason code', value: 'ROUTE_ALIAS' }]));
     expect(getManualApprovalBlocker(row)).toBe('No street-level candidate was resolved');
   });
@@ -272,16 +272,16 @@ describe('parseUtils filters', () => {
     const publicFieldRow = buildRow({
       status: 'UNMATCHED_NEEDS_REVIEW',
       reason_code: 'LOW_PRECISION_MATCH',
-      public_reason_label: 'Street details need confirmation',
+      public_reason_label: 'Street name needs confirmation',
       public_reason_message: 'We could not confirm this address automatically.',
       public_action_hint: 'Check the full street address and retry.',
     });
 
-    expect(getReasonMetadata(googleErrorRow).label).toBe('We could not verify this address automatically');
+    expect(getReasonMetadata(googleErrorRow).label).toBe('Verification service error');
     expect(getReasonMetadata(countyMismatchRow).label).toBe('Outside your selected county');
-    expect(getReasonMetadata(countyMismatchRow).description).toBe('This record appears outside your selected area.');
+    expect(getReasonMetadata(countyMismatchRow).description).toBe('This address appears to be in a different county than you selected.');
     expect(getReasonMetadata(publicFieldRow)).toEqual({
-      label: 'Street details need confirmation',
+      label: 'Street name needs confirmation',
       description: 'We could not confirm this address automatically.',
       fix_hint: 'Check the full street address and retry.',
     });
@@ -329,7 +329,7 @@ describe('parseUtils filters', () => {
       canApproveMatched: false,
       canApproveWithScopeOverride: false,
       canForceOverride: false,
-      blocker: 'House number conflict',
+      blocker: 'House number doesn\'t match',
       source: 'fallback',
     });
   });
