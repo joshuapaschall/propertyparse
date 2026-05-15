@@ -5552,50 +5552,154 @@ How to fix: ${fixHint}` : ''}`;
 
       {reviewRow ? (
         <div className="fixed inset-0 z-[60] flex justify-end bg-slate-900/60 px-4 py-6 dark:bg-slate-950/80">
-          <div className="flex h-full w-full max-w-xl flex-col overflow-y-auto rounded-2xl bg-white p-6 shadow-xl dark:bg-slate-950">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
-                  Review &amp; Fix
-                </h3>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Understand what happened and correct the row if needed.
-                </p>
+          <div className="flex h-full w-full max-w-xl flex-col rounded-2xl bg-white shadow-xl dark:bg-slate-950">
+            <div className="shrink-0 border-b border-slate-200 px-6 pb-4 pt-6 dark:border-slate-800">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-100">
+                    Review &amp; Fix
+                  </h3>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Decide what to do with this address.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={closeReviewDrawer}
+                  className="text-sm font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
+                >
+                  Close
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={closeReviewDrawer}
-                className="text-sm font-semibold text-slate-500 transition hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
-              >
-                Close
-              </button>
-            </div>
-            <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Group {activeReviewIndex >= 0 ? `${activeReviewIndex + 1} of ${activeReviewGroups.length}` : 'row'}
-              </p>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => navigateReviewRow('prev')}
-                  disabled={!canReviewPrev}
-                  className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Prev
-                </button>
-                <button
-                  type="button"
-                  onClick={() => navigateReviewRow('next')}
-                  disabled={!canReviewNext}
-                  className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                >
-                  Next
-                </button>
+              <div className="mt-4 flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  {activeReviewIndex >= 0 ? `${activeReviewIndex + 1} of ${activeReviewGroups.length}` : 'Row'}
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => navigateReviewRow('prev')}
+                    disabled={!canReviewPrev}
+                    className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    ◀ Prev
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => navigateReviewRow('next')}
+                    disabled={!canReviewNext}
+                    className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Next ▶
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="mt-6 space-y-4">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-900">
+            <div className="shrink-0 border-b border-slate-200 px-6 py-5 dark:border-slate-800">
+              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+                  <p className="text-sm font-semibold text-amber-800 dark:text-amber-200">
+                    {reviewReason?.label || 'Needs review'}
+                  </p>
+                  <p className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                    {reviewReason?.fix_hint || reviewReason?.description || 'Review this row for more context.'}
+                  </p>
+                </div>
+                {reviewVerifiedAddress ? (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                      {canReviewApprove || canReviewForceOverride ? 'Will be saved as' : 'Matched address'}
+                    </p>
+                    <p className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+                      {reviewVerifiedAddress}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-4">
+                    <p className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
+                      Matched address
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      No match found. Edit the address below and retry.
+                    </p>
+                  </div>
+                )}
+                {canEditReview ? (
+                  <>
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
+                        Edit address
+                      </p>
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      <input
+                        ref={reviewInputRef}
+                        value={reviewAddress}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setReviewAddress(value);
+                          if (reviewRow) {
+                            setReviewDrafts((prev) => ({ ...prev, [reviewRow.source_row_id]: value }));
+                          }
+                        }}
+                        disabled={!canEditReview}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-900/40"
+                        placeholder="Type a corrected address and click Retry"
+                      />
+                      {reviewError ? (
+                        <p className="text-xs text-rose-600 dark:text-rose-300">{reviewError}</p>
+                      ) : null}
+                    </div>
+                  </>
+                ) : reviewOutOfScope ? (
+                  <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
+                    Change location context and re-run.
+                  </div>
+                ) : reviewRow && !isSkippedReasonCode(reviewRow.reason_code) && !isNeedsReviewReasonCode(reviewRow.reason_code) && !isOutOfScopeReasonCode(reviewRow.reason_code) ? (
+                  <div className="text-sm text-slate-500 dark:text-slate-400">
+                    No action available for this row.
+                  </div>
+                ) : null}
+                {!canReviewApprove && !canReviewForceOverride && reviewApprovalBlocker ? (
+                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                    <span className="font-semibold text-slate-700 dark:text-slate-200">Approval unavailable.</span>{' '}
+                    {blockerSentence(reviewApprovalCapabilities?.blocker)}
+                  </div>
+                ) : null}
+                {canReviewForceOverride ? (
+                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                    Override to Valid bypasses the normal safety checks and always requires a reason.
+                  </div>
+                ) : null}
+                <div className="mt-4 flex flex-wrap justify-end gap-3">
+                  <button
+                    type="button"
+                    onClick={closeReviewDrawer}
+                    className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                  >
+                    Close
+                  </button>
+                  <button type="button" onClick={() => navigateReviewRow('next')} disabled={!canReviewNext} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Skip & Next</button>
+                  {canEditReview ? (
+                    <button type="button" onClick={async () => { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleReviewRetry(); if (!succeeded) { setPendingReviewNavigation(null); } }} disabled={!canEditReview || reviewSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300">{reviewSaving ? 'Retrying...' : 'Retry & Next'}</button>
+                  ) : null}
+                  {canReviewForceOverride ? (
+                    <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleForceOverride(reviewRow); if (!succeeded) { setPendingReviewNavigation(null); } } }} disabled={!reviewRow || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:bg-amber-300">Override & Next</button>
+                  ) : (
+                    <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleApproveMatched(reviewRow, reviewOutOfScope); if (!succeeded) { setPendingReviewNavigation(null); } } }} disabled={!reviewRow || !canReviewApprove || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
+                  )}
+                </div>
+                <p className="mt-3 text-center text-[11px] text-slate-400 dark:text-slate-500">
+                  <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">A</kbd> approve · <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">S</kbd> skip · <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">R</kbd> retry · <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">Esc</kbd> close
+                </p>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-6 py-5">
+              <div className="space-y-4">
+              {showDebugMode ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 dark:border-slate-800 dark:bg-slate-900">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Status</p>
@@ -5604,6 +5708,7 @@ How to fix: ${fixHint}` : ''}`;
                     </p>
                   </div>
                   <div className="text-right">
+                    {/* showDebugMode-gated */}
                     <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
                       Record ID
                     </p>
@@ -5612,7 +5717,8 @@ How to fix: ${fixHint}` : ''}`;
                     </p>
                   </div>
                 </div>
-              </div>
+                </div>
+              ) : null}
 
               <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
                 <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
@@ -5649,7 +5755,7 @@ How to fix: ${fixHint}` : ''}`;
                     Copy
                   </button>
                 </div>
-                {reviewCompareInput.showNormalized ? (
+                {showDebugMode && reviewCompareInput.showNormalized ? (
                   <>
                     <p className="mt-3 text-xs uppercase text-slate-500 dark:text-slate-400">
                       Compared as
@@ -5681,25 +5787,8 @@ How to fix: ${fixHint}` : ''}`;
                 </div>
               </div>
 
-              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
-                <p className="text-xs uppercase text-slate-500 dark:text-slate-400">
-                  Why this happened
-                </p>
-                <p className="mt-1 text-sm font-semibold text-slate-800 dark:text-slate-100">
-                  {reviewReason?.label || 'Needs review'}
-                </p>
-                <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">
-                  <p>{reviewRow ? getReasonSummary(reviewRow) : 'Review this row for more context.'}</p>
-                  {showDebugMode && reviewRow?.reason_code ? (
-                    <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
-                      Reason code: {reviewRow.reason_code}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-
-
-              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+              {showDebugMode ? (
+                <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
                 <div className="flex items-center justify-between gap-3"><p className="text-xs uppercase text-slate-500 dark:text-slate-400">Location check</p><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${reviewScopePass ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200' : 'bg-rose-100 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200'}`}>{reviewScopePass ? 'In scope' : 'Out of scope'}</span></div>
                 <div className="mt-2 space-y-2 text-sm">
                   <div className="flex items-center justify-between gap-3">
@@ -5720,11 +5809,14 @@ How to fix: ${fixHint}` : ''}`;
                     </div>
                   ) : null}
                 </div>
-              </div>
+                </div>
+              ) : null}
 
 
-              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+              {showDebugMode ? (
+                <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
                 <div className="flex items-center justify-between gap-3">
+                  {/* showDebugMode-gated */}
                   <p className="text-xs uppercase text-slate-500 dark:text-slate-400">Raw row JSON</p>
                   <button
                     type="button"
@@ -5736,76 +5828,10 @@ How to fix: ${fixHint}` : ''}`;
                 </div>
                 <pre className="mt-2 max-h-52 overflow-auto rounded-lg bg-slate-50 p-3 text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-300">
 {JSON.stringify(reviewRow?.raw_row ?? {}, null, 2)}</pre>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 px-4 py-4 dark:border-slate-800">
-                {canEditReview ? (
-                  <>
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                        Edit address &amp; retry
-                      </p>
-                    </div>
-                    <div className="mt-3 space-y-2">
-                      <label className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
-                        Address
-                      </label>
-                      <input
-                        ref={reviewInputRef}
-                        value={reviewAddress}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setReviewAddress(value);
-                          if (reviewRow) {
-                            setReviewDrafts((prev) => ({ ...prev, [reviewRow.source_row_id]: value }));
-                          }
-                        }}
-                        disabled={!canEditReview}
-                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-800 disabled:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-900/40"
-                      />
-                      {reviewError ? (
-                        <p className="text-xs text-rose-600 dark:text-rose-300">{reviewError}</p>
-                      ) : null}
-                    </div>
-                  </>
-                ) : reviewOutOfScope ? (
-                  <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
-                    Change location context and re-run.
-                  </div>
-                ) : (
-                  <div className="text-sm text-slate-500 dark:text-slate-400">
-                    No action available for this row.
-                  </div>
-                )}
-                {!canReviewApprove && !canReviewForceOverride && reviewApprovalBlocker ? (
-                  <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300">
-                    <span className="font-semibold text-slate-700 dark:text-slate-200">Approval unavailable.</span>{' '}
-                    {blockerSentence(reviewApprovalCapabilities?.blocker)}
-                  </div>
-                ) : null}
-                {canReviewForceOverride ? (
-                  <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                    Override to Valid bypasses the normal safety checks and always requires a reason.
-                  </div>
-                ) : null}
-                <div className="mt-4 flex flex-wrap justify-end gap-3">
-                  <button
-                    type="button"
-                    onClick={closeReviewDrawer}
-                    className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                  >
-                    Close
-                  </button>
-                  <button type="button" onClick={() => navigateReviewRow('next')} disabled={!canReviewNext} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Skip & Next</button>
-                  {canEditReview ? (
-                    <button type="button" onClick={async () => { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleReviewRetry(); if (!succeeded) { setPendingReviewNavigation(null); } }} disabled={!canEditReview || reviewSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300">{reviewSaving ? 'Retrying...' : 'Retry & Next'}</button>
-                  ) : null}
-                  {canReviewForceOverride ? (
-                    <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleForceOverride(reviewRow); if (!succeeded) { setPendingReviewNavigation(null); } } }} disabled={!reviewRow || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:bg-amber-300">Override & Next</button>
-                  ) : (
-                    <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleApproveMatched(reviewRow, reviewOutOfScope); if (!succeeded) { setPendingReviewNavigation(null); } } }} disabled={!reviewRow || !canReviewApprove || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:bg-emerald-300">Approve & Next</button>
-                  )}
                 </div>
+              ) : null}
+
+
               </div>
             </div>
           </div>
