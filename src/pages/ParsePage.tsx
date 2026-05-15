@@ -1536,9 +1536,10 @@ export default function ParsePage() {
   );
   const allNeedsReviewRowIds = useMemo(
     () =>
-      filteredNeedsReviewGroups.flatMap((group) =>
-        getGroupApprovalCapabilities(group).canApproveMatched ? group.memberRowIds : [],
-      ),
+      filteredNeedsReviewGroups.flatMap((group) => {
+        const caps = getGroupApprovalCapabilities(group);
+        return caps.canApproveMatched || caps.canForceOverride ? group.memberRowIds : [];
+      }),
     [filteredNeedsReviewGroups, getGroupApprovalCapabilities],
   );
   const allNeedsReviewSelected =
@@ -1555,9 +1556,10 @@ export default function ParsePage() {
   );
   const allOutOfScopeRowIds = useMemo(
     () =>
-      outOfScopeGroups.flatMap((group) =>
-        getGroupApprovalCapabilities(group).canApproveWithScopeOverride ? group.memberRowIds : [],
-      ),
+      outOfScopeGroups.flatMap((group) => {
+        const caps = getGroupApprovalCapabilities(group);
+        return caps.canApproveWithScopeOverride || caps.canForceOverride ? group.memberRowIds : [];
+      }),
     [getGroupApprovalCapabilities, outOfScopeGroups],
   );
   const allOutOfScopeSelected =
@@ -3731,7 +3733,15 @@ How to fix: ${fixHint}` : ''}`;
     }
     const rowIds = Array.from(selectedNeedsReviewRowIds).filter((rowId) => {
       const row = rowResultsById.get(rowId);
-      return row ? getApprovalCapabilities(row).canApproveMatched : false;
+      if (!row) return false;
+      const caps = getApprovalCapabilities(row);
+      return caps.canApproveMatched || caps.canForceOverride;
+    });
+    const needsForceOverride = rowIds.some((rowId) => {
+      const row = rowResultsById.get(rowId);
+      if (!row) return false;
+      const caps = getApprovalCapabilities(row);
+      return !caps.canApproveMatched && caps.canForceOverride;
     });
     if (!rowIds.length) return;
     setApprovingRowIds((prev) => {
@@ -3740,7 +3750,13 @@ How to fix: ${fixHint}` : ''}`;
       return next;
     });
     try {
-      const response = await approveMatchedJobRowsBatch(jobId, rowIds, false);
+      const response = await approveMatchedJobRowsBatch(
+        jobId,
+        rowIds,
+        false,
+        needsForceOverride,
+        needsForceOverride ? 'Bulk override — manual review confirmed' : '',
+      );
       const updates = response.updated_row_results ?? response.updated_rows ?? [];
       const failedRows = response.failed_rows ?? [];
       const metadata = response.metadata;
@@ -3816,7 +3832,15 @@ How to fix: ${fixHint}` : ''}`;
     }
     const rowIds = Array.from(selectedOutOfScopeRowIds).filter((rowId) => {
       const row = rowResultsById.get(rowId);
-      return row ? getApprovalCapabilities(row).canApproveWithScopeOverride : false;
+      if (!row) return false;
+      const caps = getApprovalCapabilities(row);
+      return caps.canApproveWithScopeOverride || caps.canForceOverride;
+    });
+    const needsForceOverride = rowIds.some((rowId) => {
+      const row = rowResultsById.get(rowId);
+      if (!row) return false;
+      const caps = getApprovalCapabilities(row);
+      return !caps.canApproveWithScopeOverride && caps.canForceOverride;
     });
     if (!rowIds.length) return;
     setApprovingRowIds((prev) => {
@@ -3825,7 +3849,13 @@ How to fix: ${fixHint}` : ''}`;
       return next;
     });
     try {
-      const response = await approveMatchedJobRowsBatch(jobId, rowIds, true);
+      const response = await approveMatchedJobRowsBatch(
+        jobId,
+        rowIds,
+        true,
+        needsForceOverride,
+        needsForceOverride ? 'Bulk override — manual review confirmed' : '',
+      );
       const updates = response.updated_row_results ?? response.updated_rows ?? [];
       const failedRows = response.failed_rows ?? [];
       const metadata = response.metadata;
@@ -5178,9 +5208,9 @@ How to fix: ${fixHint}` : ''}`;
                                         type="checkbox"
                                         aria-label={`Select row group ${getRowDisplayId(row)}`}
                                         className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                        disabled={!groupCapabilities.canApproveMatched}
+                                        disabled={!groupCapabilities.canApproveMatched && !groupCapabilities.canForceOverride}
                                         checked={groupSelected}
-                                        title={groupCapabilities.canApproveMatched ? 'Select for bulk approve' : blockerLabel(groupCapabilities.blocker) || 'Approval unavailable'}
+                                        title={groupCapabilities.canApproveMatched || groupCapabilities.canForceOverride ? 'Select for bulk approve' : blockerLabel(groupCapabilities.blocker) || 'Approval unavailable'}
                                         onChange={(event) => {
                                           setSelectedNeedsReviewRowIds((prev) => {
                                             const next = new Set(prev);
@@ -5444,9 +5474,9 @@ How to fix: ${fixHint}` : ''}`;
                                         type="checkbox"
                                         aria-label={`Select out of scope row group ${getRowDisplayId(row)}`}
                                         className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                        disabled={!groupCapabilities.canApproveWithScopeOverride}
+                                        disabled={!groupCapabilities.canApproveWithScopeOverride && !groupCapabilities.canForceOverride}
                                         checked={group.memberRowIds.every((rowId) => selectedOutOfScopeRowIds.has(rowId))}
-                                        title={groupCapabilities.canApproveWithScopeOverride ? 'Select for bulk approve' : blockerLabel(groupCapabilities.blocker) || 'Approval unavailable'}
+                                        title={groupCapabilities.canApproveWithScopeOverride || groupCapabilities.canForceOverride ? 'Select for bulk approve' : blockerLabel(groupCapabilities.blocker) || 'Approval unavailable'}
                                         onChange={(event) => {
                                           setSelectedOutOfScopeRowIds((prev) => {
                                             const next = new Set(prev);
