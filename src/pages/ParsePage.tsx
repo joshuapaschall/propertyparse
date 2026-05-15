@@ -2290,6 +2290,10 @@ How to fix: ${fixHint}` : ''}`;
   useEffect(() => {
     if (!reviewRow) return;
     const onKeyDown = (event: KeyboardEvent) => {
+      // Don't intercept when user is typing in an input/textarea
+      const tag = (document.activeElement?.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+
       if (event.key === 'Escape') {
         event.preventDefault();
         closeReviewDrawer();
@@ -2304,10 +2308,27 @@ How to fix: ${fixHint}` : ''}`;
         event.preventDefault();
         navigateReviewRow('prev');
       }
+      if (key === 's' && canReviewNext) {
+        event.preventDefault();
+        navigateReviewRow('next');
+      }
+      if (key === 'a' && reviewRow) {
+        event.preventDefault();
+        if (canReviewForceOverride) {
+          void handleForceOverride(reviewRow);
+        } else if (canReviewApprove) {
+          void handleApproveMatched(reviewRow, reviewOutOfScope);
+        }
+      }
+      if (key === 'r' && canEditReview && !reviewSaving) {
+        event.preventDefault();
+        void handleReviewRetry();
+      }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [closeReviewDrawer, navigateReviewRow, reviewRow]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [closeReviewDrawer, navigateReviewRow, reviewRow, canReviewNext, reviewSaving]);
 
   const handleCopyDebugInfo = async () => {
     const debugText = [
