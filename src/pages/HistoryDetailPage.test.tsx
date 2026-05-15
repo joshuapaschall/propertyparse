@@ -196,8 +196,7 @@ describe('HistoryDetailPage summary normalization', () => {
     );
 
     await user.click(await screen.findByRole('button', { name: 'Needs Review (2 issues · 2 rows)' }));
-    expect(screen.getByText(/Blocked by directional conflict/)).toBeInTheDocument();
-    expect(screen.getByText(/Route Alias \/ Route Mismatch:/)).toBeInTheDocument();
+        expect(screen.getByText(/Route Alias \/ Route Mismatch:/)).toBeInTheDocument();
     expect(screen.getByText(/pagination: 2 issues · 2 rows/)).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText('Needs review reason filter'), 'house_number');
@@ -267,9 +266,8 @@ describe('HistoryDetailPage summary normalization', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Needs Review (1 issues · 1 rows)' }));
     expect(screen.getByText('One candidate found')).toBeInTheDocument();
-    expect(screen.getByText('Internal diagnostics')).toBeInTheDocument();
-    expect(screen.getByText(/suffix_unique/i)).toBeInTheDocument();
-    expect(screen.getByText(/Only unresolved or ambiguous candidates remain in review./i)).toBeInTheDocument();
+    expect(screen.queryByText('Internal diagnostics')).not.toBeInTheDocument();
+        expect(screen.getByText(/Only unresolved or ambiguous candidates remain in review./i)).toBeInTheDocument();
   });
 
   it('shows original vs normalized compare input and preserves legacy review rows', async () => {
@@ -289,7 +287,7 @@ describe('HistoryDetailPage summary normalization', () => {
           normalized_compare_input: '3841 MONTICELLO ST',
           matched_address: '3841 Monticello St',
           resolver_strategy: 'wrapper_text_single_candidate',
-          ambiguity_reason: 'Wrapper text removed; one in-scope candidate found',
+          ambiguity_reason: 'Extra text removed — one match found',
           candidate_count_in_scope: 1,
         },
         {
@@ -317,7 +315,7 @@ describe('HistoryDetailPage summary normalization', () => {
       screen.getAllByText((_, element) => element?.textContent?.includes('Compared as:') ?? false).length,
     ).toBeGreaterThan(0);
     expect(screen.getAllByText('3841 MONTICELLO ST').length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/Wrapper text removed; one in-scope candidate found/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Extra text removed — one match found/).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Legacy Review Row').length).toBeGreaterThan(0);
   });
 

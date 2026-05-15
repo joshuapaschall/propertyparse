@@ -2060,18 +2060,16 @@ How to fix: ${fixHint}` : ''}`;
         {markerFailureSecondaryText ? (
           <div className="text-xs text-slate-500 dark:text-slate-400">{markerFailureSecondaryText}</div>
         ) : null}
-        {!isMarkerVerificationFailure && detailText ? (
-          <div className="text-xs text-slate-500 dark:text-slate-400">
-            {detailText}
-          </div>
+        {!isMarkerVerificationFailure && fixHint ? (
+          <div className="text-xs text-slate-500 dark:text-slate-400">{fixHint}</div>
         ) : null}
-        {debugHint ? (
+        {showDebugMode && debugHint ? (
           <p className="text-[11px] text-slate-400 dark:text-slate-500">{debugHint}</p>
         ) : null}
         {showDebugMode && reasonCode ? (
           <div className="text-xs text-slate-400 dark:text-slate-500">{reasonCode}</div>
         ) : null}
-        {resolverDetails.length ? (
+        {showDebugMode && resolverDetails.length ? (
           <details className="rounded-lg border border-slate-200/80 bg-slate-50/90 px-2.5 py-2 text-[11px] text-slate-600 dark:border-slate-700/80 dark:bg-slate-900/80 dark:text-slate-300">
             <summary className="cursor-pointer list-none font-medium text-slate-600 marker:hidden dark:text-slate-200">Internal diagnostics</summary>
             <div className="mt-2 grid gap-1.5">
