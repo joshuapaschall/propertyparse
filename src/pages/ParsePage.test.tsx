@@ -135,6 +135,8 @@ vi.mock('../lib/api', () => ({
 }));
 
 describe('ParsePage', () => {
+  const HYDRATION_JOB_UUID_SCOPE = 'ec2e2d44-14d0-451f-bab5-2977fec606b6';
+  const HYDRATION_JOB_UUID_LEGACY = 'aa2e2d44-14d0-451f-bab5-2977fec606b6';
   beforeEach(() => {
     vi.clearAllMocks();
     authState.role = 'admin';
@@ -1120,22 +1122,22 @@ describe('ParsePage', () => {
 
   it('hydrates scope metadata from backend job details and supports legacy city-only jobs', async () => {
     getJobDetail.mockResolvedValueOnce({
-      job: { job_id: 'job-scope', metadata: { scope: { state: 'Georgia', county: 'DeKalb', localities: ['Stonecrest', 'Lithonia'], scope_mode: 'locality_strict' } } },
+      job: { job_id: HYDRATION_JOB_UUID_SCOPE, metadata: { scope: { state: 'Georgia', county: 'DeKalb', localities: ['Stonecrest', 'Lithonia'], scope_mode: 'locality_strict' } } },
       summary: {},
     });
     getJobResults.mockResolvedValueOnce({ summary: { rows_received: 0 }, row_results: [], canonical_addresses: [], duplicate_groups: [], metadata: { scope: { state: 'Georgia', county: 'DeKalb', localities: ['Stonecrest', 'Lithonia'], scope_mode: 'locality_strict' } } });
 
-    render(<MemoryRouter initialEntries={['/?job=job-scope']}><ParsePage /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={[`/?job=${HYDRATION_JOB_UUID_SCOPE}`]}><ParsePage /></MemoryRouter>);
     expect(await screen.findByDisplayValue('Georgia')).toBeInTheDocument();
     expect(screen.getByDisplayValue('DeKalb')).toBeInTheDocument();
     expect(screen.getByRole('radio', { name: /Only selected localities/i })).toBeChecked();
     expect(screen.getByDisplayValue('Stonecrest, Lithonia')).toBeInTheDocument();
 
-    window.localStorage.setItem('pp-parse-last-job', JSON.stringify({ version: 1, jobId: 'job-legacy', stateValue: 'Georgia', countyValue: 'DeKalb', cityValue: 'Stonecrest', campaignName: '' }));
-    getJobDetail.mockResolvedValueOnce({ job: { job_id: 'job-legacy' }, summary: {} });
+    window.localStorage.setItem('pp-parse-last-job', JSON.stringify({ version: 1, jobId: HYDRATION_JOB_UUID_LEGACY, stateValue: 'Georgia', countyValue: 'DeKalb', cityValue: 'Stonecrest', campaignName: '' }));
+    getJobDetail.mockResolvedValueOnce({ job: { job_id: HYDRATION_JOB_UUID_LEGACY }, summary: {} });
     getJobResults.mockResolvedValueOnce({ summary: { rows_received: 0 }, row_results: [], canonical_addresses: [], duplicate_groups: [] });
 
-    render(<MemoryRouter initialEntries={['/?job=job-legacy']}><ParsePage /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={[`/?job=${HYDRATION_JOB_UUID_LEGACY}`]}><ParsePage /></MemoryRouter>);
     expect(await screen.findByDisplayValue('Stonecrest')).toBeInTheDocument();
   });
 
