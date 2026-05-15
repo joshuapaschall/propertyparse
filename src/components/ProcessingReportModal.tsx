@@ -10,7 +10,7 @@ import {
   isSkippedRow,
   isValidRow,
   matchesSearch,
-  stringifyPreview,
+  getReasonMetadata,
 } from '../lib/parseUtils';
 
 export type ProcessingReportFilter =
@@ -405,8 +405,8 @@ export default function ProcessingReportModal({
                     <th className="px-4 py-3">Status</th>
                     <th className="px-4 py-3">Detected Address</th>
                     <th className="px-4 py-3">Canonical Address</th>
-                    <th className="px-4 py-3">Reason Code</th>
-                    <th className="px-4 py-3">Reason Detail</th>
+                    <th className="px-4 py-3">Reason</th>
+                    <th className="px-4 py-3">What To Do</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
@@ -458,10 +458,14 @@ export default function ProcessingReportModal({
                             {row.formatted_address || '--'}
                           </td>
                           <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
-                            {row.reason_code || '--'}
+                            {row.reason_code
+                              ? getReasonMetadata(row as RowResult).label
+                              : '--'}
                           </td>
                           <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                            {stringifyPreview(row.reason_detail ?? '--', 120)}
+                            {row.reason_code
+                              ? (getReasonMetadata(row as RowResult).fix_hint || '--')
+                              : '--'}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex flex-wrap justify-end gap-2">
