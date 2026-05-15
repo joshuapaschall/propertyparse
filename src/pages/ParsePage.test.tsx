@@ -228,7 +228,7 @@ describe('ParsePage', () => {
     expect(screen.getAllByRole('checkbox', { name: /Select out of scope row group/i })[0]).toBeEnabled();
   });
 
-  it('renders explicit force override for risky rows and keeps them out of bulk approval', async () => {
+  it('renders explicit force override for risky rows and includes them in bulk approval', async () => {
     const user = userEvent.setup();
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 2 });
     parseFile.mockResolvedValue({
@@ -264,7 +264,7 @@ describe('ParsePage', () => {
       duplicate_groups: [],
     });
     approveMatchedJobRow.mockResolvedValue({ updated_row_results: [], updated_job: {} });
-    approveMatchedJobRowsBatch.mockResolvedValue({ updated_row_results: [], failed_rows: [], metadata: { approved_count: 1, failed_count: 0, requested_count: 1 }, updated_job: {} });
+    approveMatchedJobRowsBatch.mockResolvedValue({ updated_row_results: [], failed_rows: [], metadata: { approved_count: 2, failed_count: 0, requested_count: 2 }, updated_job: {} });
 
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
@@ -275,15 +275,23 @@ describe('ParsePage', () => {
     await user.click((await screen.findAllByRole('button', { name: /Needs Review/i }))[0]);
     expect(await screen.findByText('Override to Valid')).toBeInTheDocument();
     const checkboxes = screen.getAllByRole('checkbox', { name: /Select row group/i });
-    expect(checkboxes[0]).toBeDisabled();
+    expect(checkboxes[0]).toBeEnabled();
     expect(checkboxes[1]).toBeEnabled();
 
-    await user.click(screen.getByText('Override to Valid'));
-    expect(approveMatchedJobRow).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ forceOverride: true, overrideReason: 'Manual review confirmed' }),
-    );
-    expect(approveMatchedJobRowsBatch).not.toHaveBeenCalled();
+    await user.click(checkboxes[0]);
+    await user.click(checkboxes[1]);
+    await user.click(screen.getByRole('button', { name: 'Approve Selected' }));
+
+    await waitFor(() => {
+      expect(approveMatchedJobRowsBatch).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.arrayContaining(['force-only', 'safe-bulk']),
+        false,
+        true,
+        'Bulk override — manual review confirmed',
+      );
+    });
+    expect(approveMatchedJobRow).not.toHaveBeenCalled();
   });
 
   it('shows scope summary copy for county-wide vs locality-only scope', async () => {

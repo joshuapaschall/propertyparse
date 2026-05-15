@@ -604,6 +604,8 @@ export async function approveMatchedJobRowsBatch(
   jobId: string,
   rowIds: string[],
   allowScopeOverride = false,
+  forceOverride = false,
+  overrideReason = '',
 ) {
   return postJson<{
     updated_row_results?: RowResult[];
@@ -622,6 +624,8 @@ export async function approveMatchedJobRowsBatch(
   }>(`/jobs/${jobId}/approve-matched-batch`, {
     row_ids: rowIds,
     allow_scope_override: allowScopeOverride,
+    force_override: forceOverride,
+    override_reason: overrideReason,
   });
 }
 
