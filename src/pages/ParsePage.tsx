@@ -3558,7 +3558,7 @@ How to fix: ${fixHint}` : ''}`;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
-        freshReload: true,
+        freshReload: false,
       });
       publishLiveUpdate('job-updated');
       publishLiveUpdate('metrics-updated');
@@ -3632,7 +3632,7 @@ How to fix: ${fixHint}` : ''}`;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
-        freshReload: true,
+        freshReload: false,
       });
       const hasDuplicate = updates.some((updatedRow) =>
         normalizeStatus(updatedRow.status).includes('DUPLICATE'),
@@ -3707,7 +3707,7 @@ How to fix: ${fixHint}` : ''}`;
       await handleRetryUpdates({
         updatedRows: updates,
         updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
-        freshReload: true,
+        freshReload: false,
       });
       publishLiveUpdate('job-updated');
       publishLiveUpdate('metrics-updated');
