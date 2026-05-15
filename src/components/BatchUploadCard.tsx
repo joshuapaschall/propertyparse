@@ -15,9 +15,13 @@ import {
  * screenshots in waves. There's a per-file remove + a "Remove all".
  */
 
-const ACCEPTED_EXTENSIONS = ['.png', '.jpg', '.jpeg'];
-const ACCEPT_ATTRIBUTE = ACCEPTED_EXTENSIONS.join(',');
-const DEFAULT_MAX_FILES = 2000;
+const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg'] as const;
+const DOCUMENT_EXTENSIONS = ['.csv', '.tsv', '.xlsx', '.xls', '.pdf', '.doc', '.docx'] as const;
+const ALL_ACCEPTED = [...IMAGE_EXTENSIONS, ...DOCUMENT_EXTENSIONS] as const;
+const ACCEPT_ATTRIBUTE = ALL_ACCEPTED.join(',');
+const DEFAULT_MAX_IMAGES = 2000;
+const DEFAULT_MAX_DOCUMENTS = 100;
+const DEFAULT_MAX_DOC_SIZE_BYTES = 25 * 1024 * 1024;
 const COLLAPSE_LIST_THRESHOLD = 10;
 
 const formatBytes = (bytes: number): string => {
@@ -28,12 +32,23 @@ const formatBytes = (bytes: number): string => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 };
 
-const hasAcceptedExtension = (fileName: string): boolean => {
-  const lower = fileName.toLowerCase();
-  return ACCEPTED_EXTENSIONS.some((ext) => lower.endsWith(ext));
+const getLowerExtension = (fileName: string): string => {
+  const dotIndex = fileName.lastIndexOf('.');
+  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : '';
 };
 
-export type BatchUploadRejectionReason = 'type' | 'count';
+const isImageExtension = (ext: string): boolean =>
+  (IMAGE_EXTENSIONS as readonly string[]).includes(ext);
+
+const isDocumentExtension = (ext: string): boolean =>
+  (DOCUMENT_EXTENSIONS as readonly string[]).includes(ext);
+
+const hasAcceptedExtension = (fileName: string): boolean => {
+  const lowerExt = getLowerExtension(fileName);
+  return (ALL_ACCEPTED as readonly string[]).includes(lowerExt);
+};
+
+export type BatchUploadRejectionReason = 'type' | 'count' | 'size';
 
 export type BatchUploadRejection = {
   reason: BatchUploadRejectionReason;
@@ -46,6 +61,9 @@ type BatchUploadCardProps = {
   onChange: (files: File[]) => void;
   /** Max images per batch. Defaults to 2000. */
   maxFiles?: number;
+  maxImages?: number;
+  maxDocuments?: number;
+  maxDocumentSizeBytes?: number;
   onReject?: (rejection: BatchUploadRejection) => void;
   /** When true, the card is in "processing" state: inputs disabled. */
   submitting?: boolean;
@@ -54,43 +72,104 @@ type BatchUploadCardProps = {
 export default function BatchUploadCard({
   files,
   onChange,
-  maxFiles = DEFAULT_MAX_FILES,
+  maxFiles,
+  maxImages,
+  maxDocuments = DEFAULT_MAX_DOCUMENTS,
+  maxDocumentSizeBytes = DEFAULT_MAX_DOC_SIZE_BYTES,
   onReject,
   submitting = false,
 }: BatchUploadCardProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const resolvedMaxImages = maxImages ?? maxFiles ?? DEFAULT_MAX_IMAGES;
   const [inlineError, setInlineError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
 
   const appendFiles = useCallback(
     (incoming: File[]) => {
       if (incoming.length === 0) return;
-      // Partition into accepted + rejected by extension.
-      const rejected: File[] = [];
       const accepted: File[] = [];
+      const rejectedType: File[] = [];
+      const rejectedSize: File[] = [];
+
       for (const candidate of incoming) {
-        if (hasAcceptedExtension(candidate.name)) {
-          accepted.push(candidate);
-        } else {
-          rejected.push(candidate);
+        const ext = getLowerExtension(candidate.name);
+        if (!hasAcceptedExtension(candidate.name)) {
+          rejectedType.push(candidate);
+          continue;
+        }
+        if (isDocumentExtension(ext) && candidate.size > maxDocumentSizeBytes) {
+          rejectedSize.push(candidate);
+          continue;
+        }
+        accepted.push(candidate);
+      }
+
+      if (rejectedType.length > 0) {
+        const message = `Unsupported file type${rejectedType.length > 1 ? 's' : ''}. Batch upload accepts ${ALL_ACCEPTED.join(', ')} only.`;
+        setInlineError(message);
+        onReject?.({ reason: 'type', message, rejectedFiles: rejectedType });
+      }
+
+      if (rejectedSize.length > 0) {
+        const first = rejectedSize[0];
+        const message = `${first.name} is ${formatBytes(first.size)}, exceeds the ${formatBytes(maxDocumentSizeBytes)} limit.`;
+        setInlineError(message);
+        onReject?.({ reason: 'size', message, rejectedFiles: rejectedSize });
+      }
+
+      const existingImageCount = files.filter((file) => isImageExtension(getLowerExtension(file.name))).length;
+      const existingDocumentCount = files.length - existingImageCount;
+      const incomingImages = accepted.filter((file) => isImageExtension(getLowerExtension(file.name)));
+      
+      const acceptedAfterLimits = accepted.slice();
+      if (existingImageCount + incomingImages.length > resolvedMaxImages) {
+        const allowed = Math.max(0, resolvedMaxImages - existingImageCount);
+        const rejectedImageCount = incomingImages.length - allowed;
+        const message = `Image limit is ${resolvedMaxImages} per batch; you have ${existingImageCount} images selected and tried to add ${incomingImages.length} more.`;
+        setInlineError(message);
+        onReject?.({ reason: 'count', message, rejectedFiles: incomingImages.slice(allowed) });
+        let removed = 0;
+        for (let i = acceptedAfterLimits.length - 1; i >= 0 && removed < rejectedImageCount; i -= 1) {
+          if (isImageExtension(getLowerExtension(acceptedAfterLimits[i].name))) {
+            acceptedAfterLimits.splice(i, 1);
+            removed += 1;
+          }
         }
       }
-      if (rejected.length > 0) {
-        const message = `Unsupported file type${rejected.length > 1 ? 's' : ''}. Batch upload accepts ${ACCEPTED_EXTENSIONS.join(', ')} only.`;
+
+      const acceptedDocumentFiles = acceptedAfterLimits.filter((file) => !isImageExtension(getLowerExtension(file.name)));
+      if (existingDocumentCount + acceptedDocumentFiles.length > maxDocuments) {
+        const allowed = Math.max(0, maxDocuments - existingDocumentCount);
+        const message = `Document limit is ${maxDocuments} per batch; you have ${existingDocumentCount} documents selected and tried to add ${acceptedDocumentFiles.length} more.`;
         setInlineError(message);
-        onReject?.({ reason: 'type', message, rejectedFiles: rejected });
-        if (accepted.length === 0) return;
-      }
-      if (files.length + accepted.length > maxFiles) {
-        const message = `Batch limit is ${maxFiles} images; you have ${files.length} selected and tried to add ${accepted.length} more.`;
-        setInlineError(message);
-        onReject?.({ reason: 'count', message, rejectedFiles: accepted });
+        onReject?.({ reason: 'count', message, rejectedFiles: acceptedDocumentFiles.slice(allowed) });
+        let keptDocs = 0;
+        const nextAccepted: File[] = [];
+        for (const file of acceptedAfterLimits) {
+          if (isImageExtension(getLowerExtension(file.name))) {
+            nextAccepted.push(file);
+            continue;
+          }
+          if (keptDocs < allowed) {
+            nextAccepted.push(file);
+            keptDocs += 1;
+          }
+        }
+        if (nextAccepted.length === 0) return;
+        onChange([...files, ...nextAccepted]);
         return;
       }
-      if (rejected.length === 0) setInlineError(null);
-      onChange([...files, ...accepted]);
+
+      if (acceptedAfterLimits.length === 0) return;
+      if (rejectedType.length === 0 && rejectedSize.length === 0) {
+        const countRejected =
+          existingImageCount + incomingImages.length > resolvedMaxImages ||
+          existingDocumentCount + acceptedDocumentFiles.length > maxDocuments;
+        if (!countRejected) setInlineError(null);
+      }
+      onChange([...files, ...acceptedAfterLimits]);
     },
-    [files, maxFiles, onChange, onReject],
+    [files, maxDocumentSizeBytes, maxDocuments, onChange, onReject, resolvedMaxImages],
   );
 
   const removeAt = useCallback(
@@ -174,10 +253,10 @@ export default function BatchUploadCard({
         />
         <div className="space-y-2">
           <p className="text-sm font-semibold text-slate-700 dark:text-slate-200">
-            Drag &amp; drop screenshots here
+            Drag &amp; drop files here
           </p>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Or click to choose multiple images.
+            Or click to choose multiple files.
           </p>
           <button
             type="button"
@@ -185,12 +264,12 @@ export default function BatchUploadCard({
             disabled={submitting}
             className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {files.length === 0 ? 'Choose Images' : 'Add more'}
+            {files.length === 0 ? 'Choose files' : 'Add more'}
           </button>
         </div>
       </div>
       <p className="text-xs text-slate-500 dark:text-slate-400">
-        Drop screenshots — they&apos;ll be compressed and stitched into PDFs automatically. Up to {maxFiles} images per batch. PNG, JPG, JPEG only.
+        Mix images and documents in one batch. Images (PNG, JPG, JPEG) are compressed and stitched into PDFs automatically — up to {resolvedMaxImages} per batch. Documents (CSV, TSV, XLSX, XLS, PDF, DOC, DOCX) upload as-is, up to {maxDocuments} per batch, {formatBytes(maxDocumentSizeBytes)} each.
       </p>
       {inlineError ? (
         <p
@@ -209,7 +288,15 @@ export default function BatchUploadCard({
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="font-semibold text-slate-700 dark:text-slate-200">
-                {files.length} image{files.length === 1 ? '' : 's'} selected
+                {files.length} file{files.length === 1 ? '' : 's'} selected ({(() => {
+                  const imageCount = files.filter((file) => isImageExtension(getLowerExtension(file.name))).length;
+                  const documentCount = files.length - imageCount;
+                  const parts = [
+                    imageCount > 0 ? `${imageCount} image${imageCount === 1 ? '' : 's'}` : null,
+                    documentCount > 0 ? `${documentCount} document${documentCount === 1 ? '' : 's'}` : null,
+                  ].filter(Boolean);
+                  return parts.join(', ');
+                })()})
               </p>
               <p className="text-xs text-slate-500 dark:text-slate-400">
                 Total: {formatBytes(totalBytes)}
@@ -227,7 +314,15 @@ export default function BatchUploadCard({
           </div>
           {showCollapsedSummary ? (
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              {files.length} files selected ({formatBytes(totalBytes)}). Individual files will be processed in order.
+              {files.length} file{files.length === 1 ? '' : 's'} selected ({(() => {
+              const imageCount = files.filter((file) => isImageExtension(getLowerExtension(file.name))).length;
+              const documentCount = files.length - imageCount;
+              const parts = [
+                imageCount > 0 ? `${imageCount} image${imageCount === 1 ? '' : 's'}` : null,
+                documentCount > 0 ? `${documentCount} document${documentCount === 1 ? '' : 's'}` : null,
+              ].filter(Boolean);
+              return parts.join(', ');
+            })()}).
             </p>
           ) : (
             <ul className="max-h-64 space-y-1 overflow-y-auto pr-1">

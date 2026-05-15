@@ -92,6 +92,10 @@ const RESULTS_HYDRATION_BASE_DELAY_MS = 700;
 const ASYNC_PARSE_FILE_SIZE_THRESHOLD = 5 * 1024 * 1024;
 const ASYNC_PARSE_MIME_PREFIXES = ['application/pdf', 'image/'];
 const ASYNC_PARSE_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'tiff', 'tif', 'bmp', 'heic', 'heif'];
+const IMAGE_EXT_RE = /\.(png|jpe?g)$/i;
+const MAX_429_RETRY_ATTEMPTS = 12;
+const RETRY_429_WAIT_MS = 5000;
+const isImageFile = (file: File): boolean => IMAGE_EXT_RE.test(file.name);
 
 
 /**
@@ -134,6 +138,34 @@ function safeUuid(): string {
     const v = c === 'x' ? r : (r & 0x3) | 0x8;
     return v.toString(16);
   });
+}
+
+async function submitWithConcurrencyRetry<T>(
+  submit: () => Promise<T>,
+  signal: AbortSignal,
+  onWait: (attemptIndex: number) => void,
+): Promise<T> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < MAX_429_RETRY_ATTEMPTS; attempt += 1) {
+    if (signal.aborted) throw new DOMException('Aborted', 'AbortError');
+    try {
+      return await submit();
+    } catch (err) {
+      const info = getApiErrorInfo(err);
+      if (info?.status !== 429) throw err;
+      lastErr = err;
+      onWait(attempt);
+      await new Promise<void>((resolve, reject) => {
+        const t = setTimeout(resolve, RETRY_429_WAIT_MS);
+        const onAbort = () => {
+          clearTimeout(t);
+          reject(new DOMException('Aborted', 'AbortError'));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+      });
+    }
+  }
+  throw lastErr ?? new Error('Concurrency retry exhausted');
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -831,7 +863,7 @@ export default function ParsePage() {
   const [uploadMode, setUploadMode] = useState<'single' | 'batch'>('single');
   const [batchFiles, setBatchFiles] = useState<File[]>([]);
   const [batchProgress, setBatchProgress] = useState<{
-    phase: 'idle' | 'creating-batch' | 'compressing' | 'chunking' | 'uploading' | 'submitting' | 'done' | 'error';
+    phase: 'idle' | 'creating-batch' | 'compressing' | 'chunking' | 'uploading' | 'submitting' | 'waiting-for-slot' | 'done' | 'error';
     current: number;
     total: number;
     message: string;
@@ -3044,83 +3076,170 @@ How to fix: ${fixHint}` : ''}`;
       });
       if (!mountedRef.current || signal.aborted) return;
 
-      // Compression: sequential. At 1500 images, Promise.all here would
-      // exhaust browser memory. Phase B3 may revisit with a concurrency
-      // cap; B2a stays sequential for safety.
-      const compressed: { blob: Blob; filename: string }[] = [];
-      for (let i = 0; i < batchFiles.length; i += 1) {
-        if (!mountedRef.current || signal.aborted) return;
+      const imageFiles = batchFiles.filter(isImageFile);
+      const docFiles = batchFiles.filter((file) => !isImageFile(file));
+      const failures: { filename: string; reason: string }[] = [];
+      let chunkResult: Awaited<ReturnType<typeof chunkImagesIntoPdfs>> | null = null;
+
+      if (imageFiles.length > 0) {
+        const compressed: { blob: Blob; filename: string }[] = [];
+        for (let i = 0; i < imageFiles.length; i += 1) {
+          if (!mountedRef.current || signal.aborted) return;
+          setBatchProgress({
+            phase: 'compressing',
+            current: i + 1,
+            total: imageFiles.length,
+            message: `Compressing image ${i + 1} of ${imageFiles.length}…`,
+            batchId: batch.id,
+            jobIds: [],
+          });
+          const result = await compressImage(imageFiles[i]);
+          compressed.push({ blob: result.blob, filename: imageFiles[i].name });
+        }
+
         setBatchProgress({
-          phase: 'compressing',
-          current: i + 1,
-          total: batchFiles.length,
-          message: `Compressing image ${i + 1} of ${batchFiles.length}…`,
+          phase: 'chunking',
+          current: 0,
+          total: 0,
+          message: `Stitching ${compressed.length} images into PDFs…`,
           batchId: batch.id,
           jobIds: [],
         });
-        const result = await compressImage(batchFiles[i]);
-        compressed.push({ blob: result.blob, filename: batchFiles[i].name });
+        chunkResult = await chunkImagesIntoPdfs(compressed);
+        if (!mountedRef.current || signal.aborted) return;
       }
 
-      setBatchProgress({
-        phase: 'chunking',
-        current: 0,
-        total: 0,
-        message: `Stitching ${compressed.length} images into PDFs…`,
-        batchId: batch.id,
-        jobIds: [],
-      });
-      const chunkResult = await chunkImagesIntoPdfs(compressed);
-      if (!mountedRef.current || signal.aborted) return;
-
+      const imagePdfCount = imageFiles.length > 0 && chunkResult ? chunkResult.chunks.length : 0;
+      const totalSubmissions = imagePdfCount + docFiles.length;
       const jobIds: string[] = [];
-      for (let i = 0; i < chunkResult.chunks.length; i += 1) {
+      let submittedCount = 0;
+      if (chunkResult) {
+        for (let i = 0; i < chunkResult.chunks.length; i += 1) {
+          if (!mountedRef.current || signal.aborted) return;
+          const chunk = chunkResult.chunks[i];
+          const chunkFilename = `batch-${batch.id.slice(0, 8)}-part-${i + 1}-of-${chunkResult.chunks.length}.pdf`;
+          const chunkFile = new File([chunk.pdfBlob], chunkFilename, { type: 'application/pdf' });
+          submittedCount += 1;
+          setBatchProgress({
+            phase: 'uploading',
+            current: submittedCount,
+            total: totalSubmissions,
+            message: `Uploading PDF ${i + 1} of ${chunkResult.chunks.length}…`,
+            batchId: batch.id,
+            jobIds: jobIds.slice(),
+          });
+          try {
+            const upload = await uploadFile(chunkFile, trimmedCampaignName || undefined, signal);
+            if (!mountedRef.current || signal.aborted) return;
+            setBatchProgress({
+              phase: 'submitting',
+              current: submittedCount,
+              total: totalSubmissions,
+              message: `Submitting parse job ${i + 1} of ${chunkResult.chunks.length}…`,
+              batchId: batch.id,
+              jobIds: jobIds.slice(),
+            });
+            const newJobId = safeUuid();
+            await submitWithConcurrencyRetry(
+              () => parseFileAsync(upload.fileId, {
+                ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
+                force_refresh: forceRefresh,
+                jobId: newJobId,
+                jobName: trimmedCampaignName || undefined,
+                batchId: batch.id,
+              }),
+              signal,
+              (attempt) => {
+                setBatchProgress({
+                  phase: 'waiting-for-slot',
+                  current: submittedCount,
+                  total: totalSubmissions,
+                  message: `Concurrency limit reached. Waiting for a slot (attempt ${attempt + 1}/${MAX_429_RETRY_ATTEMPTS})…`,
+                  batchId: batch.id,
+                  jobIds: jobIds.slice(),
+                });
+              },
+            );
+            jobIds.push(newJobId);
+          } catch (err) {
+            if ((err as { name?: string })?.name === 'AbortError') throw err;
+            failures.push({ filename: chunkFilename, reason: (err as Error).message ?? 'Submission failed.' });
+          }
+        }
+      }
+
+      for (let docIndex = 0; docIndex < docFiles.length; docIndex += 1) {
         if (!mountedRef.current || signal.aborted) return;
-        const chunk = chunkResult.chunks[i];
-        const chunkFile = new File(
-          [chunk.pdfBlob],
-          `batch-${batch.id.slice(0, 8)}-part-${i + 1}-of-${chunkResult.chunks.length}.pdf`,
-          { type: 'application/pdf' },
-        );
+        const file = docFiles[docIndex];
+        submittedCount += 1;
         setBatchProgress({
           phase: 'uploading',
-          current: i + 1,
-          total: chunkResult.chunks.length,
-          message: `Uploading PDF ${i + 1} of ${chunkResult.chunks.length}…`,
+          current: submittedCount,
+          total: totalSubmissions,
+          message: `Uploading ${file.name} (document ${docIndex + 1} of ${docFiles.length})…`,
           batchId: batch.id,
           jobIds: jobIds.slice(),
         });
-        const upload = await uploadFile(chunkFile, trimmedCampaignName || undefined, signal);
-        if (!mountedRef.current || signal.aborted) return;
+        let upload;
+        try {
+          upload = await uploadFile(file, trimmedCampaignName || undefined, signal);
+        } catch (err) {
+          if ((err as { name?: string })?.name === 'AbortError') throw err;
+          failures.push({ filename: file.name, reason: (err as Error).message ?? 'Upload failed.' });
+          continue;
+        }
 
         setBatchProgress({
           phase: 'submitting',
-          current: i + 1,
-          total: chunkResult.chunks.length,
-          message: `Submitting parse job ${i + 1} of ${chunkResult.chunks.length}…`,
+          current: submittedCount,
+          total: totalSubmissions,
+          message: `Submitting parse job ${submittedCount} of ${totalSubmissions}…`,
           batchId: batch.id,
           jobIds: jobIds.slice(),
         });
-        const newJobId = safeUuid();
-        await parseFileAsync(upload.fileId, {
-          ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
-          force_refresh: forceRefresh,
-          jobId: newJobId,
-          jobName: trimmedCampaignName || undefined,
-          batchId: batch.id,
-        });
-        jobIds.push(newJobId);
+        try {
+          const newJobId = safeUuid();
+          await submitWithConcurrencyRetry(
+            () => parseFileAsync(upload.fileId, {
+              ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
+              force_refresh: forceRefresh,
+              jobId: newJobId,
+              jobName: trimmedCampaignName || undefined,
+              batchId: batch.id,
+            }),
+            signal,
+            (attempt) => {
+              setBatchProgress({
+                phase: 'waiting-for-slot',
+                current: submittedCount,
+                total: totalSubmissions,
+                message: `Concurrency limit reached. Waiting for a slot (attempt ${attempt + 1}/${MAX_429_RETRY_ATTEMPTS})…`,
+                batchId: batch.id,
+                jobIds: jobIds.slice(),
+              });
+            },
+          );
+          jobIds.push(newJobId);
+        } catch (err) {
+          if ((err as { name?: string })?.name === 'AbortError') throw err;
+          failures.push({ filename: file.name, reason: (err as Error).message ?? 'Submission failed.' });
+        }
       }
 
       if (!mountedRef.current || signal.aborted) return;
       setBatchProgress({
         phase: 'done',
-        current: chunkResult.chunks.length,
-        total: chunkResult.chunks.length,
-        message: `Batch submitted: ${batchFiles.length} image${batchFiles.length === 1 ? '' : 's'} across ${chunkResult.chunks.length} parse job${chunkResult.chunks.length === 1 ? '' : 's'}. Track progress in the dashboard.`,
+        current: totalSubmissions,
+        total: totalSubmissions,
+        message: failures.length === 0
+          ? `Batch submitted: ${batchFiles.length} file${batchFiles.length === 1 ? '' : 's'} across ${jobIds.length} parse job${jobIds.length === 1 ? '' : 's'}. Track progress in the dashboard.`
+          : `Batch submitted: ${jobIds.length} job${jobIds.length === 1 ? '' : 's'} created, ${failures.length} file${failures.length === 1 ? '' : 's'} failed. Track progress in the dashboard.`,
         batchId: batch.id,
         jobIds,
       });
+      if (failures.length > 0) {
+        setError(`${failures.length} file(s) failed:\n${failures.map((f) => `• ${f.filename}: ${f.reason}`).join('\n')}`);
+      }
       publishLiveUpdate('job-updated', batch.id);
       publishLiveUpdate('metrics-updated', batch.id);
       setBusy(false);

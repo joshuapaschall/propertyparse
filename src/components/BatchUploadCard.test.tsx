@@ -48,15 +48,15 @@ describe('BatchUploadCard', () => {
     expect(passed).toHaveLength(3);
   });
 
-  it('rejects PDF / CSV / other unsupported types with reason "type"', () => {
+  it('rejects truly unsupported types (.txt, .zip)', () => {
     const onChange = vi.fn();
     const onReject = vi.fn();
     render(<BatchUploadCard files={[]} onChange={onChange} onReject={onReject} />);
     const input = screen.getByTestId('batch-upload-input') as HTMLInputElement;
 
     fireFileInputChange(input, [
-      makeFile('doc.pdf', 100, 'application/pdf'),
-      makeFile('addresses.csv', 200, 'text/csv'),
+      makeFile('archive.zip', 100, 'application/zip'),
+      makeFile('notes.txt', 200, 'text/plain'),
     ]);
 
     expect(onChange).not.toHaveBeenCalled();
@@ -75,7 +75,7 @@ describe('BatchUploadCard', () => {
 
     fireFileInputChange(input, [
       makeFile('valid.png', 100, 'image/png'),
-      makeFile('invalid.pdf', 100, 'application/pdf'),
+      makeFile('invalid.zip', 100, 'application/zip'),
     ]);
 
     expect(onChange).toHaveBeenCalledTimes(1);
@@ -103,10 +103,92 @@ describe('BatchUploadCard', () => {
       makeFile('b.png', 100, 'image/png'),
     ]);
 
-    expect(onChange).not.toHaveBeenCalled();
+    // PP-MIX behavior accepts as many files as fit the cap and rejects only overflow.
+    expect(onChange).toHaveBeenCalledTimes(1);
+    const passed = onChange.mock.calls[0][0] as File[];
+    expect(passed.map((f) => f.name)).toEqual(['existing.png', 'a.png']);
     expect(onReject).toHaveBeenCalledTimes(1);
     const rejection = onReject.mock.calls[0][0] as BatchUploadRejection;
     expect(rejection.reason).toBe('count');
+  });
+
+  it('accepts a mix of images and documents in one selection', () => {
+    const onChange = vi.fn();
+    render(<BatchUploadCard files={[]} onChange={onChange} />);
+    const input = screen.getByTestId('batch-upload-input') as HTMLInputElement;
+    fireFileInputChange(input, [
+      makeFile('a.png', 100, 'image/png'),
+      makeFile('b.png', 100, 'image/png'),
+      makeFile('sheet.xlsx', 100, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+      makeFile('packet.pdf', 100, 'application/pdf'),
+    ]);
+    const passed = onChange.mock.calls[0][0] as File[];
+    expect(passed.map((f) => f.name)).toEqual(['a.png', 'b.png', 'sheet.xlsx', 'packet.pdf']);
+  });
+
+  it('rejects a document larger than maxDocumentSizeBytes with reason size', () => {
+    const onChange = vi.fn();
+    const onReject = vi.fn();
+    render(<BatchUploadCard files={[]} onChange={onChange} onReject={onReject} maxDocumentSizeBytes={1024} />);
+    const input = screen.getByTestId('batch-upload-input') as HTMLInputElement;
+    fireFileInputChange(input, [
+      makeFile('too-big.xlsx', 2048, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'),
+      makeFile('big-image.png', 2048, 'image/png'),
+    ]);
+    const rejection = onReject.mock.calls.find((call) => (call[0] as BatchUploadRejection).reason === 'size')?.[0] as BatchUploadRejection;
+    expect(rejection.reason).toBe('size');
+    const passed = onChange.mock.calls[0][0] as File[];
+    expect(passed.map((f) => f.name)).toEqual(['big-image.png']);
+  });
+
+  it('enforces maxImages independently of maxDocuments', () => {
+    const onChange = vi.fn();
+    const onReject = vi.fn();
+    const existing = [makeFile('a.png', 100), makeFile('b.png', 100)];
+    render(<BatchUploadCard files={existing} onChange={onChange} onReject={onReject} maxImages={2} maxDocuments={10} />);
+    const input = screen.getByTestId('batch-upload-input') as HTMLInputElement;
+    fireFileInputChange(input, [
+      makeFile('extra.png', 100),
+      makeFile('1.xlsx', 100, 'application/vnd.ms-excel'),
+      makeFile('2.xlsx', 100, 'application/vnd.ms-excel'),
+      makeFile('3.xlsx', 100, 'application/vnd.ms-excel'),
+      makeFile('4.xlsx', 100, 'application/vnd.ms-excel'),
+      makeFile('5.xlsx', 100, 'application/vnd.ms-excel'),
+    ]);
+    const passed = onChange.mock.calls[0][0] as File[];
+    expect(passed.map((f) => f.name)).toEqual(['a.png', 'b.png', '1.xlsx', '2.xlsx', '3.xlsx', '4.xlsx', '5.xlsx']);
+    expect(onReject).toHaveBeenCalled();
+  });
+
+  it('enforces maxDocuments independently of maxImages', () => {
+    const onChange = vi.fn();
+    const onReject = vi.fn();
+    const existing = [makeFile('a.xlsx', 100, 'application/vnd.ms-excel'), makeFile('b.xlsx', 100, 'application/vnd.ms-excel')];
+    render(<BatchUploadCard files={existing} onChange={onChange} onReject={onReject} maxImages={10} maxDocuments={2} />);
+    const input = screen.getByTestId('batch-upload-input') as HTMLInputElement;
+    fireFileInputChange(input, [
+      makeFile('extra.xlsx', 100, 'application/vnd.ms-excel'),
+      makeFile('1.png', 100),
+      makeFile('2.png', 100),
+      makeFile('3.png', 100),
+      makeFile('4.png', 100),
+      makeFile('5.png', 100),
+    ]);
+    const passed = onChange.mock.calls[0][0] as File[];
+    expect(passed.map((f) => f.name)).toEqual(['a.xlsx', 'b.xlsx', '1.png', '2.png', '3.png', '4.png', '5.png']);
+    expect(onReject).toHaveBeenCalled();
+  });
+
+  it('selected files summary shows both image and document counts', () => {
+    const files = [
+      makeFile('a.png', 100),
+      makeFile('b.png', 100),
+      makeFile('c.png', 100),
+      makeFile('a.xlsx', 100, 'application/vnd.ms-excel'),
+      makeFile('b.xlsx', 100, 'application/vnd.ms-excel'),
+    ];
+    render(<BatchUploadCard files={files} onChange={vi.fn()} />);
+    expect(screen.getByText(/5 files selected.*3 images.*2 documents/)).toBeInTheDocument();
   });
 
   it('APPENDS new files to the existing list rather than replacing', () => {
