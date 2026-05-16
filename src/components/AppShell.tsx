@@ -71,6 +71,7 @@ export default function AppShell({ title, subtitle, actions, children, contentFu
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const canAccessAdmin = role === 'admin' || role === 'owner';
   const visibleNavItems = canAccessAdmin ? [...navItems, adminNavItem] : navItems;
+  const widthClass = density === 'wide' ? 'max-w-[1600px]' : 'max-w-[1440px]';
 
   const renderNavLinks = () => (
     <nav className="space-y-1">
@@ -206,4 +207,3 @@ export default function AppShell({ title, subtitle, actions, children, contentFu
     </div>
   );
 }
-  const widthClass = density === 'wide' ? 'max-w-[1600px]' : 'max-w-[1440px]';
