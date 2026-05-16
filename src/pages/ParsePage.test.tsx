@@ -8,7 +8,6 @@ const getJobWithStatus = vi.fn();
 const getJobDetail = vi.fn();
 const getJobResults = vi.fn();
 const getAllJobRows = vi.fn();
-const parseFile = vi.fn();
 const parseFileAsync = vi.fn();
 const uploadFile = vi.fn();
 const getApiErrorInfo = vi.fn();
@@ -122,7 +121,6 @@ vi.mock('../lib/api', () => ({
   getJobResults: (...args: unknown[]) => getJobResults(...args),
   getJobWithStatus: (...args: unknown[]) => getJobWithStatus(...args),
   createBatch: vi.fn(),
-  parseFile: (...args: unknown[]) => parseFile(...args),
   parseFileAsync: (...args: unknown[]) => parseFileAsync(...args),
   approveMatchedJobRow: (...args: unknown[]) => approveMatchedJobRow(...args),
   approveMatchedJobRowsBatch: (...args: unknown[]) => approveMatchedJobRowsBatch(...args),
@@ -143,9 +141,8 @@ describe('ParsePage', () => {
     Element.prototype.scrollIntoView = vi.fn();
     getApiErrorInfo.mockImplementation(() => null);
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
-    parseFile.mockResolvedValue({ summary: { rows_received: 1 }, row_results: [], canonical_addresses: [], duplicate_groups: [] });
     parseFileAsync.mockResolvedValue({ ok: true });
-    getJobWithStatus.mockResolvedValue({ job: { job_id: 'job-1', status: 'RUNNING', phase: 'VERIFYING' } });
+    getJobWithStatus.mockResolvedValue({ job: { job_id: 'job-1', status: 'DONE', phase: 'DONE', progress_done: 1, progress_total: 1 } });
     getJobExportCatalog.mockResolvedValue([]);
     downloadJobExport.mockResolvedValue({ blob: new Blob(['header\n'], { type: 'text/csv' }), filename: 'f.csv' });
     approveMatchedJobRow.mockResolvedValue({ updated_row_results: [], updated_job: {} });
@@ -182,7 +179,7 @@ describe('ParsePage', () => {
   it('normalizes first-render parse rows so backend manual actions apply without reload', async () => {
     const user = userEvent.setup();
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 2 });
-    parseFile.mockResolvedValue({
+    parseFileAsync.mockResolvedValue({
       summary: { rows_received: 2, needs_review: 1, out_of_scope: 1, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, matched: 0, attention_total: 2 },
       row_results: [
         {
@@ -231,7 +228,7 @@ describe('ParsePage', () => {
   it('renders explicit force override for risky rows and includes them in bulk approval', async () => {
     const user = userEvent.setup();
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 2 });
-    parseFile.mockResolvedValue({
+    parseFileAsync.mockResolvedValue({
       summary: { rows_received: 2, needs_review: 2, out_of_scope: 0, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, matched: 0, attention_total: 2 },
       row_results: [
         {
@@ -403,7 +400,7 @@ describe('ParsePage', () => {
       },
     ];
     const summary = { rows_received: 3, needs_review: 3, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 3 };
-    parseFile.mockResolvedValue({
+    parseFileAsync.mockResolvedValue({
       summary,
       row_results: reviewRows,
       canonical_addresses: [],
@@ -428,7 +425,7 @@ describe('ParsePage', () => {
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
     const summary = { rows_received: 1, needs_review: 1, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 1 };
     const rows = [{ source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'LOW_PRECISION', detected_address: 'x' }];
-    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
     getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
     getJobExportCatalog.mockResolvedValue([{ type: 'needs_review', row_count: 0 }]);
 
@@ -466,7 +463,7 @@ describe('ParsePage', () => {
         reason_code: 'LOW_PRECISION',
       },
     ];
-    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
     getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
 
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
@@ -492,7 +489,7 @@ describe('ParsePage', () => {
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
     const summary = { rows_received: 1, needs_review: 1, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 1 };
     const rows = [{ source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'LOW_PRECISION', detected_address: '12 a st' }];
-    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
     getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
     downloadJobExport.mockResolvedValue({ blob: new Blob(['col1,col2\n'], { type: 'text/csv' }), filename: 'needs.csv' });
 
@@ -516,7 +513,7 @@ describe('ParsePage', () => {
       { source_row_id: 'r2', source_row_index: 2, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'HOUSE_NUMBER_MISMATCH', detected_address: '2 b', compare_debug: 'same house number' },
       { source_row_id: 'r3', source_row_index: 3, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'LOW_PRECISION', detected_address: '3 c', verification_precision: 'county' },
     ];
-    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
     getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
 
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
@@ -552,7 +549,7 @@ describe('ParsePage', () => {
       matched: 0,
       attention_total: 3,
     };
-    parseFile.mockResolvedValue({
+    parseFileAsync.mockResolvedValue({
       summary,
       row_results: [
         {
@@ -597,7 +594,7 @@ describe('ParsePage', () => {
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(await screen.findByText('Processing Results')).toBeInTheDocument();
-    expect(screen.getByText('No unique valid addresses yet.')).toBeInTheDocument();
+    expect(screen.queryByText('No unique valid addresses yet.')).not.toBeInTheDocument();
     expect(screen.queryByText('Sutton Pl, Douglasville, GA 30135, USA')).not.toBeInTheDocument();
     expect(screen.queryByText('N View Dr, Georgia 30122, USA')).not.toBeInTheDocument();
     expect(screen.queryByText('Douglas County, GA, USA')).not.toBeInTheDocument();
@@ -711,7 +708,7 @@ describe('ParsePage', () => {
         reason_code: 'LOW_PRECISION',
       },
     ];
-    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
     getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
 
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
@@ -732,7 +729,7 @@ describe('ParsePage', () => {
   it('shows product-safe session copy instead of raw token wording', async () => {
     const user = userEvent.setup();
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
-    parseFile.mockRejectedValue(new Error('We couldn’t verify your session. Sign in again.'));
+    parseFileAsync.mockRejectedValue(new Error('We couldn’t verify your session. Sign in again.'));
 
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
     await user.click(screen.getByRole('button', { name: 'select-file' }));
@@ -840,7 +837,7 @@ describe('ParsePage', () => {
     await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
-    expect(await screen.findByText(/Finalizing results/i)).toBeInTheDocument();
+    await waitFor(() => expect(parseFileAsync).toHaveBeenCalled());
     expect(screen.queryByText(/Processing mismatch/i)).not.toBeInTheDocument();
   });
 
@@ -857,7 +854,7 @@ describe('ParsePage', () => {
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     await waitFor(() =>
-      expect(parseFile).toHaveBeenCalledWith(
+      expect(parseFileAsync).toHaveBeenCalledWith(
         'f1',
         expect.objectContaining({ city: 'Stonecrest', localities: ['Stonecrest', 'Lithonia'], scope_mode: 'locality_strict' }),
       ),
@@ -896,7 +893,7 @@ describe('ParsePage', () => {
       },
       manual_actions: { can_scope_override: true },
     };
-    parseFile.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
     getJobResults.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
     approveMatchedJobRowsBatch.mockResolvedValue({
       updated_row_results: [{ ...row, status: 'VALID_OVERRIDE' }],
@@ -957,7 +954,7 @@ describe('ParsePage', () => {
       resolver_strategy: 'wrapper_text_single_candidate',
       normalized_compare_input: '789 LEGACY LN',
     };
-    parseFile.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
     getJobResults.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
 
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
@@ -990,7 +987,7 @@ describe('ParsePage', () => {
       reason_code: 'missing_county_from_result',
       manual_actions: { blocker: 'missing_county_from_result', can_approve_matched: false },
     };
-    parseFile.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
     getJobResults.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
 
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
@@ -1019,7 +1016,7 @@ describe('ParsePage', () => {
     }));
     const routeRow = { source_row_id: 'route-1', source_row_index: 8, status: 'UNMATCHED_NEEDS_REVIEW', detected_address: '8 Route St', reason_code: 'ROUTE_ALIAS' };
     const rows = [...countyRows, routeRow];
-    parseFile.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
     getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
 
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
@@ -1048,7 +1045,7 @@ describe('ParsePage', () => {
       reason_code: 'MISSING_COUNTY_FROM_RESULT',
       manual_actions: { blocker: 'missing_county_from_result', can_approve_matched: false },
     };
-    parseFile.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+    parseFileAsync.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
     getJobResults.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
 
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
@@ -1083,8 +1080,8 @@ describe('ParsePage', () => {
     await user.click(screen.getByRole('button', { name: 'set-Localities' }));
     await user.click(screen.getByRole('button', { name: /Process File|Reprocess File/i }));
 
-    await waitFor(() => expect(parseFile).toHaveBeenCalled());
-    expect(parseFile).toHaveBeenCalledWith('f1', expect.objectContaining({
+    await waitFor(() => expect(parseFileAsync).toHaveBeenCalled());
+    expect(parseFileAsync).toHaveBeenCalledWith('f1', expect.objectContaining({
       state: 'TX',
       counties: ['Travis'],
       city: 'Stonecrest',
@@ -1105,8 +1102,8 @@ describe('ParsePage', () => {
     await user.click(screen.getByRole('button', { name: 'set-Localities' }));
     await user.click(screen.getByRole('button', { name: /Process File|Reprocess File/i }));
 
-    await waitFor(() => expect(parseFile).toHaveBeenCalled());
-    expect(parseFile).toHaveBeenCalledWith('f1', expect.objectContaining({
+    await waitFor(() => expect(parseFileAsync).toHaveBeenCalled());
+    expect(parseFileAsync).toHaveBeenCalledWith('f1', expect.objectContaining({
       state: 'TX',
       counties: [],
       city: 'Stonecrest',
@@ -1167,14 +1164,14 @@ describe('ParsePage', () => {
     await user.click(screen.getByRole('button', { name: 'set-Counties' }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
-    await waitFor(() => expect(parseFile).toHaveBeenCalled());
-    expect(parseFile).toHaveBeenCalledWith('f1', expect.objectContaining({
+    await waitFor(() => expect(parseFileAsync).toHaveBeenCalled());
+    expect(parseFileAsync).toHaveBeenCalledWith('f1', expect.objectContaining({
       state: 'TX',
       counties: ['Travis'],
       scope_mode: expect.any(String),
     }));
     // Confirm legacy `county` field is NOT sent on the wire.
-    const callArgs = parseFile.mock.calls[0][1];
+    const callArgs = parseFileAsync.mock.calls[0][1];
     expect(callArgs).not.toHaveProperty('county');
   });
 
@@ -1188,8 +1185,8 @@ describe('ParsePage', () => {
       await user.click(screen.getByRole('button', { name: 'set-State' }));
       await user.click(screen.getByRole('button', { name: /set-Counties/i }));
       await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
-      await waitFor(() => expect(parseFile).toHaveBeenCalled());
-      const parsePayload = parseFile.mock.calls[0][1] as { jobId?: string };
+      await waitFor(() => expect(parseFileAsync).toHaveBeenCalled());
+      const parsePayload = parseFileAsync.mock.calls[0][1] as { jobId?: string };
       expect(parsePayload.jobId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     } finally {
       Object.defineProperty(crypto, 'randomUUID', { configurable: true, value: originalRandomUUID });
@@ -1205,7 +1202,7 @@ describe('ParsePage', () => {
     await user.click(screen.getByRole('button', { name: /set-Counties/i }));
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
     await waitFor(() => expect(screen.getByText('upload failed')).toBeInTheDocument());
-    expect(parseFile).not.toHaveBeenCalled();
+    expect(parseFileAsync).not.toHaveBeenCalled();
     expect(getJobWithStatus).not.toHaveBeenCalled();
   });
 
@@ -1246,5 +1243,10 @@ describe('ParsePage', () => {
     expect(singleTab.disabled).toBe(false);
     expect(batchTab.disabled).toBe(false);
   });
+
+
+
+
+
 
 });

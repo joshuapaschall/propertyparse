@@ -263,7 +263,11 @@ const performAuthedFetch = async (path: string, options: RequestInit, retryOnAut
   } catch (error) {
     if (error instanceof TypeError) {
       throw createApiError({
-        message: `Network error (CORS or connectivity). Endpoint: ${path}. Check ALLOWED_ORIGINS on API.`,
+        message:
+          `The request to ${path} did not complete. This can happen if ` +
+          `the job is taking longer than the proxy timeout, or if the ` +
+          `network briefly dropped. Your job may still be running — ` +
+          `check History in a moment to confirm.`,
         endpoint: path,
         isNetworkError: true,
       });
