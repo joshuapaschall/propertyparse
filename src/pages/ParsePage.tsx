@@ -1722,7 +1722,7 @@ export default function ParsePage() {
     return inputAddress ? inputAddress : '(blank)';
   };
 
-  const getMatchedAddress = (row: RowResult) => {
+  const getMatchedAddress = (row: RowResult): { address: string; isCandidate: boolean } => {
     const rowRecord = row as Record<string, unknown>;
     const verificationRecord =
       rowRecord.verification && typeof rowRecord.verification === 'object'
@@ -1730,13 +1730,28 @@ export default function ParsePage() {
         : null;
     const googleDisplayAddress = verificationRecord?.google_display_address;
     if (typeof googleDisplayAddress === 'string' && googleDisplayAddress.trim()) {
-      return googleDisplayAddress.trim();
+      return { address: googleDisplayAddress.trim(), isCandidate: false };
     }
     const googleFormattedAddress = verificationRecord?.google_formatted_address;
     if (typeof googleFormattedAddress === 'string' && googleFormattedAddress.trim()) {
-      return googleFormattedAddress.trim();
+      return { address: googleFormattedAddress.trim(), isCandidate: false };
     }
     return getDisplaySafeMatchedAddress(row);
+  };
+  const renderMatchedAddressCell = (row: RowResult) => {
+    const { address, isCandidate } = getMatchedAddress(row);
+    if (!address) return <span className="text-slate-400">—</span>;
+    if (isCandidate) {
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-slate-400 dark:text-slate-500">{address}</span>
+          <span className="inline-flex w-fit items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+            Unverified
+          </span>
+        </div>
+      );
+    }
+    return address;
   };
 
   const getScopeDebugGroup = (scopeDebug: unknown, key: 'selected' | 'matched') => {
@@ -1837,23 +1852,6 @@ export default function ParsePage() {
     }
 
     return '';
-  };
-
-  const getReasonSummary = (row: RowResult) => {
-    if (row.public_reason_message?.trim()) return row.public_reason_message.trim();
-    const reasonCode = row.reason_code?.toLowerCase() ?? '';
-    const summaryByReason: Record<string, string> = {
-      out_of_scope: 'The matched location falls outside your selected area.',
-      city_mismatch: 'This record appears outside your selected area.',
-      county_mismatch: 'This record appears outside your selected area.',
-      state_mismatch: 'This record appears outside your selected area.',
-      no_match: 'We could not confidently verify this as a complete property address.',
-      low_confidence: 'The verifier returned a low-confidence result and needs your review.',
-      po_box: 'This row was skipped because it appears to be a PO Box, not a property address.',
-      missing_address: 'This row was skipped because no usable address was detected.',
-      blank_address: 'This row was skipped because no usable address was detected.',
-    };
-    return summaryByReason[reasonCode] || getReasonMetadata(row).description;
   };
 
   const getOriginalRowFields = (row: RowResult) => {
@@ -2156,6 +2154,10 @@ How to fix: ${fixHint}` : ''}`;
       : capabilities.canApproveMatched;
     const isApproving = approvingRowIds.has(row.source_row_id);
     if (!canApprove && capabilities.canForceOverride) {
+      const { address: candidateAddr } = getMatchedAddress(row);
+      if (!candidateAddr) {
+        // fall through to blocker display
+      } else {
       return (
         <button
           type="button"
@@ -2166,6 +2168,7 @@ How to fix: ${fixHint}` : ''}`;
           {isApproving ? '⏳ Overriding…' : 'Override to Valid'}
         </button>
       );
+      }
     }
     if (!canApprove) {
       return (
@@ -2316,7 +2319,7 @@ How to fix: ${fixHint}` : ''}`;
       }
       if (key === 'a' && reviewRow) {
         event.preventDefault();
-        if (canReviewForceOverride) {
+        if (canReviewForceOverride && reviewVerifiedAddress) {
           void handleForceOverride(reviewRow);
         } else if (canReviewApprove) {
           void handleApproveMatched(reviewRow, reviewOutOfScope);
@@ -4216,9 +4219,8 @@ How to fix: ${fixHint}` : ''}`;
   const reviewRecordId = reviewRow ? getRecordId(reviewRow) : null;
   const reviewStatusLabel = reviewRow ? getStatusLabel(reviewRow) : '';
   const reviewDetectedAddress = reviewCompareInput.original || reviewRow?.formatted_address || '';
-  const reviewVerifiedAddress = reviewRow
-    ? getMatchedAddress(reviewRow)
-    : '';
+  const reviewMatch = reviewRow ? getMatchedAddress(reviewRow) : { address: '', isCandidate: false };
+  const reviewVerifiedAddress = reviewMatch.address;
   const reviewSelectedState = reviewRow ? getScopeDebugValue(reviewRow, 'selected', 'state') : '';
   const reviewSelectedCounty = reviewRow ? getScopeDebugValue(reviewRow, 'selected', 'county') : '';
   const reviewSelectedCity = reviewRow ? getScopeDebugValue(reviewRow, 'selected', 'city') : '';
@@ -4236,7 +4238,7 @@ How to fix: ${fixHint}` : ''}`;
   const canReviewApprove = reviewOutOfScope
     ? Boolean(reviewApprovalCapabilities?.canApproveWithScopeOverride)
     : Boolean(reviewApprovalCapabilities?.canApproveMatched);
-  const canReviewForceOverride = Boolean(reviewApprovalCapabilities?.canForceOverride);
+  const canReviewForceOverride = Boolean(reviewApprovalCapabilities?.canForceOverride) && Boolean(reviewVerifiedAddress);
   const reviewApprovalBlocker = reviewApprovalCapabilities?.blocker ?? null;
   const scopeSummary = buildScopeSummary(stateValue, selectedCounties, scopeMode, selectedLocalities);
 
@@ -5230,7 +5232,7 @@ How to fix: ${fixHint}` : ''}`;
                                       ) : null}
                                     </td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{renderOriginalAddressCell(row)}</td>
-                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedAddress(row) || '--'}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{renderMatchedAddressCell(row)}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                       {renderReasonCell(row)}
@@ -5375,7 +5377,7 @@ How to fix: ${fixHint}` : ''}`;
                                   Group {(resultsPage - 1) * resultsPageSize + index + 1}
                                 </p>
                                 <p className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-                                  {getMatchedAddress(displayRow) || getInputAddress(displayRow) || '--'}
+                                  {getMatchedAddress(displayRow).address || getInputAddress(displayRow) || '--'}
                                 </p>
                                 <p className="text-xs text-slate-500 dark:text-slate-400">
                                   Group key: {group.groupKey}
@@ -5496,7 +5498,7 @@ How to fix: ${fixHint}` : ''}`;
                                       ) : null}
                                     </td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{renderOriginalAddressCell(row)}</td>
-                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words">{getMatchedAddress(row) || '—'}</td>
+                                    <td className="px-4 py-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words">{renderMatchedAddressCell(row)}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row) || '—'}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCity(row) || '—'}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
@@ -5652,11 +5654,24 @@ How to fix: ${fixHint}` : ''}`;
                 {reviewVerifiedAddress ? (
                   <div className="mt-4">
                     <p className="text-xs font-semibold uppercase text-slate-500 dark:text-slate-400">
-                      {canReviewApprove || canReviewForceOverride ? 'Will be saved as' : 'Matched address'}
+                      {reviewMatch.isCandidate
+                        ? 'Google suggestion (unverified)'
+                        : canReviewApprove || canReviewForceOverride
+                          ? 'Will be saved as'
+                          : 'Matched address'}
                     </p>
-                    <p className="mt-1 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+                    <p className={`mt-1 rounded-lg px-3 py-2 text-sm font-semibold ${
+                      reviewMatch.isCandidate
+                        ? 'border border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'
+                        : 'border border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200'
+                    }`}>
                       {reviewVerifiedAddress}
                     </p>
+                    {reviewMatch.isCandidate ? (
+                      <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">
+                        This is what Google returned but couldn't be fully verified. Override if you're confident, or edit and retry.
+                      </p>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="mt-4">
@@ -5699,7 +5714,7 @@ How to fix: ${fixHint}` : ''}`;
                   <div className="rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
                     Change location context and re-run.
                   </div>
-                ) : reviewRow && !isSkippedReasonCode(reviewRow.reason_code) && !isNeedsReviewReasonCode(reviewRow.reason_code) && !isOutOfScopeReasonCode(reviewRow.reason_code) ? (
+                ) : reviewRow && !canEditReview ? (
                   <div className="text-sm text-slate-500 dark:text-slate-400">
                     No action available for this row.
                   </div>

@@ -126,16 +126,51 @@ describe('parseUtils filters', () => {
     expect(summary.attention_total).toBe(1);
   });
 
-  it('prefers google display fields over matched_address for display-safe matched address text', () => {
+  it('returns verified matched address when formatted_address is present', () => {
     const row = buildRow({
-      matched_address: '4785 Georgia, 5, Douglasville, Georgia 30135',
-      matched_address_display: '4785 Hwy 5, Douglasville, GA 30135',
-      google_formatted_address: '4785 Highway 5, Douglasville, GA 30135',
-      google_display_address: '4785 Highway 5, Douglasville, GA 30135',
-      formatted_address: 'fallback',
+      formatted_address: '4785 Highway 5, Douglasville, GA 30135',
     });
+    expect(getDisplaySafeMatchedAddress(row)).toEqual({
+      address: '4785 Highway 5, Douglasville, GA 30135',
+      isCandidate: false,
+    });
+  });
 
-    expect(getDisplaySafeMatchedAddress(row)).toBe('4785 Highway 5, Douglasville, GA 30135');
+  it('returns candidate matched address when only candidate_address is present', () => {
+    const row = buildRow({
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      candidate_address: '12 Main St, Atlanta, GA 30303',
+    });
+    expect(getDisplaySafeMatchedAddress(row)).toEqual({
+      address: '12 Main St, Atlanta, GA 30303',
+      isCandidate: true,
+    });
+  });
+
+  it('prefers verified address over candidate when both are present', () => {
+    const row = buildRow({
+      formatted_address: '4785 Highway 5, Douglasville, GA 30135',
+      candidate_address: '12 Main St, Atlanta, GA 30303',
+    });
+    expect(getDisplaySafeMatchedAddress(row)).toEqual({
+      address: '4785 Highway 5, Douglasville, GA 30135',
+      isCandidate: false,
+    });
+  });
+
+  it('returns empty address when neither verified nor candidate exists', () => {
+    const row = buildRow({
+      formatted_address: '',
+      matched_address: '',
+      matched_address_display: '',
+      google_display_address: '',
+      google_formatted_address: '',
+      candidate_address: '',
+    });
+    expect(getDisplaySafeMatchedAddress(row)).toEqual({
+      address: '',
+      isCandidate: false,
+    });
   });
 
   it('flags out of scope rows by status or reason', () => {

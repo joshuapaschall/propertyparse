@@ -85,7 +85,7 @@ describe('HistoryDetailPage summary normalization', () => {
     getJobResults.mockResolvedValue({
       summary: { rows_received: 3, valid_total: 0, valid_unique: 0, needs_review: 3, skipped: 0, out_of_scope: 0, duplicates: 0 },
       row_results: [
-        { source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', detected_address: '4785 hwy 5', matched_address: '4785 Georgia, 5, Douglasville, Georgia 30135', google_display_address: '4785 Highway 5, Douglasville, GA 30135' },
+        { source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', detected_address: '4785 hwy 5', candidate_address: '4785 Highway 5, Douglasville, GA 30135' },
         { source_row_id: 'r2', source_row_index: 2, status: 'UNMATCHED_NEEDS_REVIEW', detected_address: '4785 hwy 5', matched_address: '4785 Georgia, 5, Douglasville, Georgia 30135' },
         { source_row_id: 'r3', source_row_index: 3, status: 'UNMATCHED_NEEDS_REVIEW', detected_address: '2198 hwy 92', matched_address: '2198 Georgia 92, Douglasville, Georgia 30135' },
       ],

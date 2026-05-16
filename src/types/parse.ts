@@ -88,6 +88,7 @@ export type RowResult = {
   reason_detail?: string;
   scope_debug?: unknown;
   formatted_address?: string;
+  candidate_address?: string;
   matched_address?: string;
   matched_address_display?: string;
   google_display_address?: string;
