@@ -2330,7 +2330,11 @@ How to fix: ${fixHint}` : ''}`;
       }
       if (key === 'r' && canEditReview && !reviewSaving) {
         event.preventDefault();
-        void handleReviewRetry();
+        if (event.shiftKey) {
+          void handleReviewRetryStay();
+        } else {
+          void handleReviewRetry();
+        }
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -3469,8 +3473,11 @@ How to fix: ${fixHint}` : ''}`;
     }, 0);
   };
 
-  const handleReviewRetry = async () => {
+  const handleReviewRetry = async (
+    options: { closeDrawerOnSuccess?: boolean } = {},
+  ) => {
     if (!reviewRow) return;
+    const closeDrawerOnSuccess = options.closeDrawerOnSuccess ?? true;
     const trimmedAddress = reviewAddress.trim();
     if (!trimmedAddress) {
       setReviewError('Address is required.');
@@ -3514,7 +3521,28 @@ How to fix: ${fixHint}` : ''}`;
         delete next[reviewRow.source_row_id];
         return next;
       });
-      closeReviewDrawer();
+      const retriedRowId = memberRows[0]?.source_row_id;
+      const retriedRowUpdate = updates.find((row) => row.source_row_id === retriedRowId);
+      const destinationTab = retriedRowUpdate
+        ? isValidRow(retriedRowUpdate)
+          ? 'valid'
+          : isOutOfScopeRow(retriedRowUpdate)
+            ? 'out_of_scope'
+            : isSkippedRow(retriedRowUpdate)
+              ? 'skipped'
+              : isNeedsReviewRow(retriedRowUpdate)
+                ? 'needs_review'
+                : null
+        : null;
+      if (closeDrawerOnSuccess) {
+        closeReviewDrawer();
+      } else {
+        const refreshedRow = rowResultsRef.current.find((row) => row.source_row_id === retriedRowId);
+        if (refreshedRow) {
+          setReviewRow(refreshedRow);
+          setReviewAddress(refreshedRow.address_raw ?? trimmedAddress);
+        }
+      }
       const hasDuplicate = updates.some((row) => normalizeStatus(row.status).includes('DUPLICATE'));
       const movedToValid = updates.some((row) => isValidRow(row));
       const stillNeedsReview = updates.some((row) => isNeedsReviewRow(row));
@@ -3526,8 +3554,14 @@ How to fix: ${fixHint}` : ''}`;
           : movedToValid
             ? 'Moved to Valid'
             : stillNeedsReview
-              ? 'Still needs review'
+              ? destinationTab && destinationTab !== activeTab
+                ? `Moved to ${destinationTab === 'needs_review' ? 'Needs Review' : destinationTab === 'out_of_scope' ? 'Out of Scope' : 'Skipped'}`
+                : 'Still needs review'
               : 'Retry complete',
+        description:
+          destinationTab && destinationTab !== activeTab && !hasDuplicate
+            ? 'Switch tabs to continue reviewing this row.'
+            : undefined,
         variant: hasDuplicate || stillNeedsReview ? 'info' : 'success',
       });
       return true;
@@ -3544,6 +3578,11 @@ How to fix: ${fixHint}` : ''}`;
         return next;
       });
     }
+  };
+
+  const handleReviewRetryStay = async () => {
+    const succeededAndStayed = await handleReviewRetry({ closeDrawerOnSuccess: false });
+    return succeededAndStayed;
   };
 
 
@@ -5682,7 +5721,18 @@ How to fix: ${fixHint}` : ''}`;
                   </button>
                   <button type="button" onClick={() => navigateReviewRow('next')} disabled={!canReviewNext} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Skip & Next</button>
                   {canEditReview ? (
-                    <button type="button" onClick={async () => { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleReviewRetry(); if (!succeeded) { setPendingReviewNavigation(null); } }} disabled={!canEditReview || reviewSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300">{reviewSaving ? 'Retrying...' : 'Retry & Next'}</button>
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => void handleReviewRetryStay()}
+                        disabled={!canEditReview || reviewSaving}
+                        className="rounded-lg border border-indigo-200 px-4 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:opacity-50 dark:border-indigo-500/40 dark:text-indigo-300 dark:hover:bg-indigo-500/10"
+                        title="Re-verify this address and stay on this row to review the result"
+                      >
+                        {reviewSaving ? 'Retrying...' : 'Retry & Stay'}
+                      </button>
+                      <button type="button" onClick={async () => { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleReviewRetry({ closeDrawerOnSuccess: true }); if (!succeeded) { setPendingReviewNavigation(null); } }} disabled={!canEditReview || reviewSaving} className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-indigo-300">{reviewSaving ? 'Retrying...' : 'Retry & Next'}</button>
+                    </>
                   ) : null}
                   {canReviewForceOverride ? (
                     <button type="button" onClick={async () => { if (reviewRow) { const nextGroup = canReviewNext ? activeReviewGroups[activeReviewIndex + 1] : null; queueReviewNavigation(activeTab === 'out_of_scope' ? 'out_of_scope' : activeTab === 'skipped' ? 'skipped' : 'needs_review', nextGroup?.groupKey ?? null); const succeeded = await handleForceOverride(reviewRow); if (!succeeded) { setPendingReviewNavigation(null); } } }} disabled={!reviewRow || approvingRowIds.has(reviewRow.source_row_id)} className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:bg-amber-300">Override & Next</button>
@@ -5691,7 +5741,7 @@ How to fix: ${fixHint}` : ''}`;
                   )}
                 </div>
                 <p className="mt-3 text-center text-[11px] text-slate-400 dark:text-slate-500">
-                  <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">A</kbd> approve · <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">S</kbd> skip · <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">R</kbd> retry · <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">Esc</kbd> close
+                  <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">A</kbd> approve · <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">S</kbd> skip · <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">R</kbd> retry · <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">⇧R</kbd> retry+stay · <kbd className="rounded border border-slate-200 px-1 py-0.5 text-[10px] dark:border-slate-700">Esc</kbd> close
                 </p>
               </div>
             </div>
