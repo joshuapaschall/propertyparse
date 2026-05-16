@@ -761,6 +761,48 @@ const formatEta = (seconds: number) => {
   return `${minutes.toString().padStart(2, '0')}:${remaining.toString().padStart(2, '0')}`;
 };
 
+
+export type BatchLiveProgressForDetail = {
+  phase: string | null;
+  done: number | null;
+  total: number | null;
+  eta: string | null;
+  cacheHits: number | null;
+  googleCallsUsed: number | null;
+  jobsRunning: number;
+  jobsCompleted: number;
+  jobsTotal: number;
+  effectiveStatus: string;
+};
+
+export function formatBatchProgressDetail(
+  progress: BatchLiveProgressForDetail | null,
+): string | null {
+  if (!progress) return null;
+  const {
+    phase, done, total, eta, cacheHits, googleCallsUsed,
+    jobsRunning, jobsCompleted, jobsTotal, effectiveStatus,
+  } = progress;
+  if (effectiveStatus === 'COMPLETE' || effectiveStatus === 'PARTIAL' || effectiveStatus === 'FAILED') {
+    return null;
+  }
+  const phaseLabel =
+    phase === 'AI_FIXING' ? 'AI fixing'
+    : phase === 'VERIFYING' || phase === 'VALIDATING' ? 'Verifying'
+    : phase === 'EXTRACTING' ? 'Extracting'
+    : phase === 'NORMALIZING' ? 'Normalizing'
+    : phase === 'FINALIZING_RESULTS' || phase === 'PERSISTING_ROWS' ? 'Finalizing'
+    : 'Processing';
+  const doneStr = done ?? '--';
+  const totalStr = total ?? '--';
+  const baseDetail =
+    `${phaseLabel}: ${doneStr}/${totalStr} across ` +
+    `${jobsCompleted + jobsRunning}/${jobsTotal} jobs • ` +
+    `Verification calls ${googleCallsUsed ?? '--'} • ` +
+    `Cache hits ${cacheHits ?? '--'}`;
+  return eta ? `${baseDetail} • ETA ~ ${eta}` : baseDetail;
+}
+
 const readLastJobState = () => {
   try {
     const stored = window.localStorage.getItem(LAST_JOB_STORAGE_KEY);
@@ -1679,31 +1721,7 @@ export default function ParsePage() {
   }, [busy, isStartingParse, progressInfo, softProgressOutage]);
 
 
-  const batchProgressDetail = useMemo(() => {
-    if (!batchLiveProgress) return null;
-    const {
-      phase, done, total, eta, cacheHits, googleCallsUsed,
-      jobsRunning, jobsCompleted, jobsTotal, effectiveStatus,
-    } = batchLiveProgress;
-    if (effectiveStatus === 'COMPLETE' || effectiveStatus === 'PARTIAL' || effectiveStatus === 'FAILED') {
-      return null;
-    }
-    const phaseLabel =
-      phase === 'AI_FIXING' ? 'AI fixing'
-      : phase === 'VERIFYING' || phase === 'VALIDATING' ? 'Verifying'
-      : phase === 'EXTRACTING' ? 'Extracting'
-      : phase === 'NORMALIZING' ? 'Normalizing'
-      : phase === 'FINALIZING_RESULTS' || phase === 'PERSISTING_ROWS' ? 'Finalizing'
-      : 'Processing';
-    const doneStr = done ?? '--';
-    const totalStr = total ?? '--';
-    const baseDetail =
-      `${phaseLabel}: ${doneStr}/${totalStr} across ` +
-      `${jobsCompleted + jobsRunning}/${jobsTotal} jobs • ` +
-      `Verification calls ${googleCallsUsed ?? '--'} • ` +
-      `Cache hits ${cacheHits ?? '--'}`;
-    return eta ? `${baseDetail} • ETA ~ ${eta}` : baseDetail;
-  }, [batchLiveProgress]);
+  const batchProgressDetail = useMemo(() => formatBatchProgressDetail(batchLiveProgress), [batchLiveProgress]);
 
   const shouldShowProgress = useMemo(
     () => {
