@@ -498,6 +498,19 @@ export async function createBatch(payload: CreateBatchPayload): Promise<BatchRes
   return postJson<BatchResponse>('/batches', payload, { headers: getAuthHeaders() });
 }
 
+export type BatchProgress = {
+  phase: string | null;
+  done: number;
+  total: number;
+  percent: number;
+  eta_seconds: number | null;
+  cache_hits: number;
+  google_calls_used: number;
+  jobs_total: number;
+  jobs_running: number;
+  jobs_completed: number;
+};
+
 export type BatchRollup = {
   batch: BatchResponse;
   job_counts: {
@@ -513,6 +526,7 @@ export type BatchRollup = {
     unmatched_count: number;
   };
   effective_status: string;
+  progress?: BatchProgress;
 };
 
 export async function getBatches(query: { limit?: number; offset?: number } = {}): Promise<{ items: BatchRollup[]; totalCount: number }> {
