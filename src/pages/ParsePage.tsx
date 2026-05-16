@@ -57,7 +57,6 @@ import {
   JobExportType,
   JobRecord,
   createBatch,
-  parseFile,
   parseFileAsync,
   approveMatchedJobRow,
   approveMatchedJobRowsBatch,
@@ -89,9 +88,6 @@ const PROGRESS_STEPS = ['Uploading', 'Extracting', 'Verifying', 'AI fixing', 'Fi
 
 const RESULTS_HYDRATION_MAX_ATTEMPTS = 7;
 const RESULTS_HYDRATION_BASE_DELAY_MS = 700;
-const ASYNC_PARSE_FILE_SIZE_THRESHOLD = 5 * 1024 * 1024;
-const ASYNC_PARSE_MIME_PREFIXES = ['application/pdf', 'image/'];
-const ASYNC_PARSE_EXTENSIONS = ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'tiff', 'tif', 'bmp', 'heic', 'heif'];
 const IMAGE_EXT_RE = /\.(png|jpe?g)$/i;
 const MAX_429_RETRY_ATTEMPTS = 12;
 const RETRY_429_WAIT_MS = 5000;
@@ -708,13 +704,13 @@ const isSummaryReadyProgressState = (phase: string | null, status: string | null
 
 const shouldUseAsyncParse = (selectedFile: File | null) => {
   if (!selectedFile) return false;
-  if (selectedFile.size > ASYNC_PARSE_FILE_SIZE_THRESHOLD) return true;
-  const mimeType = selectedFile.type.toLowerCase();
-  if (ASYNC_PARSE_MIME_PREFIXES.some((prefix) => mimeType.startsWith(prefix))) {
-    return true;
-  }
-  const extension = selectedFile.name.split('.').pop()?.toLowerCase() ?? '';
-  return ASYNC_PARSE_EXTENSIONS.includes(extension);
+  // All file types use async mode. Sync /parse holds the HTTP
+  // request open for the full job duration, which exceeds the
+  // Caddy proxy timeout for any non-trivial file (forced
+  // re-verify on 500+ rows reliably hits this). Async mode
+  // returns immediately with a job_id and the poller hydrates
+  // results — this is the only reliable path.
+  return true;
 };
 
 const mapPhaseToStep = (phase: string | null) => {
@@ -1662,10 +1658,12 @@ export default function ParsePage() {
 
   const shouldShowProgress = useMemo(
     () => {
-      // Hide the live progress panel once the job has settled into a
-      // success summary. The KPI tiles + "Ready" lifecycle pill on the
-      // Processing Results header are the source of truth at that point.
-      if (parseSummary && !busy && !resultsFinalizing) return false;
+      const settled =
+        parseSummary &&
+        !busy &&
+        !resultsFinalizing &&
+        (rowResults.length > 0 || canonicalAddressesForDisplay.length > 0);
+      if (settled) return false;
       return (
         busy ||
         resultsFinalizing ||
@@ -1673,7 +1671,12 @@ export default function ParsePage() {
         progressPercent !== null
       );
     },
-    [busy, parseSummary, progressInfo.phase, progressPercent, resultsFinalizing],
+    [busy, parseSummary, progressInfo.phase, progressPercent, resultsFinalizing, rowResults.length, canonicalAddressesForDisplay.length],
+  );
+
+  const isJobSettled = useMemo(
+    () => Boolean(parseSummary && !busy && !resultsFinalizing),
+    [parseSummary, busy, resultsFinalizing],
   );
 
   const getRecordId = (row: RowResult) => {
@@ -2867,82 +2870,39 @@ How to fix: ${fixHint}` : ''}`;
     try {
       const trimmedCampaignName = campaignName.trim();
       const localitiesToUse = cityOverride !== undefined ? (cityOverride ? [cityOverride] : []) : selectedLocalities;
-      const parsed = await parseFile(uploadFileId, {
+      const createdJobId = safeUuid();
+      await parseFileAsync(uploadFileId, {
         ...buildLocationPayload(stateValue, selectedCounties, scopeMode, localitiesToUse),
         force_refresh: forceRefresh,
+        jobId: createdJobId,
         jobName: trimmedCampaignName || undefined,
       });
-      const parsedRecord = parsed as Record<string, unknown>;
-      const createdJobId =
-        pickString(parsedRecord as JobRecord, ['job_id', 'jobId', 'id']) ??
-        pickString((parsedRecord.metadata as JobRecord) ?? {}, ['job_id', 'jobId', 'id']) ??
-        safeUuid();
       setJobId(createdJobId);
       setIsJobReload(false);
       setFileId(uploadFileId);
       setParseTimestamp(new Date().toISOString());
-      setParsePayload(parsedRecord);
-      setProgressStep(4);
-      setProgressPercent(100);
-      const hasRowAccounting = Boolean(parsed.summary && parsed.row_results);
-      if (hasRowAccounting) {
-        const summary = toParseSummary(normalizeJobSummary(parsed.summary));
-        const rowAccountingMetadata: Record<string, unknown> = {
-          ...((parsedRecord.metadata as Record<string, unknown>) ?? {}),
-        };
-        const responseRowsReceived =
-          typeof parsedRecord.rows_received === 'number'
-            ? parsedRecord.rows_received
-            : summary.rows_received ?? null;
-
-        rowAccountingMetadata.rows_received = responseRowsReceived;
-        if (typeof parsedRecord.accounted_rows === 'number') {
-          rowAccountingMetadata.accounted_rows = parsedRecord.accounted_rows;
-        }
-        if (typeof parsedRecord.extraction_method === 'string') {
-          rowAccountingMetadata.extraction_method = parsedRecord.extraction_method;
-        }
-        if (parsedRecord.warnings) {
-          rowAccountingMetadata.warnings = parsedRecord.warnings;
-        }
-        if (typeof parsedRecord.google_calls_used === 'number') {
-          rowAccountingMetadata.google_calls_used = parsedRecord.google_calls_used;
-        }
-        if (typeof parsedRecord.cache_hits === 'number') {
-          rowAccountingMetadata.cache_hits = parsedRecord.cache_hits;
-        }
-
-        const parsedRows = ((parsed.row_results ?? []) as JobRecord[]).map((row, index) =>
-          normalizeJobRowResult(row, index),
-        );
-        const displayedSummary = deriveDisplayedParseSummary(parsedRows, summary);
-        setParseSummary(displayedSummary);
-        setRowsReceived(deriveDisplayedRowsReceived(parsedRows, displayedSummary));
-        const canonicalRows = (parsed.canonical_addresses ?? []) as CanonicalAddress[];
-        setCanonicalAddresses(canonicalRows.map(normalizeCanonicalAddress));
-        setDeriveCanonicalsFromRows(false);
-        setRowResults(parsedRows);
-        setDuplicateGroups(buildDuplicateGroupsFromRows(parsedRows));
-        setDebugInfo((parsed.debug ?? null) as ParseDebugInfo | null);
-        setMetadata(Object.keys(rowAccountingMetadata).length ? rowAccountingMetadata : null);
-        setLegacyMode(false);
-      } else {
-        setLegacyMode(true);
-        const parsedHasBuckets = 'matched' in parsed || 'unmatched' in parsed;
-        if (parsedHasBuckets) {
-          const rawMatched = (parsed.matched || []) as unknown[];
-          const rawUnmatched = (parsed.unmatched || []) as unknown[];
-          setLegacyMatchedRows(normalizeRows(rawMatched));
-          setLegacyUnmatchedRows(normalizeRows(rawUnmatched));
-        } else {
-          const rawItems = (parsed.items || []) as Record<string, unknown>[];
-          const matchedItems = rawItems.filter((item) => item.status === 'Matched');
-          const unmatchedItems = rawItems.filter((item) => item.status !== 'Matched');
-          setLegacyMatchedRows(normalizeRows(matchedItems));
-          setLegacyUnmatchedRows(normalizeRows(unmatchedItems));
-        }
-        setMetadata((parsed.metadata as Record<string, unknown>) || null);
-      }
+      setProgressInfo((prev) => ({ ...prev, phase: 'PARSING' }));
+      startPolling(createdJobId, {
+        onFinished: async () => {
+          try {
+            await hydrateSummaryFromJobDetail(createdJobId, null);
+            if (!mountedRef.current) return;
+            publishLiveUpdate('job-updated', createdJobId);
+            publishLiveUpdate('metrics-updated', createdJobId);
+            setBusy(false);
+            await hydrateCompletedAsyncJob(createdJobId, null);
+            if (!mountedRef.current) return;
+            publishLiveUpdate('job-updated', createdJobId);
+            publishLiveUpdate('metrics-updated', createdJobId);
+            void reconcileDurableJob(createdJobId);
+          } catch (hydrationError) {
+            if (!mountedRef.current) return;
+            setBusy(false);
+            setResultsFinalizing(false);
+            setError((hydrationError as Error).message ?? 'Unable to finalize parse results.');
+          }
+        },
+      });
       if (cityOverride !== undefined) {
         setSelectedLocalities(cityOverride ? [cityOverride] : []);
         setScopeMode(cityOverride ? 'locality_strict' : 'county_wide');
@@ -2985,8 +2945,7 @@ How to fix: ${fixHint}` : ''}`;
       setProgressStep(1);
       setProgressStep(2);
 
-      const useAsyncMode = shouldUseAsyncParse(file);
-      if (useAsyncMode) {
+      void shouldUseAsyncParse(file);
         setProgressInfo((prev) => ({
           ...prev,
           phase: 'PARSING',
@@ -3018,23 +2977,6 @@ How to fix: ${fixHint}` : ''}`;
           jobId: newJobId,
           jobName: trimmedCampaignName || undefined,
         });
-      } else {
-        startPolling(newJobId);
-        const parsed = await parseFile(upload.fileId, {
-          ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
-          force_refresh: forceRefresh,
-          jobId: newJobId,
-          jobName: trimmedCampaignName || undefined,
-        });
-        if (!mountedRef.current || signal.aborted) return;
-        applyParsedResponse(parsed as unknown as Record<string, unknown>, upload.rowsReceived ?? null);
-        setResultsFinalizing(false);
-        publishLiveUpdate('job-updated', newJobId);
-        publishLiveUpdate('metrics-updated', newJobId);
-        stopPolling();
-        setBusy(false);
-        void reconcileDurableJob(newJobId);
-      }
 
       updateJobQueryParam(newJobId);
       writeLastJobState({
@@ -4829,7 +4771,7 @@ How to fix: ${fixHint}` : ''}`;
               experience.
             </div>
           ) : null}
-          {parseSummary && rowAccountingMismatch && !isJobReload ? (
+          {isJobSettled && parseSummary && rowAccountingMismatch && !isJobReload ? (
             <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p>
@@ -4849,20 +4791,20 @@ How to fix: ${fixHint}` : ''}`;
               </div>
             </div>
           ) : null}
-          {noAddressesDetected ? (
+          {isJobSettled && noAddressesDetected ? (
             <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">
               No addresses were detected in this file. This usually means the file has unusual
               headers or split columns.
             </div>
           ) : null}
-          <JobWarnings warnings={metadataWarnings as Array<string | { code?: string; message?: string; detail?: unknown }>} />
-          {cityValue && unmatchedCount > 0 ? (
+          {isJobSettled ? <JobWarnings warnings={metadataWarnings as Array<string | { code?: string; message?: string; detail?: unknown }>} /> : null}
+          {isJobSettled && cityValue && unmatchedCount > 0 ? (
             <div className="mt-4 rounded-lg border border-indigo-100 bg-indigo-50 px-3 py-2 text-sm text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-200">
               Some addresses failed because verification returned a different city. Leave City blank if
               your file spans multiple cities.
             </div>
           ) : null}
-          {canRerunWithoutCityFilter && fileId ? (
+          {isJobSettled && canRerunWithoutCityFilter && fileId ? (
             <div className="mt-4 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-800 dark:border-indigo-500/40 dark:bg-indigo-500/10 dark:text-indigo-100">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <p>Many rows are out-of-scope due to city mismatch. Rerun without city filter.</p>
