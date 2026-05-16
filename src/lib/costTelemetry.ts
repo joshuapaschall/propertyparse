@@ -47,17 +47,7 @@ export const buildAdminCostSections = ({
   jobGeocodingCalls?: unknown;
 }): CostPanelSection[] => {
   const sections: CostPanelSection[] = [
-    {
-      title: 'This job',
-      items: [
-        { label: 'Estimated job cost', value: formatCurrency(usage.estimated_job_cost_usd ?? estimatedJobCost) },
-        { label: 'Job geocoding calls', value: formatCount(usage.job_geocoding_calls ?? jobGeocodingCalls) },
-        { label: 'Job autocomplete calls', value: formatCount(usage.job_autocomplete_calls) },
-        { label: 'Job place details calls', value: formatCount(usage.job_place_details_calls) },
-        { label: 'Job input tokens', value: formatCount(usage.job_input_tokens) },
-        { label: 'Job output tokens', value: formatCount(usage.job_output_tokens) },
-      ],
-    },
+    _buildThisJobSection({ usage, estimatedJobCost, jobGeocodingCalls }),
     {
       title: 'Month to date',
       items: [
@@ -82,6 +72,36 @@ export const buildAdminCostSections = ({
 
   return sections;
 };
+
+const _buildThisJobSection = ({
+  usage,
+  estimatedJobCost,
+  jobGeocodingCalls,
+}: {
+  usage: UsageSummaryFlatFields;
+  estimatedJobCost?: unknown;
+  jobGeocodingCalls?: unknown;
+}): CostPanelSection => ({
+  title: 'This job',
+  items: [
+    { label: 'Estimated job cost', value: formatCurrency(usage.estimated_job_cost_usd ?? estimatedJobCost) },
+    { label: 'Job geocoding calls', value: formatCount(usage.job_geocoding_calls ?? jobGeocodingCalls) },
+    { label: 'Job autocomplete calls', value: formatCount(usage.job_autocomplete_calls) },
+    { label: 'Job place details calls', value: formatCount(usage.job_place_details_calls) },
+    { label: 'Job input tokens', value: formatCount(usage.job_input_tokens) },
+    { label: 'Job output tokens', value: formatCount(usage.job_output_tokens) },
+  ],
+});
+
+export const buildJobOnlyCostSections = ({
+  usage,
+  estimatedJobCost,
+  jobGeocodingCalls,
+}: {
+  usage: UsageSummaryFlatFields;
+  estimatedJobCost?: unknown;
+  jobGeocodingCalls?: unknown;
+}): CostPanelSection[] => [_buildThisJobSection({ usage, estimatedJobCost, jobGeocodingCalls })];
 
 export const buildProductSafeCostItems = ({
   usage,

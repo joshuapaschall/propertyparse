@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router-dom';
 import DashboardPage from './DashboardPage';
 
 const getMetricsSummary = vi.fn();
+const getBatches = vi.fn();
 const readLocalParsePersistenceState = vi.fn();
 const authState = { role: 'member' };
 
@@ -13,6 +14,7 @@ vi.mock('../contexts/AuthContext', () => ({ useAuthControls: () => authState }))
 vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
 vi.mock('../lib/api', () => ({
   getMetricsSummary: (...args: unknown[]) => getMetricsSummary(...args),
+  getBatches: (...args: unknown[]) => getBatches(...args),
   getApiErrorInfo: vi.fn(() => null),
 }));
 vi.mock('../lib/persistenceStatus', () => ({
@@ -42,6 +44,7 @@ describe('DashboardPage', () => {
       duplicates: 2,
       total_cost_usd: 12.25,
     });
+    getBatches.mockResolvedValue({ items: [] });
   });
 
   it('renders relabeled KPI metrics and keeps review helper text', async () => {
@@ -52,7 +55,7 @@ describe('DashboardPage', () => {
     expect(screen.getByText('Needs Review')).toBeInTheDocument();
     expect(screen.getByText('Exports')).toBeInTheDocument();
     expect(screen.getByText('Cost This Period')).toBeInTheDocument();
-    expect(screen.getByText(/Rows still requiring review or correction/i)).toBeInTheDocument();
+    expect(screen.getByText(/Rows still requiring review/i)).toBeInTheDocument();
   });
 
   it('sends custom range shape when custom dates are set', async () => {
@@ -88,13 +91,10 @@ describe('DashboardPage', () => {
     expect(getMetricsSummary.mock.calls.length).toBeGreaterThan(before);
   });
 
-  it('renders customer-safe this month cards and hides internal strings regardless of role', async () => {
+  it('hides internal strings regardless of role', async () => {
     authState.role = 'owner';
     render(<MemoryRouter><DashboardPage /></MemoryRouter>);
-    expect(await screen.findAllByText('This month')).toHaveLength(3);
-    expect(screen.getByText('Files processed')).toBeInTheDocument();
-    expect(screen.getByText('Addresses verified')).toBeInTheDocument();
-    expect(screen.getByText('Cost')).toBeInTheDocument();
+    expect(await screen.findByText('Cost This Period')).toBeInTheDocument();
 
     for (const forbidden of ['Internal cost transparency', 'Reconciliation', 'Geocoding', 'Place Details', 'Free cap', 'Local estimate only']) {
       expect(screen.queryByText(new RegExp(forbidden, 'i'))).not.toBeInTheDocument();

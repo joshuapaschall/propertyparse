@@ -53,11 +53,18 @@ const pickString = (job: JobRecord, keys: string[]) => {
   return typeof value === 'string' ? value : value != null ? String(value) : null;
 };
 
-const formatDateTime = (value: string | null) => {
-  if (!value) return '--';
+const formatHistoryDate = (value: string | null) => {
+  if (!value) return "--";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString();
+  const now = new Date();
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" as const } : {}),
+    hour: "numeric",
+    minute: "2-digit",
+  });
 };
 
 const parsePositiveInt = (value: string | null, fallback: number) => {
@@ -330,7 +337,7 @@ export default function HistoryPage() {
   const pageEnd = totalCount === 0 ? 0 : Math.min(totalCount, page * pageSize);
 
   return (
-    <AppShell title="History" subtitle="Review and export previous parse jobs.">
+    <AppShell density="wide" title="History" subtitle="Review and export previous parse jobs.">
       <Card>
         <SectionHeader
           title="Job history"
@@ -412,21 +419,22 @@ export default function HistoryPage() {
             </div>
             <div className="mt-6 overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
               <div className="max-h-[68vh] overflow-auto">
-                <table className="w-full min-w-[1080px] text-left text-sm">
+                <table className="w-full text-left text-sm">
                   <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                     <tr>
-                      <th className="px-4 py-3">Date</th>
-                      <th className="px-4 py-3">Job</th>
+                      <th className="px-4 py-3"> </th>
+                      <th className="px-3 py-3">Date</th>
+                      <th className="px-4 py-3"><span className="hidden xl:inline">Job name & file</span><span className="xl:hidden">Job</span></th>
                       <th className="px-4 py-3">Location</th>
                       <th className="px-4 py-3 text-right">Rows Received</th>
                       <th className="px-4 py-3 text-right">Unique Valid</th>
                       <th className="px-4 py-3 text-right">Needs Review</th>
-                      <th className="px-4 py-3 text-right">Out of Scope</th>
-                      <th className="px-4 py-3 text-right">Skipped</th>
-                      <th className="px-4 py-3 text-right">Duplicates</th>
+                      
+                      
+                      
                       <th className="px-4 py-3">Status</th>
                       <th className="px-4 py-3 text-right">Cost</th>
-                      <th className="px-4 py-3 text-right">Export</th>
+                      
                       <th className="px-4 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
@@ -434,7 +442,7 @@ export default function HistoryPage() {
                     {groupedEntries.map((entry) => (
                       entry.type === 'standalone' ? (
                       <tr key={entry.row.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => entry.row.hasId && navigate(`/history/${entry.row.id}`)}>
-                        <td className="px-4 py-2.5">{formatDateTime(entry.row.createdAt)}</td>
+                        <td className="px-4 py-2.5">{formatHistoryDate(entry.row.createdAt)}</td>
                         <td className="px-4 py-2.5">
                           <div className="font-medium" style={twoLineClampStyle}>{entry.row.name}</div>
                           <div className="text-xs text-slate-500" style={twoLineClampStyle}>{entry.row.filename}</div>
@@ -476,7 +484,7 @@ export default function HistoryPage() {
                             className="cursor-pointer bg-indigo-50/50 hover:bg-indigo-100/40 dark:bg-indigo-950/20 dark:hover:bg-indigo-900/30"
                             onClick={() => toggleBatch(entry.batchId)}
                           >
-                            <td className="px-4 py-2.5">{formatDateTime(entry.createdAt)}</td>
+                            <td className="px-4 py-2.5">{formatHistoryDate(entry.createdAt)}</td>
                             <td className="px-4 py-2.5">
                               <div className="font-medium">{expandedBatches.has(entry.batchId) ? '▾' : '▸'} 📦 {entry.name}</div>
                               <div className="text-xs text-slate-500">{entry.rows.length} {entry.rows.length === 1 ? 'job' : 'jobs'} in batch</div>
@@ -505,7 +513,7 @@ export default function HistoryPage() {
                           {expandedBatches.has(entry.batchId)
                             ? entry.rows.map((row) => (
                               <tr key={row.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => row.hasId && navigate(`/history/${row.id}`)}>
-                                <td className="px-4 py-2.5 pl-8">{formatDateTime(row.createdAt)}</td>
+                                <td className="px-4 py-2.5 pl-8">{formatHistoryDate(row.createdAt)}</td>
                                 <td className="px-4 py-2.5">
                                   <div className="font-medium" style={twoLineClampStyle}>{row.name}</div>
                                   <div className="text-xs text-slate-500" style={twoLineClampStyle}>{row.filename}</div>

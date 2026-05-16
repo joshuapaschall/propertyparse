@@ -591,7 +591,7 @@ export default function AdminPage() {
 
 
   return (
-    <AppShell title="Admin" subtitle="Manage your organization team.">
+    <AppShell density="wide" title="Admin" subtitle="Manage your organization team.">
       {!hasRoleInfo || !canAccessAdmin ? (
         <Card className="p-10 text-center">
           <h2 className="text-lg font-semibold text-slate-800 dark:text-slate-100">Not authorized</h2>

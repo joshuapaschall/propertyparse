@@ -31,8 +31,7 @@ import { deriveDisplayedParseSummary, normalizeJobSummary, toParseSummary } from
 import type { ExportCatalogItem } from '../types/exports';
 import type { CanonicalAddress, RowResult } from '../types/parse';
 import { subscribeJobUpdates } from '../lib/liveUpdates';
-import { buildAdminCostSections, buildProductSafeCostItems } from '../lib/costTelemetry';
-import { hasLocalOnlyBillingWarning, LOCAL_ONLY_BILLING_WARNING } from '../lib/telemetryWarnings';
+import { buildJobOnlyCostSections, buildProductSafeCostItems } from '../lib/costTelemetry';
 
 const RESULTS_RETRY_MAX_ATTEMPTS = 6;
 const RESULTS_RETRY_BASE_DELAY_MS = 800;
@@ -275,19 +274,13 @@ export default function HistoryDetailPage() {
   const costPanelSections = useMemo(
     () =>
       isPrivileged
-        ? buildAdminCostSections({
+        ? buildJobOnlyCostSections({
             usage: usageSummary,
             estimatedJobCost: totalCost,
-            estimatedMonthlyTotal: pickNumber((mergedJobSummary ?? {}) as JobRecord, ['google_month_to_date_actual_or_estimated_cost_usd', 'estimated_monthly_total_usd', 'estimated_monthly_cost_usd']),
             jobGeocodingCalls: pickNumber((mergedJobSummary ?? {}) as JobRecord, ['job_geocoding_calls', 'google_calls_used']),
           })
         : undefined,
     [isPrivileged, mergedJobSummary, totalCost, usageSummary],
-  );
-
-  const showLocalOnlyBillingWarning = useMemo(
-    () => hasLocalOnlyBillingWarning(usageSummary),
-    [usageSummary],
   );
 
   const costPanelItems = useMemo(
@@ -523,15 +516,16 @@ export default function HistoryDetailPage() {
             />
           </div>
         </div>
-        <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-          <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">Campaign name</p>
-            <div className="mt-2 flex flex-wrap gap-2">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-[280px] flex-1">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Campaign name</p>
+              <div className="mt-1 flex gap-2">
               <input
                 aria-label="Edit campaign name"
                 value={campaignDraft}
                 onChange={(event) => setCampaignDraft(event.target.value)}
-                className="min-w-[240px] flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
+                className="flex-1 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-slate-700 dark:bg-slate-900"
               />
               <button
                 type="button"
@@ -539,23 +533,14 @@ export default function HistoryDetailPage() {
                 onClick={() => void saveCampaignName()}
                 disabled={savingCampaign}
               >
-                {savingCampaign ? 'Saving…' : 'Save name'}
+                {savingCampaign ? 'Saving…' : 'Save'}
               </button>
             </div>
           </div>
-          <div className="space-y-3">
-            {showLocalOnlyBillingWarning ? (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-100">
-                {LOCAL_ONLY_BILLING_WARNING}
-              </div>
-            ) : null}
-            <InternalCostPanel
-            title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
-            subtitle={isPrivileged ? 'Internal-only testing and reconciliation fields.' : 'Product-safe estimate only.'}
-            items={costPanelItems}
-            sections={costPanelSections}
-            isPrivileged={isPrivileged}
-            />
+            <div className="flex flex-col items-end gap-1 text-right">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">Estimated cost</p>
+              <p className="text-2xl font-semibold text-slate-900 dark:text-white">{formatCurrency(totalCost)}</p>
+            </div>
           </div>
         </div>
 
@@ -591,6 +576,14 @@ export default function HistoryDetailPage() {
           {refreshing ? <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">Refreshing…</p> : null}
           {error ? <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200">{error}</div> : null}
         </div>
+        <InternalCostPanel
+          compact
+          title={isPrivileged ? 'Internal cost transparency' : 'Usage estimate'}
+          subtitle={isPrivileged ? 'Internal-only testing and reconciliation fields.' : 'Product-safe estimate only.'}
+          items={costPanelItems}
+          sections={costPanelSections}
+          isPrivileged={isPrivileged}
+        />
 
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
           <div className="flex flex-wrap items-center justify-between gap-4">

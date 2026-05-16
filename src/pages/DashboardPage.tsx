@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import AppShell from '../components/AppShell';
 import Card, { SectionHeader } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
@@ -18,6 +19,17 @@ const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
 ];
 
 const toNumber = (value: unknown) => (typeof value === 'number' ? value : Number(value ?? 0) || 0);
+
+function Stat({ label, value, hint, variant = 'default' }: { label: string; value: string | number; hint?: string; variant?: 'primary' | 'default' }) {
+  return (
+    <div className={`rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950 ${variant === 'primary' ? 'border-t-2 border-t-indigo-500' : ''}`}>
+      <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
+      <p className={`mt-2 font-semibold ${variant === 'primary' ? 'text-3xl text-indigo-600 dark:text-indigo-400' : 'text-2xl text-slate-900 dark:text-white'}`}>{value}</p>
+      {hint ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p> : null}
+      {variant === 'primary' ? <>{/* TODO: prior-period delta */}</> : null}
+    </div>
+  );
+}
 
 export default function DashboardPage() {
   const { showToast } = useToast();
@@ -127,26 +139,8 @@ export default function DashboardPage() {
   }, [loadMetrics]);
 
 
-  const kpis = useMemo(() => {
-    const spend = toNumber(metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd);
-    return [
-      ['Files', toNumber(metrics?.files_uploaded ?? metrics?.uploads)],
-      ['Addresses In', toNumber(metrics?.potential_properties ?? metrics?.leads)],
-      ['Verified Unique', toNumber(metrics?.valid_unique)],
-      ['Needs Review', toNumber(metrics?.review_queue_total ?? metrics?.needs_review)],
-      ['Exports', toNumber(metrics?.exports)],
-      ['Cost This Period', spend.toLocaleString(undefined, { style: 'currency', currency: 'USD' })],
-    ];
-  }, [metrics]);
-
-  const secondary = useMemo(
-    () => [
-      ['Needs Review', toNumber(metrics?.needs_review)],
-      ['Skipped', toNumber(metrics?.skipped)],
-      ['Out of Scope', toNumber(metrics?.out_of_scope)],
-      ['Duplicates', toNumber(metrics?.duplicates)],
-      ['Excluded Total', toNumber(metrics?.excluded_total)],
-    ],
+  const spend = useMemo(
+    () => toNumber(metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd),
     [metrics],
   );
 
@@ -205,47 +199,25 @@ export default function DashboardPage() {
             {refreshing ? (
               <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">Refreshing…</p>
             ) : null}
-            <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-              {kpis.map(([label, value]) => (
-                <div key={label} className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-                  <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">{value as any}</p>
-                  {label === 'Needs Review' ? (
-                    <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Rows still requiring review or correction.</p>
-                  ) : null}
-                </div>
-              ))}
+            <div className="mt-6 grid gap-4 md:grid-cols-4">
+              <Stat label="Cost This Period" value={spend.toLocaleString(undefined, { style: 'currency', currency: 'USD' })} variant="primary" />
+              <Stat label="Files" value={toNumber(metrics?.files_uploaded ?? metrics?.uploads)} />
+              <Stat label="Addresses In" value={toNumber(metrics?.potential_properties ?? metrics?.leads)} />
+              <Stat label="Verified Unique" value={toNumber(metrics?.valid_unique)} />
             </div>
-            <div className="mt-6 flex flex-wrap gap-2">
-              {secondary.map(([label, value]) => (
-                <span key={label} className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200">
-                  {label}: {value}
-                </span>
-              ))}
+            <div className="mt-4 grid gap-4 md:grid-cols-3">
+              <Stat label="Needs Review" value={toNumber(metrics?.review_queue_total ?? metrics?.needs_review)} hint="Rows still requiring review" />
+              <Stat label="Exports" value={toNumber(metrics?.exports)} />
+              <Stat label="Excluded Total" value={toNumber(metrics?.excluded_total)} />
             </div>
-            <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">Excluded Total: Rows not exportable because they were skipped, out of scope, or duplicates.</p>
+            <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400" title="Excluded Total = skipped + out of scope + duplicates.">
+              Metadata: Skipped {toNumber(metrics?.skipped)} • Out of Scope {toNumber(metrics?.out_of_scope)} • Duplicates {toNumber(metrics?.duplicates)}.
+            </p>
             {localParsePersistenceWarning && hasZeroDurableMetrics ? (
               <p className="mt-4 text-xs text-slate-500 dark:text-slate-400">
                 Dashboard metrics only include saved jobs. Your last run may be missing until backend persistence is restored.
               </p>
             ) : null}
-            <div className="mt-6 grid gap-4 sm:grid-cols-3">
-              <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-                <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">This month</p>
-                <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">Files processed</p>
-                <p className="mt-1 text-2xl font-semibold">{toNumber(metrics?.files_uploaded ?? metrics?.uploads)}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-                <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">This month</p>
-                <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">Addresses verified</p>
-                <p className="mt-1 text-2xl font-semibold">{toNumber(metrics?.valid_unique)}</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950">
-                <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">This month</p>
-                <p className="mt-2 text-sm text-slate-700 dark:text-slate-200">Cost</p>
-                <p className="mt-1 text-2xl font-semibold">{(toNumber(metrics?.total_cost_usd ?? metrics?.spend_usd ?? metrics?.spendUsd)).toLocaleString(undefined, { style: 'currency', currency: 'USD' })}</p>
-              </div>
-            </div>
             <div className="mt-8">
               <SectionHeader title="Recent batches" subtitle="Latest batch uploads across your parsing pipeline." />
               {batchesLoading ? (
@@ -261,18 +233,17 @@ export default function DashboardPage() {
                     const createdAt = item.batch.created_at ? new Date(item.batch.created_at).toLocaleString() : '--';
                     return (
                       <li key={item.batch.id}>
-                        <a href="/history" className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900">
+                        <Link to={`/history?search=${encodeURIComponent(batchName)}`} className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 hover:bg-slate-50 dark:hover:bg-slate-900">
                           <div className="min-w-0">
                             <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{batchName}</p>
-                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                              {item.job_counts.total} {item.job_counts.total === 1 ? 'job' : 'jobs'} · {item.row_totals.total_rows} rows, {item.row_totals.matched_count} valid
-                            </p>
+                            <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.row_totals.total_rows} rows, {item.row_totals.matched_count} valid</p>
                           </div>
                           <div className="flex items-center gap-3">
                             <Badge variant={getBadgeVariant(item.effective_status)}>{item.effective_status}</Badge>
+                            <Badge className="font-mono">{item.job_counts.total} {item.job_counts.total === 1 ? 'job' : 'jobs'}</Badge>
                             <span className="text-xs text-slate-500 dark:text-slate-400">{createdAt}</span>
                           </div>
-                        </a>
+                        </Link>
                       </li>
                     );
                   })}
