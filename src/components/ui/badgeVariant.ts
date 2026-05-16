@@ -1,5 +1,6 @@
 export type BadgeVariant =
   | 'neutral'
+  | 'muted'
   | 'running'
   | 'done'
   | 'failed'

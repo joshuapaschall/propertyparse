@@ -5,6 +5,7 @@ import Card, { SectionHeader } from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import { getBadgeVariant } from '../components/ui/badgeVariant';
 import EmptyState from '../components/ui/EmptyState';
+import Stat from '../components/ui/Stat';
 import { BatchRollup, getApiErrorInfo, getBatches, getMetricsSummary, MetricsRange, MetricsSummary } from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
 import { readLocalParsePersistenceState } from '../lib/persistenceStatus';
@@ -19,17 +20,6 @@ const ranges: Array<{ key: MetricsRange | 'custom'; label: string }> = [
 ];
 
 const toNumber = (value: unknown) => (typeof value === 'number' ? value : Number(value ?? 0) || 0);
-
-function Stat({ label, value, hint, variant = 'default' }: { label: string; value: string | number; hint?: string; variant?: 'primary' | 'default' }) {
-  return (
-    <div className={`rounded-xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-950 ${variant === 'primary' ? 'border-t-2 border-t-indigo-500' : ''}`}>
-      <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
-      <p className={`mt-2 font-semibold ${variant === 'primary' ? 'text-3xl text-indigo-600 dark:text-indigo-400' : 'text-2xl text-slate-900 dark:text-white'}`}>{value}</p>
-      {hint ? <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hint}</p> : null}
-      {variant === 'primary' ? <>{/* TODO: prior-period delta */}</> : null}
-    </div>
-  );
-}
 
 export default function DashboardPage() {
   const { showToast } = useToast();
