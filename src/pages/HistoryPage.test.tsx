@@ -177,7 +177,36 @@ describe('HistoryPage refresh behavior', () => {
     expect(getJobs).toHaveBeenLastCalledWith({ limit: 20, offset: 20, search: undefined, status: undefined });
   });
 
-  it('keeps row export working after navigating to another page', async () => {
+  
+
+  it('renders aligned 12-column history table headers and row cells', async () => {
+    render(<MemoryRouter><HistoryPage /></MemoryRouter>);
+    expect(await screen.findByText('Job 1')).toBeInTheDocument();
+
+    const headers: Array<string | RegExp> = [
+      'Date',
+      /Job name & file/i,
+      'Location',
+      'Rows',
+      'Valid',
+      'Review',
+      'OOS',
+      'Skipped',
+      'Dupes',
+      'Status',
+      'Cost',
+      'Actions',
+    ];
+
+    headers.forEach((name) => {
+      expect(screen.getByRole('columnheader', { name })).toBeInTheDocument();
+    });
+
+    const row = screen.getByText('Job 1').closest('tr');
+    expect(row).not.toBeNull();
+    expect(row?.querySelectorAll('td')).toHaveLength(12);
+  });
+it('keeps row export working after navigating to another page', async () => {
     const user = userEvent.setup();
     const pageOneJobs = Array.from({ length: 20 }, (_, index) => buildJob(index + 1));
     const pageTwoJobs = Array.from({ length: 20 }, (_, index) => buildJob(index + 21));

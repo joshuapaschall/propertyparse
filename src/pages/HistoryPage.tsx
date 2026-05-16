@@ -422,59 +422,59 @@ export default function HistoryPage() {
                 <table className="w-full text-left text-sm">
                   <thead className="sticky top-0 z-10 bg-slate-50 text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900 dark:text-slate-400">
                     <tr>
-                      <th className="px-4 py-3"> </th>
                       <th className="px-3 py-3">Date</th>
-                      <th className="px-4 py-3"><span className="hidden xl:inline">Job name & file</span><span className="xl:hidden">Job</span></th>
-                      <th className="px-4 py-3">Location</th>
-                      <th className="px-4 py-3 text-right">Rows Received</th>
-                      <th className="px-4 py-3 text-right">Unique Valid</th>
-                      <th className="px-4 py-3 text-right">Needs Review</th>
-                      
-                      
-                      
-                      <th className="px-4 py-3">Status</th>
-                      <th className="px-4 py-3 text-right">Cost</th>
-                      
-                      <th className="px-4 py-3 text-right">Actions</th>
+                      <th className="px-3 py-3"><span className="hidden xl:inline">Job name & file</span><span className="xl:hidden">Job</span></th>
+                      <th className="px-3 py-3">Location</th>
+                      <th className="px-2 py-3 text-right" title="Rows received">Rows</th>
+                      <th className="px-2 py-3 text-right" title="Unique valid addresses">Valid</th>
+                      <th className="px-2 py-3 text-right" title="Needs review">Review</th>
+                      <th className="px-2 py-3 text-right" title="Out of scope">OOS</th>
+                      <th className="px-2 py-3 text-right" title="Skipped">Skipped</th>
+                      <th className="px-2 py-3 text-right" title="Duplicates">Dupes</th>
+                      <th className="px-3 py-3">Status</th>
+                      <th className="px-3 py-3 text-right">Cost</th>
+                      <th className="px-3 py-3 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {groupedEntries.map((entry) => (
                       entry.type === 'standalone' ? (
                       <tr key={entry.row.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => entry.row.hasId && navigate(`/history/${entry.row.id}`)}>
-                        <td className="px-4 py-2.5">{formatHistoryDate(entry.row.createdAt)}</td>
-                        <td className="px-4 py-2.5">
+                        <td className="px-3 py-2.5 whitespace-nowrap">{formatHistoryDate(entry.row.createdAt)}</td>
+                        <td className="px-3 py-2.5">
                           <div className="font-medium" style={twoLineClampStyle}>{entry.row.name}</div>
                           <div className="text-xs text-slate-500" style={twoLineClampStyle}>{String(entry.row.filename ?? "--")}</div>
                         </td>
-                        <td className="px-4 py-2.5">{String(entry.row.location ?? "--")}</td>
-                        <td className="px-4 py-2.5 text-right">{entry.row.rowsReceived}</td>
-                        <td className="px-4 py-2.5 text-right">{entry.row.validUnique}</td>
-                        <td className="px-4 py-2.5 text-right">{entry.row.needsReview}</td>
-                        <td className="px-4 py-2.5 text-right">{entry.row.outOfScope}</td>
-                        <td className="px-4 py-2.5 text-right">{entry.row.skipped}</td>
-                        <td className="px-4 py-2.5 text-right">{entry.row.duplicates}</td>
-                        <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(entry.row.status)}>{entry.row.status}</Badge></td>
-                        <td className="px-4 py-2.5 text-right">
+                        <td className="px-3 py-2.5">{String(entry.row.location ?? "--")}</td>
+                        <td className="px-2 py-2.5 text-right tabular-nums">{entry.row.rowsReceived}</td>
+                        <td className="px-2 py-2.5 text-right tabular-nums">{entry.row.validUnique}</td>
+                        <td className="px-2 py-2.5 text-right tabular-nums">{entry.row.needsReview}</td>
+                        <td className="px-2 py-2.5 text-right tabular-nums">{entry.row.outOfScope}</td>
+                        <td className="px-2 py-2.5 text-right tabular-nums">{entry.row.skipped}</td>
+                        <td className="px-2 py-2.5 text-right tabular-nums">{entry.row.duplicates}</td>
+                        <td className="px-3 py-2.5"><Badge variant={getBadgeVariant(entry.row.status)}>{entry.row.status}</Badge></td>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap">
                           <div>{formatHistoryRowCost(entry.row.estimatedJobCost ?? entry.row.spendUsd)}</div>
                           {isPrivileged && entry.row.estimatedJobCost !== null && entry.row.spendUsd !== entry.row.estimatedJobCost ? (
                             <div className="text-[11px] text-slate-400">Actual {formatHistoryRowCost(entry.row.spendUsd)}</div>
                           ) : null}
                         </td>
-                        <td className="px-4 py-2.5 text-right" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(entry.row.id); }}>
-                          <ExportPanel
-                            triggerLabel="Export"
-                            className="relative inline-block text-left"
-                            catalog={catalogByJobId[entry.row.id] ?? FALLBACK_EXPORT_CATALOG}
-                            onDownload={(type, label) => void handleDownload(entry.row.id, type, label)}
-                            activeDownloadType={getRowActiveDownloadType(entry.row.id)}
-                            disabled={!entry.row.hasId}
-                          />
-                        </td>
-                        <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
-                          <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(entry.row.id, entry.row.name)} disabled={!entry.row.hasId}>
-                            Edit name
-                          </Button>
+                        <td className="px-3 py-2.5 text-right whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
+                          <div className="inline-flex items-center justify-end gap-2">
+                            <span onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(entry.row.id); }}>
+                              <ExportPanel
+                                triggerLabel="Export"
+                                className="relative inline-block text-left"
+                                catalog={catalogByJobId[entry.row.id] ?? FALLBACK_EXPORT_CATALOG}
+                                onDownload={(type, label) => void handleDownload(entry.row.id, type, label)}
+                                activeDownloadType={getRowActiveDownloadType(entry.row.id)}
+                                disabled={!entry.row.hasId}
+                              />
+                            </span>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(entry.row.id, entry.row.name)} disabled={!entry.row.hasId}>
+                              Edit name
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                       ) : (
@@ -484,21 +484,21 @@ export default function HistoryPage() {
                             className="cursor-pointer bg-indigo-50/50 hover:bg-indigo-100/40 dark:bg-indigo-950/20 dark:hover:bg-indigo-900/30"
                             onClick={() => toggleBatch(entry.batchId)}
                           >
-                            <td className="px-4 py-2.5">{formatHistoryDate(entry.createdAt)}</td>
-                            <td className="px-4 py-2.5">
+                            <td className="px-3 py-2.5 whitespace-nowrap">{formatHistoryDate(entry.createdAt)}</td>
+                            <td className="px-3 py-2.5">
                               <div className="font-medium">{expandedBatches.has(entry.batchId) ? '▾' : '▸'} 📦 {entry.name}</div>
                               <div className="text-xs text-slate-500">{entry.rows.length} {entry.rows.length === 1 ? 'job' : 'jobs'} in batch</div>
                             </td>
-                            <td className="px-4 py-2.5">{String(entry.rows[0]?.location ?? "--")}</td>
-                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.rowsReceived, 0)}</td>
-                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.validUnique, 0)}</td>
-                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.needsReview, 0)}</td>
-                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.outOfScope, 0)}</td>
-                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.skipped, 0)}</td>
-                            <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.duplicates, 0)}</td>
-                            <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(entry.status)}>{entry.status}</Badge></td>
-                            <td className="px-4 py-2.5 text-right">{formatHistoryRowCost(entry.rows.reduce((sum, row) => sum + Number(row.estimatedJobCost ?? row.spendUsd ?? 0), 0))}</td>
-                            <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
+                            <td className="px-3 py-2.5">{String(entry.rows[0]?.location ?? "--")}</td>
+                            <td className="px-2 py-2.5 text-right tabular-nums">{entry.rows.reduce((sum, row) => sum + row.rowsReceived, 0)}</td>
+                            <td className="px-2 py-2.5 text-right tabular-nums">{entry.rows.reduce((sum, row) => sum + row.validUnique, 0)}</td>
+                            <td className="px-2 py-2.5 text-right tabular-nums">{entry.rows.reduce((sum, row) => sum + row.needsReview, 0)}</td>
+                            <td className="px-2 py-2.5 text-right tabular-nums">{entry.rows.reduce((sum, row) => sum + row.outOfScope, 0)}</td>
+                            <td className="px-2 py-2.5 text-right tabular-nums">{entry.rows.reduce((sum, row) => sum + row.skipped, 0)}</td>
+                            <td className="px-2 py-2.5 text-right tabular-nums">{entry.rows.reduce((sum, row) => sum + row.duplicates, 0)}</td>
+                            <td className="px-3 py-2.5"><Badge variant={getBadgeVariant(entry.status)}>{entry.status}</Badge></td>
+                            <td className="px-3 py-2.5 text-right whitespace-nowrap">{formatHistoryRowCost(entry.rows.reduce((sum, row) => sum + Number(row.estimatedJobCost ?? row.spendUsd ?? 0), 0))}</td>
+                            <td className="px-3 py-2.5 text-right whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
                               <ExportPanel
                                 triggerLabel="Export"
                                 className="relative inline-block text-left"
@@ -508,30 +508,31 @@ export default function HistoryPage() {
                                 excludeTypes={['original_file']}
                               />
                             </td>
-                            <td className="px-4 py-2.5 text-right" />
                           </tr>
                           {expandedBatches.has(entry.batchId)
                             ? entry.rows.map((row) => (
                               <tr key={row.id} className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-900" onClick={() => row.hasId && navigate(`/history/${row.id}`)}>
-                                <td className="px-4 py-2.5 pl-8">{formatHistoryDate(row.createdAt)}</td>
-                                <td className="px-4 py-2.5">
+                                <td className="px-3 py-2.5 pl-8 whitespace-nowrap">{formatHistoryDate(row.createdAt)}</td>
+                                <td className="px-3 py-2.5">
                                   <div className="font-medium" style={twoLineClampStyle}>{row.name}</div>
                                   <div className="text-xs text-slate-500" style={twoLineClampStyle}>{String(row.filename ?? "--")}</div>
                                 </td>
-                                <td className="px-4 py-2.5">{String(row.location ?? "--")}</td>
-                                <td className="px-4 py-2.5 text-right">{row.rowsReceived}</td>
-                                <td className="px-4 py-2.5 text-right">{row.validUnique}</td>
-                                <td className="px-4 py-2.5 text-right">{row.needsReview}</td>
-                                <td className="px-4 py-2.5 text-right">{row.outOfScope}</td>
-                                <td className="px-4 py-2.5 text-right">{row.skipped}</td>
-                                <td className="px-4 py-2.5 text-right">{row.duplicates}</td>
-                                <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(row.status)}>{row.status}</Badge></td>
-                                <td className="px-4 py-2.5 text-right">{formatHistoryRowCost(row.estimatedJobCost ?? row.spendUsd)}</td>
-                                <td className="px-4 py-2.5 text-right" onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.id); }}>
-                                  <ExportPanel triggerLabel="Export" className="relative inline-block text-left" catalog={catalogByJobId[row.id] ?? FALLBACK_EXPORT_CATALOG} onDownload={(type, label) => void handleDownload(row.id, type, label)} activeDownloadType={getRowActiveDownloadType(row.id)} disabled={!row.hasId} />
-                                </td>
-                                <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
-                                  <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(row.id, row.name)} disabled={!row.hasId}>Edit name</Button>
+                                <td className="px-3 py-2.5">{String(row.location ?? "--")}</td>
+                                <td className="px-2 py-2.5 text-right tabular-nums">{row.rowsReceived}</td>
+                                <td className="px-2 py-2.5 text-right tabular-nums">{row.validUnique}</td>
+                                <td className="px-2 py-2.5 text-right tabular-nums">{row.needsReview}</td>
+                                <td className="px-2 py-2.5 text-right tabular-nums">{row.outOfScope}</td>
+                                <td className="px-2 py-2.5 text-right tabular-nums">{row.skipped}</td>
+                                <td className="px-2 py-2.5 text-right tabular-nums">{row.duplicates}</td>
+                                <td className="px-3 py-2.5"><Badge variant={getBadgeVariant(row.status)}>{row.status}</Badge></td>
+                                <td className="px-3 py-2.5 text-right whitespace-nowrap">{formatHistoryRowCost(row.estimatedJobCost ?? row.spendUsd)}</td>
+                                <td className="px-3 py-2.5 text-right whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
+                                  <div className="inline-flex items-center justify-end gap-2">
+                                    <span onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.id); }}>
+                                      <ExportPanel triggerLabel="Export" className="relative inline-block text-left" catalog={catalogByJobId[row.id] ?? FALLBACK_EXPORT_CATALOG} onDownload={(type, label) => void handleDownload(row.id, type, label)} activeDownloadType={getRowActiveDownloadType(row.id)} disabled={!row.hasId} />
+                                    </span>
+                                    <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(row.id, row.name)} disabled={!row.hasId}>Edit name</Button>
+                                  </div>
                                 </td>
                               </tr>
                             ))
