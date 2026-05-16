@@ -586,9 +586,7 @@ export default function AdminPage() {
   const adminCostSections = useMemo(
     () => buildAdminMtdOnlySections({
       usage: adminUsageMetrics ?? {},
-      estimatedJobCost: adminMetrics?.total_cost_usd ?? adminMetrics?.spend_usd ?? adminMetrics?.spendUsd,
       estimatedMonthlyTotal: adminMetrics?.google_month_to_date_actual_or_estimated_cost_usd ?? adminMetrics?.estimated_monthly_total_usd ?? adminMetrics?.estimated_monthly_cost_usd ?? adminMetrics?.total_cost_usd ?? adminMetrics?.spend_usd ?? adminMetrics?.spendUsd,
-      jobGeocodingCalls: (adminMetrics as Record<string, unknown>)?.job_geocoding_calls ?? adminMetrics?.googleCalls,
     }),
     [adminMetrics, adminUsageMetrics],
   );
