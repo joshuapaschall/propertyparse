@@ -19,6 +19,7 @@ type InternalCostPanelProps = {
   items?: CostPanelItem[];
   sections?: CostPanelSection[];
   isPrivileged: boolean;
+  compact?: boolean;
 };
 
 const isEmpty = (value: CostValue) => value === null || value === undefined || value === '';
@@ -29,6 +30,7 @@ export default function InternalCostPanel({
   items = [],
   sections,
   isPrivileged,
+  compact = false,
 }: InternalCostPanelProps) {
   const visibleSections = (sections ?? [{ title: '', items }])
     .map((section) => ({
@@ -40,6 +42,8 @@ export default function InternalCostPanel({
 
   if (!visibleSections.length) return null;
 
+  const hideSingleThisJobTitle =
+    visibleSections.length === 1 && visibleSections[0].title === 'This job';
   return (
     <Card className="p-4">
       <div className="space-y-1">
@@ -49,19 +53,19 @@ export default function InternalCostPanel({
       <div className="mt-4 space-y-5">
         {visibleSections.map((section) => (
           <div key={section.title || 'default'} className="space-y-3">
-            {section.title ? (
+            {section.title && !(compact && hideSingleThisJobTitle) ? (
               <h4 className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
                 {section.title}
               </h4>
             ) : null}
             {section.items.length ? (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+              <div className={`grid gap-3 ${compact ? 'sm:grid-cols-3 lg:grid-cols-6' : 'sm:grid-cols-2 xl:grid-cols-3'}`}>
                 {section.items.map((item) => (
-                  <div key={`${section.title}:${item.label}`} className="rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  <div key={`${section.title}:${item.label}`} className={`rounded-lg border border-slate-200 bg-slate-50 ${compact ? 'p-2.5' : 'p-3'} dark:border-slate-700 dark:bg-slate-900`}>
+                    <p className={`${compact ? 'text-[10px]' : 'text-[11px]'} font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400`}>
                       {item.label}
                     </p>
-                    <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">{item.value}</p>
+                    <p className={`mt-1 ${compact ? 'text-base' : 'text-lg'} font-semibold text-slate-900 dark:text-white`}>{item.value}</p>
                   </div>
                 ))}
               </div>

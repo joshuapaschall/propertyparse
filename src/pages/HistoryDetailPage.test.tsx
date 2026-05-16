@@ -342,7 +342,7 @@ describe('HistoryDetailPage summary normalization', () => {
     await screen.findByText('Rows Received');
     await user.clear(screen.getByLabelText('Edit campaign name'));
     await user.type(screen.getByLabelText('Edit campaign name'), 'Updated Campaign');
-    await user.click(screen.getByRole('button', { name: 'Save name' }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(updateJobMetadata).toHaveBeenCalledWith('job-1', { campaignName: 'Updated Campaign' }));
   });
@@ -384,12 +384,9 @@ describe('HistoryDetailPage summary normalization', () => {
     );
 
     expect(await screen.findByText('Rows Received')).toBeInTheDocument();
-    expect(screen.getByText('This job')).toBeInTheDocument();
-    expect(screen.getByText('Month to date')).toBeInTheDocument();
-    expect(screen.getByText('Remaining free cap (Geocoding)')).toBeInTheDocument();
-    expect(screen.getByText('11')).toBeInTheDocument();
-    expect(screen.getByText('Reconciliation / sync status')).toBeInTheDocument();
-    expect(screen.getByText('settled')).toBeInTheDocument();
+    expect(screen.queryByText('Month to date')).not.toBeInTheDocument();
+    expect(screen.queryByText('Remaining free cap (Geocoding)')).not.toBeInTheDocument();
+    expect(screen.getByText('Job geocoding calls')).toBeInTheDocument();
   });
 
   it('renders job geocoding calls from job_geocoding_calls instead of google_calls_used', async () => {
@@ -416,7 +413,7 @@ describe('HistoryDetailPage summary normalization', () => {
     expect(screen.queryByText('41')).not.toBeInTheDocument();
   });
 
-  it('shows the local-only warning when billing snapshot data is missing', async () => {
+  it('does not show the local-only warning on per-job detail', async () => {
     getJobDetail.mockResolvedValue({
       job: {
         job_id: 'job-1',
@@ -439,7 +436,8 @@ describe('HistoryDetailPage summary normalization', () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByText(/Local estimate only/i)).toBeInTheDocument();
+    expect(await screen.findByText('Rows Received')).toBeInTheDocument();
+    expect(screen.queryByText(/Local estimate only/i)).not.toBeInTheDocument();
   });
 
   it('does not repeatedly refetch results after initial load settles', async () => {

@@ -9,6 +9,7 @@ type AppShellProps = {
   children: ReactNode;
   actions?: ReactNode;
   contentFullWidth?: boolean;
+  density?: 'comfortable' | 'wide';
 };
 
 type NavItem = {
@@ -64,7 +65,7 @@ const adminNavItem: NavItem = {
 const navLinkBase =
   'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition';
 
-export default function AppShell({ title, subtitle, actions, children, contentFullWidth = false }: AppShellProps) {
+export default function AppShell({ title, subtitle, actions, children, contentFullWidth = false, density = 'comfortable' }: AppShellProps) {
   const { logout, role } = useAuthControls();
   const { theme, toggleTheme } = useThemeControls();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -140,7 +141,7 @@ export default function AppShell({ title, subtitle, actions, children, contentFu
 
         <div className="flex min-h-screen flex-1 flex-col">
           <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/90 backdrop-blur dark:border-slate-800 dark:bg-slate-950/80">
-            <div className="mx-auto flex w-full max-w-[1200px] flex-wrap items-center justify-between gap-4 px-6 py-4">
+            <div className={`mx-auto flex w-full ${widthClass} flex-wrap items-center justify-between gap-4 px-6 py-4`}>
               <div>
                 <button
                   type="button"
@@ -191,7 +192,7 @@ export default function AppShell({ title, subtitle, actions, children, contentFu
               </div>
             </div>
           </header>
-          <main className={`w-full px-6 py-8 ${contentFullWidth ? '' : 'mx-auto max-w-[1200px]'}`}>
+          <main className={`w-full px-6 py-8 ${contentFullWidth ? '' : `mx-auto ${widthClass}`}`}>
             <div className="mb-8">
               <h1 className="text-2xl font-semibold">{title}</h1>
               {subtitle ? (
@@ -205,3 +206,4 @@ export default function AppShell({ title, subtitle, actions, children, contentFu
     </div>
   );
 }
+  const widthClass = density === 'wide' ? 'max-w-[1600px]' : 'max-w-[1440px]';
