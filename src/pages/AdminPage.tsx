@@ -28,7 +28,7 @@ import {
   SystemDiagnostics,
   updateOrgMember,
 } from '../lib/api';
-import { buildAdminCostSections } from '../lib/costTelemetry';
+import { buildAdminMtdOnlySections } from '../lib/costTelemetry';
 import { hasLocalOnlyBillingWarning, LOCAL_ONLY_BILLING_WARNING } from '../lib/telemetryWarnings';
 import { flattenUsageSummary } from '../lib/usageSummary';
 
@@ -85,13 +85,21 @@ const getGoogleConfigStatusMessage = (status: ProviderUsageGoogleStatus | null) 
 
 function ProviderDetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-900/60">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
+    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 dark:border-slate-800 dark:bg-slate-900/60">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">{label}</p>
       <p className="mt-1 text-sm text-slate-800 dark:text-slate-100">{value}</p>
     </div>
   );
 }
 
+
+function ProviderSyncStatusBanner({ state, message, missingEnvVars, errorId, onRetry }: { state: 'ok' | 'not_configured' | 'local_only' | 'failed'; message?: string; missingEnvVars?: string[]; errorId?: string; onRetry?: () => void; }) {
+  const { showToast } = useToast();
+  if (state === 'ok') return null;
+  if (state === 'local_only') return <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-100">{LOCAL_ONLY_EXPLANATION}</div>;
+  if (state === 'not_configured') return <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"><p className="font-semibold">Provider sync is not configured.</p><p className="mt-1 text-xs">Missing env vars: {(missingEnvVars ?? []).join(', ') || 'None listed'}</p><a href="#" onClick={async (e)=>{e.preventDefault(); const msg='Check provider usage env vars and redeploy API.'; try {await navigator.clipboard.writeText(msg); showToast({ title: 'Setup guide copied', variant: 'success' });} catch { window.prompt('Copy setup guide:', msg);} }} className="mt-2 inline-block text-xs font-semibold text-indigo-600">Setup guide</a></div>;
+  return <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-100"><p className="font-semibold">{message || 'Provider sync failed.'}</p>{errorId ? <p className="mt-1 text-xs">error_id: {errorId}</p> : null}<div className="mt-2 flex gap-2"><Button type="button" size="sm" variant="secondary" onClick={onRetry}>Retry</Button><Button type="button" size="sm" variant="ghost" onClick={async ()=>{const text=`${message ?? 'Provider sync failed.'} ${errorId ?? ''}`.trim(); await navigator.clipboard.writeText(text);}}>Copy error</Button></div></div>;
+}
 type SetupGuidance = {
   title: string;
   messages: string[];
@@ -576,7 +584,7 @@ export default function AdminPage() {
     [adminMetrics],
   );
   const adminCostSections = useMemo(
-    () => buildAdminCostSections({
+    () => buildAdminMtdOnlySections({
       usage: adminUsageMetrics ?? {},
       estimatedJobCost: adminMetrics?.total_cost_usd ?? adminMetrics?.spend_usd ?? adminMetrics?.spendUsd,
       estimatedMonthlyTotal: adminMetrics?.google_month_to_date_actual_or_estimated_cost_usd ?? adminMetrics?.estimated_monthly_total_usd ?? adminMetrics?.estimated_monthly_cost_usd ?? adminMetrics?.total_cost_usd ?? adminMetrics?.spend_usd ?? adminMetrics?.spendUsd,
@@ -636,12 +644,7 @@ export default function AdminPage() {
                     </Button>
                   </div>
 
-                  {googleUsageError ? (
-                    <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-100">
-                      <p className="font-semibold">Google provider usage status could not be loaded.</p>
-                      <p className="mt-1">{googleUsageError.message}</p>
-                    </div>
-                  ) : null}
+                  <ProviderSyncStatusBanner state={googleUsageError ? 'failed' : getMissingGoogleConfigEnvVars(googleUsageStatus).length > 0 ? 'not_configured' : showLocalOnlyExplanation ? 'local_only' : 'ok'} message={googleUsageError?.message} missingEnvVars={getMissingGoogleConfigEnvVars(googleUsageStatus)} onRetry={() => void handleGoogleSync()} />
 
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     <ProviderDetailRow label="Sync status" value={formatDisplayValue(googleUsageStatus?.sync_status)} />
@@ -686,12 +689,7 @@ export default function AdminPage() {
                     </Button>
                   </div>
 
-                  {openAiUsageError ? (
-                    <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900 dark:border-rose-800/60 dark:bg-rose-950/40 dark:text-rose-100">
-                      <p className="font-semibold">OpenAI provider usage status could not be loaded.</p>
-                      <p className="mt-1">{openAiUsageError.message}</p>
-                    </div>
-                  ) : null}
+                  <ProviderSyncStatusBanner state={openAiUsageError ? 'failed' : 'ok'} message={openAiUsageError?.message} onRetry={() => void handleOpenAiSync()} />
 
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
                     <ProviderDetailRow label="Sync status" value={formatDisplayValue(openAiUsageSummary?.sync_status)} />
@@ -705,7 +703,7 @@ export default function AdminPage() {
 
           <Card>
             <SectionHeader
-              title="Cost transparency"
+              title="Month-to-date cost & usage"
               subtitle="Internal cost detail for testing and reconciliation. Not shown to non-admin users."
               action={
                 <Button type="button" variant="secondary" onClick={() => void loadAdminMetrics()} disabled={adminMetricsLoading}>
@@ -725,7 +723,7 @@ export default function AdminPage() {
             ) : null}
             <div className="mt-4">
               <InternalCostPanel
-                title="Internal cost transparency"
+                title="Month-to-date cost & usage"
                 subtitle="Visible to admin and owner roles only."
                 sections={adminCostSections}
                 isPrivileged
@@ -824,7 +822,7 @@ export default function AdminPage() {
                       <th className="px-3 py-2">Email</th>
                       <th className="px-3 py-2">Role</th>
                       <th className="px-3 py-2">Joined</th>
-                      <th className="px-3 py-2 text-right">Actions</th>
+                      <th className="border-l border-slate-200 px-3 py-2 text-right dark:border-slate-800">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-900">
@@ -847,17 +845,17 @@ export default function AdminPage() {
                           <td className="px-3 py-3 text-sm text-slate-600 dark:text-slate-300">{email}</td>
                           <td className="px-3 py-3 text-sm text-slate-600 dark:text-slate-300"><span className="capitalize">{memberRole}</span></td>
                           <td className="px-3 py-3 text-sm text-slate-500 dark:text-slate-400">{joinedLabel}</td>
-                          <td className="px-3 py-3 text-right text-sm">
+                          <td className="border-l border-slate-100 px-3 py-3 text-right text-sm dark:border-slate-800">
                             {canManageTeam ? (
                               <div className="flex justify-end gap-2">
-                                <Button type="button" disabled={!userId} onClick={() => handleOpenEdit(member)} variant="secondary">
+                                <Button type="button" disabled={!userId} onClick={() => handleOpenEdit(member)} variant="secondary" size="sm">
                                   Edit
                                 </Button>
                                 <Button
                                   type="button"
                                   disabled={Boolean(resettingByUserId[userId]) || !userId}
                                   onClick={() => void handleResetPassword(userId)}
-                                  variant="ghost"
+                                  variant="ghost" size="sm"
                                 >
                                   {resettingByUserId[userId] ? 'Sending...' : 'Reset Password'}
                                 </Button>
@@ -865,7 +863,7 @@ export default function AdminPage() {
                                   type="button"
                                   disabled={Boolean(removingByUserId[userId]) || !userId}
                                   onClick={() => void handleRemove(userId, email)}
-                                  variant="destructive"
+                                  variant="destructive" size="sm"
                                 >
                                   {removingByUserId[userId] ? 'Removing...' : 'Remove'}
                                 </Button>

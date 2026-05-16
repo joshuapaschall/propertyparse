@@ -103,6 +103,35 @@ export const buildJobOnlyCostSections = ({
   jobGeocodingCalls?: unknown;
 }): CostPanelSection[] => [_buildThisJobSection({ usage, estimatedJobCost, jobGeocodingCalls })];
 
+export const buildAdminMtdOnlySections = ({
+  usage,
+  estimatedMonthlyTotal,
+}: {
+  usage: UsageSummaryFlatFields;
+  estimatedMonthlyTotal?: unknown;
+}): CostPanelSection[] => [
+  {
+    title: 'Month to date',
+    items: [
+      { label: 'Estimated monthly total', value: formatCurrency(usage.google_month_to_date_actual_or_estimated_cost_usd ?? usage.estimated_monthly_total_usd ?? estimatedMonthlyTotal) },
+      { label: 'Month-to-date geocoding usage', value: formatCount(usage.month_to_date_geocoding_calls) },
+      { label: 'Month-to-date autocomplete usage', value: formatCount(usage.month_to_date_autocomplete_calls) },
+      { label: 'Month-to-date place details usage', value: formatCount(usage.month_to_date_place_details_calls) },
+      { label: 'Remaining free cap (Geocoding)', value: formatCount(usage.remaining_free_cap_geocoding) },
+      { label: 'Remaining free cap (Autocomplete)', value: formatCount(usage.remaining_free_cap_autocomplete) },
+      { label: 'Remaining free cap (Place Details)', value: formatCount(usage.remaining_free_cap_place_details) },
+      { label: 'Reconciliation / sync status', value: usage.reconciliation_status ?? null },
+      { label: 'Pricing source / confidence', value: usage.pricing_accuracy ? titleCase(usage.pricing_accuracy) : null },
+    ],
+    metadata: [
+      usage.provider_usage_source ? `Source: ${titleCase(usage.provider_usage_source)}` : '',
+      usage.pricing_accuracy ? `Confidence: ${titleCase(usage.pricing_accuracy)}` : '',
+      usage.billing_snapshot_as_of ? `Billing snapshot as of ${formatDateTime(usage.billing_snapshot_as_of)}` : '',
+      usage.sync_lag_seconds !== undefined ? `Sync lag: ${formatSyncLag(usage.sync_lag_seconds)}` : '',
+    ],
+  },
+];
+
 export const buildProductSafeCostItems = ({
   usage,
   estimatedJobCost,

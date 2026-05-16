@@ -73,13 +73,24 @@ describe('AdminPage provider usage sync section', () => {
     expect(await screen.findByText('Not authorized')).toBeInTheDocument();
   });
 
-  it('renders admin cost transparency panel with month-to-date details', async () => {
+  it('renders admin cost panel with month-to-date details', async () => {
     authState.role = 'admin';
     render(<MemoryRouter><AdminPage /></MemoryRouter>);
-    expect(await screen.findByText('Cost transparency')).toBeInTheDocument();
-    expect(screen.getByText('Internal cost transparency')).toBeInTheDocument();
+    expect(await screen.findByText('Month-to-date cost & usage')).toBeInTheDocument();
+    expect(screen.getAllByText('Month-to-date cost & usage').length).toBeGreaterThan(0);
     expect(screen.getByText('Month-to-date geocoding usage')).toBeInTheDocument();
     expect(screen.getByText('Remaining free cap (Geocoding)')).toBeInTheDocument();
+  });
+  it('renders failed provider banner when google usage errors', async () => {
+    getGoogleProviderUsageStatus.mockRejectedValueOnce({ apiErrorInfo: { message: 'failed', endpoint: '/x' } });
+    render(<MemoryRouter><AdminPage /></MemoryRouter>);
+    expect(await screen.findByText('failed')).toBeInTheDocument();
+  });
+
+  it('renders not configured banner when missing env vars exist', async () => {
+    getGoogleProviderUsageStatus.mockResolvedValueOnce({ sync_status: 'ready', missing_env_vars: ['GOOGLE_BILLING_PROJECT_ID'], billing_snapshot_missing: false, google_billing_sync_configured: false });
+    render(<MemoryRouter><AdminPage /></MemoryRouter>);
+    expect(await screen.findByText('Provider sync is not configured.')).toBeInTheDocument();
   });
 
   it('refreshes provider usage and triggers both sync buttons', async () => {
