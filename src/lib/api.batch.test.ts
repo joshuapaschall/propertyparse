@@ -1,23 +1,20 @@
+import * as api from './api';
 import { describe, it, expect } from 'vitest';
 
 describe('batch API types', () => {
-  it('getBatches is exported', async () => {
-    const api = await import('./api');
+  it('getBatches is exported', () => {
     expect(typeof api.getBatches).toBe('function');
   });
 
-  it('getBatchRollup is exported', async () => {
-    const api = await import('./api');
+  it('getBatchRollup is exported', () => {
     expect(typeof api.getBatchRollup).toBe('function');
   });
 
-  it('getBatchJobs is exported', async () => {
-    const api = await import('./api');
+  it('getBatchJobs is exported', () => {
     expect(typeof api.getBatchJobs).toBe('function');
   });
 
-  it('BatchRollup allows optional progress', async () => {
-    const api = await import('./api');
+  it('BatchRollup allows optional progress', () => {
     const fixture: api.BatchRollup = {
       batch: {} as api.BatchResponse,
       job_counts: { total: 1, pending: 0, running: 1, succeeded: 0, failed: 0 },

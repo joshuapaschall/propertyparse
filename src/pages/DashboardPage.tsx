@@ -215,7 +215,7 @@ export default function DashboardPage() {
               ) : batchesError ? (
                 <EmptyState className="mt-4" title="Recent batches unavailable" description={batchesError} />
               ) : batches.length === 0 ? (
-                <EmptyState className="mt-4" title="No batches yet" />
+                <EmptyState className="mt-4" title="No batches yet" description="Run a parse job to see recent batches here." />
               ) : (
                 <ul className="mt-4 divide-y divide-slate-200 rounded-xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
                   {batches.map((item) => {

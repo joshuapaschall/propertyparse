@@ -221,12 +221,12 @@ export default function HistoryPage() {
           name: pickString(job, ['display_name', 'displayName', 'campaign_name']) ?? 'Untitled job',
           filename: pickString(job, ['file_name', 'fileName', 'original_filename', 'filename']) ?? '--',
           location: [state, county, city].filter(Boolean).join(' / ') || '--',
-          rowsReceived: summary.rowsReceived,
-          validUnique: summary.validUnique,
-          needsReview: summary.needsReview,
-          outOfScope: summary.outOfScope,
-          skipped: summary.skipped,
-          duplicates: summary.duplicates,
+          rowsReceived: Number(summary.rowsReceived ?? 0),
+          validUnique: Number(summary.validUnique ?? 0),
+          needsReview: Number(summary.needsReview ?? 0),
+          outOfScope: Number(summary.outOfScope ?? 0),
+          skipped: Number(summary.skipped ?? 0),
+          duplicates: Number(summary.duplicates ?? 0),
           spendUsd: summary.spendUsd ?? null,
           estimatedJobCost: usageSummary.estimated_job_cost_usd ?? pick(job, ['estimated_job_cost_usd', 'estimatedJobCostUsd']) ?? null,
           batchId: pickString(job, ['batch_id', 'batchId']) ?? null,
@@ -445,9 +445,9 @@ export default function HistoryPage() {
                         <td className="px-4 py-2.5">{formatHistoryDate(entry.row.createdAt)}</td>
                         <td className="px-4 py-2.5">
                           <div className="font-medium" style={twoLineClampStyle}>{entry.row.name}</div>
-                          <div className="text-xs text-slate-500" style={twoLineClampStyle}>{entry.row.filename}</div>
+                          <div className="text-xs text-slate-500" style={twoLineClampStyle}>{String(entry.row.filename ?? "--")}</div>
                         </td>
-                        <td className="px-4 py-2.5">{entry.row.location}</td>
+                        <td className="px-4 py-2.5">{String(entry.row.location ?? "--")}</td>
                         <td className="px-4 py-2.5 text-right">{entry.row.rowsReceived}</td>
                         <td className="px-4 py-2.5 text-right">{entry.row.validUnique}</td>
                         <td className="px-4 py-2.5 text-right">{entry.row.needsReview}</td>
@@ -489,7 +489,7 @@ export default function HistoryPage() {
                               <div className="font-medium">{expandedBatches.has(entry.batchId) ? '▾' : '▸'} 📦 {entry.name}</div>
                               <div className="text-xs text-slate-500">{entry.rows.length} {entry.rows.length === 1 ? 'job' : 'jobs'} in batch</div>
                             </td>
-                            <td className="px-4 py-2.5">{entry.rows[0]?.location ?? '--'}</td>
+                            <td className="px-4 py-2.5">{String(entry.rows[0]?.location ?? "--")}</td>
                             <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.rowsReceived, 0)}</td>
                             <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.validUnique, 0)}</td>
                             <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.needsReview, 0)}</td>
@@ -497,7 +497,7 @@ export default function HistoryPage() {
                             <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.skipped, 0)}</td>
                             <td className="px-4 py-2.5 text-right">{entry.rows.reduce((sum, row) => sum + row.duplicates, 0)}</td>
                             <td className="px-4 py-2.5"><Badge variant={getBadgeVariant(entry.status)}>{entry.status}</Badge></td>
-                            <td className="px-4 py-2.5 text-right">{formatHistoryRowCost(entry.rows.reduce((sum, row) => sum + (row.estimatedJobCost ?? row.spendUsd ?? 0), 0))}</td>
+                            <td className="px-4 py-2.5 text-right">{formatHistoryRowCost(entry.rows.reduce((sum, row) => sum + Number(row.estimatedJobCost ?? row.spendUsd ?? 0), 0))}</td>
                             <td className="px-4 py-2.5 text-right" onClick={(event) => event.stopPropagation()}>
                               <ExportPanel
                                 triggerLabel="Export"
@@ -516,9 +516,9 @@ export default function HistoryPage() {
                                 <td className="px-4 py-2.5 pl-8">{formatHistoryDate(row.createdAt)}</td>
                                 <td className="px-4 py-2.5">
                                   <div className="font-medium" style={twoLineClampStyle}>{row.name}</div>
-                                  <div className="text-xs text-slate-500" style={twoLineClampStyle}>{row.filename}</div>
+                                  <div className="text-xs text-slate-500" style={twoLineClampStyle}>{String(row.filename ?? "--")}</div>
                                 </td>
-                                <td className="px-4 py-2.5">{row.location}</td>
+                                <td className="px-4 py-2.5">{String(row.location ?? "--")}</td>
                                 <td className="px-4 py-2.5 text-right">{row.rowsReceived}</td>
                                 <td className="px-4 py-2.5 text-right">{row.validUnique}</td>
                                 <td className="px-4 py-2.5 text-right">{row.needsReview}</td>
