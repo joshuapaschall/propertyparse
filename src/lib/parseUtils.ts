@@ -612,18 +612,25 @@ export const computeParseSummaryFromRowResults = (rows: RowResult[]): ParseSumma
   };
 };
 
-export const getDisplaySafeMatchedAddress = (row: RowResult) => {
-  const candidates = [
-    row.google_display_address,
-    row.google_formatted_address,
+export const getDisplaySafeMatchedAddress = (
+  row: RowResult,
+): { address: string; isCandidate: boolean } => {
+  const verified = [
+    row.formatted_address,
     row.matched_address_display,
     row.matched_address,
-    row.formatted_address,
+    row.google_display_address,
+    row.google_formatted_address,
   ];
-  for (const candidate of candidates) {
-    if (typeof candidate === 'string' && candidate.trim()) return candidate.trim();
+  for (const value of verified) {
+    if (typeof value === 'string' && value.trim()) {
+      return { address: value.trim(), isCandidate: false };
+    }
   }
-  return '';
+  if (typeof row.candidate_address === 'string' && row.candidate_address.trim()) {
+    return { address: row.candidate_address.trim(), isCandidate: true };
+  }
+  return { address: '', isCandidate: false };
 };
 
 export const buildReasonLabel = (row: RowResult) => getReasonMetadata(row).label;
@@ -641,6 +648,7 @@ export const matchesSearch = (row: RowResult, query: string) => {
   const haystack = [
     row.detected_address,
     row.formatted_address,
+    row.candidate_address,
     row.reason_code,
     row.reason_detail,
     row.status,
@@ -696,7 +704,7 @@ export const isSafeManualApprovalCandidate = (row: RowResult) => {
   const blocked = getBlockedByList(row);
   const reason = getReasonCode(row);
   const ambiguity = getAmbiguityReason(row);
-  const matchedAddress = getDisplaySafeMatchedAddress(row);
+  const { address: matchedAddress } = getDisplaySafeMatchedAddress(row);
   const tier = getDecisionTier(row);
 
   if (!matchedAddress) return false;
@@ -733,7 +741,7 @@ export const getManualApprovalBlocker = (row: RowResult) => {
   const blocked = getBlockedByList(row);
   const tier = getDecisionTier(row);
 
-  if (!getDisplaySafeMatchedAddress(row)) return 'No street-level candidate was resolved';
+  if (!getDisplaySafeMatchedAddress(row).address) return 'No street-level candidate was resolved';
   if (!hasResolverMetadata(row)) return 'Approval requires backend resolver confirmation';
   if (candidateCount === null) return 'Approval requires a confirmed in-scope candidate count';
   if (candidateCount > 1) return 'Multiple possible matches found';

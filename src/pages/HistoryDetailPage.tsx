@@ -104,7 +104,7 @@ const normalizeCanonicalAddress = (row: CanonicalAddress) => {
 };
 
 const rowDisplayId = (row: RowResult) => row.source_row_id || row.source_row_index || '--';
-const getMatchedAddress = (row: RowResult) => getDisplaySafeMatchedAddress(row) || '—';
+const getMatchedAddress = (row: RowResult) => getDisplaySafeMatchedAddress(row);
 const getMatchedCounty = (row: RowResult) => {
   const components = (row.components ?? {}) as Record<string, unknown>;
   return (components.county as string) || (components.matched_county as string) || '—';
@@ -433,7 +433,23 @@ export default function HistoryDetailPage() {
                     ) : null}
                   </td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{renderOriginalAddressCell(row)}</td>
-                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedAddress(row)}</td>
+                  <td className="px-4 py-3 text-slate-700 dark:text-slate-200">
+                    {(() => {
+                      const { address, isCandidate } = getMatchedAddress(row);
+                      if (!address) return <span className="text-slate-400">—</span>;
+                      if (isCandidate) {
+                        return (
+                          <div className="flex flex-col gap-0.5">
+                            <span className="text-slate-400 dark:text-slate-500">{address}</span>
+                            <span className="inline-flex w-fit items-center rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                              Unverified
+                            </span>
+                          </div>
+                        );
+                      }
+                      return address;
+                    })()}
+                  </td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row)}</td>
                   <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCity(row)}</td>
                   <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
