@@ -57,6 +57,7 @@ import {
   JobExportType,
   JobRecord,
   createBatch,
+  getBatchRollup,
   parseFileAsync,
   approveMatchedJobRow,
   approveMatchedJobRowsBatch,
@@ -866,6 +867,21 @@ export default function ParsePage() {
     batchId: string | null;
     jobIds: string[];
   } | null>(null);
+
+  const [batchLiveProgress, setBatchLiveProgress] = useState<{
+    phase: string | null;
+    done: number | null;
+    total: number | null;
+    percent: number | null;
+    eta: string | null;
+    cacheHits: number | null;
+    googleCallsUsed: number | null;
+    jobsTotal: number;
+    jobsRunning: number;
+    jobsCompleted: number;
+    effectiveStatus: string;
+  } | null>(null);
+
   const [fileId, setFileId] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
   const [parseTimestamp, setParseTimestamp] = useState<string | null>(null);
@@ -959,6 +975,11 @@ export default function ParsePage() {
   const progressSamplesRef = useRef<{ timestamp: number; done: number; total: number }[]>([]);
   const etaSecondsRef = useRef<number | null>(null);
   const activeProgressJobIdRef = useRef<string | null>(null);
+  const batchPollIntervalRef = useRef<number | null>(null);
+  const batchPollInFlightRef = useRef<boolean>(false);
+  const batchProgressSamplesRef = useRef<Array<{ timestamp: number; done: number; total: number }>>([]);
+  const batchEtaSecondsRef = useRef<number | null>(null);
+  const activeBatchProgressIdRef = useRef<string | null>(null);
   const resetInProgressRef = useRef(false);
   const mountedRef = useRef(true);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -1074,6 +1095,7 @@ export default function ParsePage() {
   const resetParseUi = useCallback(
     (options?: { showMissingJobToast?: boolean }) => {
       stopPolling();
+      stopBatchPolling();
       clearLastJobState();
       clearJobQueryParam();
       setFile(null);
@@ -1655,6 +1677,33 @@ export default function ParsePage() {
     const hasReliableEta = Boolean(progressInfo.eta && progressInfo.eta !== '00:00' && progressInfo.phase !== 'DONE');
     return hasReliableEta ? `${detailText} • ETA ~ ${progressInfo.eta}` : detailText;
   }, [busy, isStartingParse, progressInfo, softProgressOutage]);
+
+
+  const batchProgressDetail = useMemo(() => {
+    if (!batchLiveProgress) return null;
+    const {
+      phase, done, total, eta, cacheHits, googleCallsUsed,
+      jobsRunning, jobsCompleted, jobsTotal, effectiveStatus,
+    } = batchLiveProgress;
+    if (effectiveStatus === 'COMPLETE' || effectiveStatus === 'PARTIAL' || effectiveStatus === 'FAILED') {
+      return null;
+    }
+    const phaseLabel =
+      phase === 'AI_FIXING' ? 'AI fixing'
+      : phase === 'VERIFYING' || phase === 'VALIDATING' ? 'Verifying'
+      : phase === 'EXTRACTING' ? 'Extracting'
+      : phase === 'NORMALIZING' ? 'Normalizing'
+      : phase === 'FINALIZING_RESULTS' || phase === 'PERSISTING_ROWS' ? 'Finalizing'
+      : 'Processing';
+    const doneStr = done ?? '--';
+    const totalStr = total ?? '--';
+    const baseDetail =
+      `${phaseLabel}: ${doneStr}/${totalStr} across ` +
+      `${jobsCompleted + jobsRunning}/${jobsTotal} jobs • ` +
+      `Verification calls ${googleCallsUsed ?? '--'} • ` +
+      `Cache hits ${cacheHits ?? '--'}`;
+    return eta ? `${baseDetail} • ETA ~ ${eta}` : baseDetail;
+  }, [batchLiveProgress]);
 
   const shouldShowProgress = useMemo(
     () => {
@@ -2422,6 +2471,109 @@ How to fix: ${fixHint}` : ''}`;
     },
     [campaignName, cityValue, selectedCounties, loadJobResults, scopeMode, selectedLocalities, stateValue],
   );
+
+
+  const stopBatchPolling = () => {
+    if (batchPollIntervalRef.current !== null) {
+      window.clearInterval(batchPollIntervalRef.current);
+      batchPollIntervalRef.current = null;
+    }
+    batchPollInFlightRef.current = false;
+    batchProgressSamplesRef.current = [];
+    batchEtaSecondsRef.current = null;
+    activeBatchProgressIdRef.current = null;
+  };
+
+  const startBatchPolling = (batchId: string) => {
+    stopBatchPolling();
+    activeBatchProgressIdRef.current = batchId;
+    batchProgressSamplesRef.current = [];
+    batchEtaSecondsRef.current = null;
+
+    const runBatchPoll = async () => {
+      if (batchPollInFlightRef.current) return;
+      batchPollInFlightRef.current = true;
+      try {
+        const rollup = await getBatchRollup(batchId);
+        if (activeBatchProgressIdRef.current !== batchId) return;
+        const p = rollup.progress;
+        if (!p) {
+          setBatchLiveProgress(null);
+          return;
+        }
+
+        const now = Date.now();
+        if (p.total > 0) {
+          batchProgressSamplesRef.current = [
+            ...batchProgressSamplesRef.current.slice(-14),
+            { timestamp: now, done: p.done, total: p.total },
+          ];
+        }
+        let etaSeconds: number | null = p.eta_seconds ?? null;
+        if (etaSeconds === null) {
+          const samples = batchProgressSamplesRef.current;
+          if (samples.length >= 5) {
+            const first = samples[0];
+            const last = samples[samples.length - 1];
+            const dtMs = last.timestamp - first.timestamp;
+            const dDone = last.done - first.done;
+            if (dtMs >= 4000 && dDone > 0) {
+              const rate = dDone / (dtMs / 1000);
+              const remaining = Math.max(p.total - p.done, 0);
+              etaSeconds = rate > 0 ? remaining / rate : null;
+            }
+          }
+        }
+        if (etaSeconds !== null && Number.isFinite(etaSeconds)) {
+          const prev = batchEtaSecondsRef.current;
+          const raw = Math.max(0, etaSeconds);
+          if (prev === null) {
+            batchEtaSecondsRef.current = raw;
+          } else {
+            const clamped = Math.min(prev * 1.35 + 8, Math.max(prev * 0.7 - 8, raw));
+            batchEtaSecondsRef.current = prev * 0.7 + clamped * 0.3;
+          }
+        }
+        const samples = batchProgressSamplesRef.current;
+        const showEta = samples.length >= 5 || p.eta_seconds !== null;
+
+        setBatchLiveProgress({
+          phase: p.phase,
+          done: p.done,
+          total: p.total,
+          percent: p.percent,
+          eta: showEta && batchEtaSecondsRef.current !== null
+            ? formatEta(batchEtaSecondsRef.current)
+            : null,
+          cacheHits: p.cache_hits,
+          googleCallsUsed: p.google_calls_used,
+          jobsTotal: p.jobs_total,
+          jobsRunning: p.jobs_running,
+          jobsCompleted: p.jobs_completed,
+          effectiveStatus: rollup.effective_status,
+        });
+
+        if (
+          rollup.effective_status === 'COMPLETE' ||
+          rollup.effective_status === 'PARTIAL' ||
+          rollup.effective_status === 'FAILED'
+        ) {
+          stopBatchPolling();
+        }
+      } catch (err) {
+        if (import.meta.env.DEV) {
+          console.warn('[batch-poll] failed', err);
+        }
+      } finally {
+        batchPollInFlightRef.current = false;
+      }
+    };
+
+    void runBatchPoll();
+    batchPollIntervalRef.current = window.setInterval(() => {
+      void runBatchPoll();
+    }, PARSE_POLL_INTERVAL_MS);
+  };
 
   const startPolling = (jobIdToWatch: string, options?: { onFinished?: () => Promise<void> | void }) => {
     stopPolling();
@@ -3248,6 +3400,8 @@ How to fix: ${fixHint}` : ''}`;
             }
           },
         });
+      } else if (jobIds.length > 1 && batch?.id) {
+        startBatchPolling(batch.id);
       }
     } catch (err) {
       if ((err as { name?: string })?.name === 'AbortError') return;
@@ -4558,6 +4712,8 @@ How to fix: ${fixHint}` : ''}`;
                           <button
                             type="button"
                             onClick={() => {
+                              stopBatchPolling();
+                              setBatchLiveProgress(null);
                               setBatchProgress(null);
                               setBatchFiles([]);
                             }}
@@ -4604,6 +4760,56 @@ How to fix: ${fixHint}` : ''}`;
               ) : null}
             </div>
         </div>
+
+
+        {uploadMode === 'batch' && batchLiveProgress ? (
+          <div
+            className="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950"
+            data-testid="batch-live-progress-panel"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Parsing Progress</h2>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Live status across all jobs in this batch.
+                </p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                {batchLiveProgress.effectiveStatus === 'COMPLETE'
+                  ? 'Complete'
+                  : batchLiveProgress.effectiveStatus === 'PARTIAL'
+                    ? 'Partial'
+                    : batchLiveProgress.effectiveStatus === 'FAILED'
+                      ? 'Failed'
+                      : 'Running…'}
+              </span>
+            </div>
+            <div className="mt-4">
+              <ProgressIndicator
+                steps={PROGRESS_STEPS}
+                currentStep={
+                  batchLiveProgress.phase === 'VERIFYING' || batchLiveProgress.phase === 'VALIDATING' ? 2
+                    : batchLiveProgress.phase === 'EXTRACTING' || batchLiveProgress.phase === 'NORMALIZING' ? 1
+                      : batchLiveProgress.phase === 'AI_FIXING' ? 3
+                        : batchLiveProgress.phase === 'FINALIZING_RESULTS' || batchLiveProgress.phase === 'PERSISTING_ROWS' ? 4
+                          : 0
+                }
+                percent={batchLiveProgress.percent}
+              />
+              {batchProgressDetail ? (
+                <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400" data-testid="batch-live-progress-detail">
+                  <span>{batchProgressDetail}</span>
+                </div>
+              ) : null}
+              <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+                {batchLiveProgress.jobsCompleted}/{batchLiveProgress.jobsTotal}{' '}jobs complete
+                {batchLiveProgress.jobsRunning > 0
+                  ? ` • ${batchLiveProgress.jobsRunning} running`
+                  : ''}
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         {shouldShowProgress ? (
           <div className="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950">
