@@ -54,6 +54,7 @@ import {
   getAllJobRows,
   getJobResults,
   getJobWithStatus,
+  getBatchJobs,
   JobExportType,
   JobRecord,
   createBatch,
@@ -80,6 +81,7 @@ import { FALLBACK_EXPORT_CATALOG, normalizeExportCatalog } from '../lib/exportCa
 import { mergeUsageSummary } from '../lib/usageSummary';
 import JobWarnings from '../components/JobWarnings';
 import { deriveDisplayedParseSummary, deriveDisplayedRowsReceived, normalizeJobSummary, normalizeUpdatedJobPayload, toParseSummary } from '../lib/jobSummary';
+import type { NormalizedJobSummary } from '../lib/jobSummary';
 import { writeLocalParsePersistenceState } from '../lib/persistenceStatus';
 import type { ExportCatalogItem } from '../types/exports';
 import { publishJobUpdate } from '../lib/liveUpdates';
@@ -923,6 +925,7 @@ export default function ParsePage() {
     jobsCompleted: number;
     effectiveStatus: string;
   } | null>(null);
+  const [batchHydrating, setBatchHydrating] = useState(false);
 
   const [fileId, setFileId] = useState<string | null>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -2577,6 +2580,25 @@ How to fix: ${fixHint}` : ''}`;
           rollup.effective_status === 'FAILED'
         ) {
           stopBatchPolling();
+          if (rollup.effective_status === 'COMPLETE' || rollup.effective_status === 'PARTIAL') {
+            const syntheticJobId = `batch:${batchId}`;
+            setJobId(syntheticJobId);
+            updateJobQueryParam(syntheticJobId);
+            setBatchHydrating(true);
+            try {
+              await hydrateCompletedBatch(batchId, abortControllerRef.current?.signal ?? null);
+            } catch (err) {
+              if (import.meta.env.DEV) console.warn('[batch-hydrate] failed', err);
+            } finally {
+              if (mountedRef.current) {
+                setBusy(false);
+                setBatchHydrating(false);
+                setBatchLiveProgress(null);
+              }
+            }
+          } else if (rollup.effective_status === 'FAILED') {
+            if (mountedRef.current) setBusy(false);
+          }
         }
       } catch (err) {
         if (import.meta.env.DEV) {
@@ -2992,9 +3014,71 @@ How to fix: ${fixHint}` : ''}`;
     [applyParsedResponse],
   );
 
+  const hydrateCompletedBatch = useCallback(
+    async (batchId: string, signal: AbortSignal | null) => {
+      const jobs = await getBatchJobs(batchId);
+      if (signal?.aborted || !mountedRef.current) return false;
+      const hydratableJobs = jobs.filter((job) => {
+        const status = String((job as any).status ?? '').toUpperCase();
+        return status === 'COMPLETED' || status === 'SUCCESS';
+      });
+      const allRows: { matched: ParsedRow[]; unmatched: ParsedRow[] } = { matched: [], unmatched: [] };
+      const aggregateSummaryAcc: NormalizedJobSummary = {
+        rowsReceived: 0, validTotal: 0, validUnique: 0, needsReview: 0, outOfScope: 0, skipped: 0,
+        duplicates: 0, matched: 0, attentionTotal: 0, googleCallsUsed: 0, openAIOcrCallsUsed: 0, spendUsd: 0,
+      };
+      const CONCURRENCY = 5;
+      for (let i = 0; i < hydratableJobs.length; i += CONCURRENCY) {
+        if (signal?.aborted || !mountedRef.current) return false;
+        const slice = hydratableJobs.slice(i, i + CONCURRENCY);
+        const results = await Promise.all(slice.map(async (job) => {
+          const jobId = String((job as any).id ?? (job as any).job_id ?? '');
+          if (!jobId) return null;
+          try {
+            const detail = await getJobDetail(jobId);
+            const resultsPayload = await getJobResults(jobId);
+            return { jobId, job, detail, resultsPayload };
+          } catch (err) {
+            if (import.meta.env.DEV) console.warn('[batch-hydrate] job fetch failed', jobId, err);
+            return null;
+          }
+        }));
+        if (signal?.aborted || !mountedRef.current) return false;
+        for (const r of results) {
+          if (!r) continue;
+          const jobSummary = normalizeJobSummary((r.detail as any)?.summary ?? r.job);
+          aggregateSummaryAcc.rowsReceived += jobSummary.rowsReceived;
+          aggregateSummaryAcc.validTotal += jobSummary.validTotal;
+          aggregateSummaryAcc.validUnique += jobSummary.validUnique;
+          aggregateSummaryAcc.needsReview += jobSummary.needsReview;
+          aggregateSummaryAcc.outOfScope += jobSummary.outOfScope;
+          aggregateSummaryAcc.skipped += jobSummary.skipped;
+          aggregateSummaryAcc.duplicates += jobSummary.duplicates;
+          aggregateSummaryAcc.matched += jobSummary.matched;
+          aggregateSummaryAcc.attentionTotal += jobSummary.attentionTotal;
+          aggregateSummaryAcc.googleCallsUsed += jobSummary.googleCallsUsed;
+          aggregateSummaryAcc.openAIOcrCallsUsed += jobSummary.openAIOcrCallsUsed;
+          aggregateSummaryAcc.spendUsd += jobSummary.spendUsd;
+          const rowResults = ((r.resultsPayload as any)?.row_results ?? []) as Record<string, unknown>[];
+          const sourceFileName = String((r.job as any)?.file_name ?? (r.job as any)?.original_filename ?? '');
+          const stamped = rowResults.map((row) => ({ ...row, source_job_id: r.jobId, source_file_name: sourceFileName }));
+          allRows.matched.push(...normalizeRows(stamped.filter((row) => row.status === 'Matched')));
+          allRows.unmatched.push(...normalizeRows(stamped.filter((row) => row.status !== 'Matched')));
+        }
+      }
+      if (signal?.aborted || !mountedRef.current) return false;
+      setLegacyMatchedRows(allRows.matched);
+      setLegacyUnmatchedRows(allRows.unmatched);
+      setParseSummary(toParseSummary(aggregateSummaryAcc));
+      return true;
+    },
+    [],
+  );
+
   const resetForFreshParse = () => {
     setError(null);
     setBusy(true);
+    setBatchHydrating(false);
     setResultsFinalizing(false);
     setRowsReceived(null);
     setParseSummary(null);
@@ -3432,6 +3516,10 @@ How to fix: ${fixHint}` : ''}`;
   };
 
   const handleEditSave = (updated: ParsedRow) => {
+    if (jobId?.startsWith('batch:')) {
+      showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
+      return;
+    }
     setLegacyMatchedRows((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
     setLegacyUnmatchedRows((prev) => prev.map((row) => (row.id === updated.id ? updated : row)));
     setEditingRow(null);
@@ -3469,6 +3557,10 @@ How to fix: ${fixHint}` : ''}`;
   };
 
   const handleRetryRow = async (row: ParsedRow) => {
+    if (jobId?.startsWith('batch:')) {
+      showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
+      return;
+    }
     try {
       const response = await retryParseRow({
         row: row.original ?? row,
@@ -3488,6 +3580,10 @@ How to fix: ${fixHint}` : ''}`;
   };
 
   const handleRetryMarked = async () => {
+    if (jobId?.startsWith('batch:')) {
+      showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
+      return;
+    }
     const marked = legacyUnmatchedRows.filter((row) => row.needsRetry);
     if (!marked.length) return;
     try {
@@ -3638,6 +3734,7 @@ How to fix: ${fixHint}` : ''}`;
   };
 
   const handleClearResults = () => {
+    setBatchHydrating(false);
     resetInProgressRef.current = true;
     resetParseUi();
     window.setTimeout(() => {
@@ -3657,6 +3754,10 @@ How to fix: ${fixHint}` : ''}`;
     }
     if (!jobId) {
       setReviewError('Missing job ID. Please re-run the parse job.');
+      return;
+    }
+    if (jobId.startsWith('batch:')) {
+      setReviewError('Per-row retries are not supported on multi-job batches yet — open History.');
       return;
     }
     setReviewSaving(true);
@@ -3761,6 +3862,10 @@ How to fix: ${fixHint}` : ''}`;
   const handleApproveMatched = async (row: RowResult, allowScopeOverride = false) => {
     if (!jobId) {
       showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+      return;
+    }
+    if (jobId.startsWith('batch:')) {
+      showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
       return;
     }
     const capabilities = getApprovalCapabilities(row);
@@ -4780,7 +4885,7 @@ How to fix: ${fixHint}` : ''}`;
         </div>
 
 
-        {uploadMode === 'batch' && batchLiveProgress ? (
+        {uploadMode === 'batch' && batchLiveProgress && !(!batchHydrating && (batchLiveProgress.effectiveStatus === 'COMPLETE' || batchLiveProgress.effectiveStatus === 'PARTIAL')) ? (
           <div
             className="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950"
             data-testid="batch-live-progress-panel"
@@ -4793,8 +4898,10 @@ How to fix: ${fixHint}` : ''}`;
                 </p>
               </div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-                {batchLiveProgress.effectiveStatus === 'COMPLETE'
-                  ? 'Complete'
+                {batchHydrating
+                  ? 'Loading results…'
+                  : batchLiveProgress.effectiveStatus === 'COMPLETE'
+                    ? 'Complete'
                   : batchLiveProgress.effectiveStatus === 'PARTIAL'
                     ? 'Partial'
                     : batchLiveProgress.effectiveStatus === 'FAILED'
@@ -4816,6 +4923,7 @@ How to fix: ${fixHint}` : ''}`;
               />
               {batchProgressDetail ? (
                 <div className="mt-2 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400" data-testid="batch-live-progress-detail">
+                  {batchHydrating ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-500 dark:border-slate-700 dark:border-t-indigo-400" /> : null}
                   <span>{batchProgressDetail}</span>
                 </div>
               ) : null}
