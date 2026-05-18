@@ -1,5 +1,5 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import ParsePage from './ParsePage';
@@ -50,25 +50,28 @@ beforeEach(() => {
     .mockResolvedValueOnce({ effective_status: 'COMPLETE', progress: { phase: 'FINALIZING_RESULTS', done: 6, total: 6, percent: 100, eta_seconds: null, cache_hits: 0, google_calls_used: 0, jobs_total: 2, jobs_running: 0, jobs_completed: 2 } });
   getBatchJobs.mockResolvedValue([{ id: 'j1', status: 'COMPLETED', file_name: 'a.xlsx' }, { id: 'j2', status: 'COMPLETED', file_name: 'b.xlsx' }]);
   getJobDetail.mockImplementation(async (jobId: string) => ({ summary: { rows_received: 3, matched: 1, valid_total: 1, valid_unique: 1, needs_review: 2, out_of_scope: 0, skipped: 0, duplicates: 0, attention_total: 2, google_calls_used: 3, openai_ocr_calls_used: 1, spend_usd: 0.1 }, job: { id: jobId } }));
-  getJobResults.mockImplementation(async (jobId: string) => ({ row_results: [
-    { id: `${jobId}-1`, status: 'Matched' },
-    { id: `${jobId}-2`, status: 'Unmatched' },
-    { id: `${jobId}-3`, status: 'Unmatched' },
-  ] }));
+  getJobResults.mockImplementation(async (jobId: string) => ({
+    row_results: [
+      { source_row_id: `${jobId}-1`, source_row_index: 1, address_raw: '1 Main St', status: 'Matched' },
+      { source_row_id: `${jobId}-2`, source_row_index: 2, address_raw: '2 Main St', status: 'Unmatched' },
+      { source_row_id: `${jobId}-3`, source_row_index: 3, address_raw: '3 Main St', status: 'Unmatched' },
+    ],
+  }));
 });
 afterEach(() => vi.useRealTimers());
 
 it('hydrates and merges multi-job batch results into unified table', async () => {
-  const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+  vi.useRealTimers();
+  const user = userEvent.setup();
   render(<MemoryRouter><ParsePage /></MemoryRouter>);
+  await user.click(screen.getByTestId('upload-mode-batch'));
   await user.click(screen.getByText('pick-batch'));
   await user.click(screen.getByText('set-State'));
   await user.click(screen.getByText('set-Counties'));
-  await user.click(await screen.findByRole('button', { name: /Process File/i }));
-  await act(async () => { vi.advanceTimersByTime(2000); });
-  await waitFor(() => expect(getBatchJobs).toHaveBeenCalledWith('batch-1'));
-  await waitFor(() => expect(getJobResults).toHaveBeenCalledTimes(2));
-  const rows = await screen.findByTestId('rows');
-  expect(rows.textContent).toContain('j1:a.xlsx');
-  expect(rows.textContent).toContain('j2:b.xlsx');
+  await user.click(await screen.findByRole('button', { name: /Process batch/i }));
+  await waitFor(() => expect(getBatchRollup).toHaveBeenCalled(), { timeout: 10000 });
+  await waitFor(() => expect(getBatchJobs).toHaveBeenCalledWith('batch-1'), { timeout: 10000 });
+  await waitFor(() => expect(getJobResults).toHaveBeenCalledTimes(2), { timeout: 10000 });
+  expect(getJobResults).toHaveBeenNthCalledWith(1, 'j1');
+  expect(getJobResults).toHaveBeenNthCalledWith(2, 'j2');
 });

@@ -3016,12 +3016,13 @@ How to fix: ${fixHint}` : ''}`;
 
   const hydrateCompletedBatch = useCallback(
     async (batchId: string, signal: AbortSignal | null) => {
-      const jobs = await getBatchJobs(batchId);
+      const jobs: JobRecord[] = await getBatchJobs(batchId);
       if (signal?.aborted || !mountedRef.current) return false;
       const hydratableJobs = jobs.filter((job) => {
-        const status = String((job as any).status ?? '').toUpperCase();
+        const status = String(job.status ?? '').toUpperCase();
         return status === 'COMPLETED' || status === 'SUCCESS';
       });
+      type StampedRow = RowResult & { source_job_id: string; source_file_name: string };
       const allRows: { matched: ParsedRow[]; unmatched: ParsedRow[] } = { matched: [], unmatched: [] };
       const aggregateSummaryAcc: NormalizedJobSummary = {
         rowsReceived: 0, validTotal: 0, validUnique: 0, needsReview: 0, outOfScope: 0, skipped: 0,
@@ -3032,11 +3033,11 @@ How to fix: ${fixHint}` : ''}`;
         if (signal?.aborted || !mountedRef.current) return false;
         const slice = hydratableJobs.slice(i, i + CONCURRENCY);
         const results = await Promise.all(slice.map(async (job) => {
-          const jobId = String((job as any).id ?? (job as any).job_id ?? '');
+          const jobId = String(job.id ?? job.job_id ?? '');
           if (!jobId) return null;
           try {
-            const detail = await getJobDetail(jobId);
-            const resultsPayload = await getJobResults(jobId);
+            const detail = (await getJobDetail(jobId)) as { summary?: unknown; job?: JobRecord } | undefined;
+            const resultsPayload = (await getJobResults(jobId)) as { row_results?: RowResult[] } | undefined;
             return { jobId, job, detail, resultsPayload };
           } catch (err) {
             if (import.meta.env.DEV) console.warn('[batch-hydrate] job fetch failed', jobId, err);
@@ -3046,7 +3047,7 @@ How to fix: ${fixHint}` : ''}`;
         if (signal?.aborted || !mountedRef.current) return false;
         for (const r of results) {
           if (!r) continue;
-          const jobSummary = normalizeJobSummary((r.detail as any)?.summary ?? r.job);
+          const jobSummary = normalizeJobSummary(r.detail?.summary ?? r.job);
           aggregateSummaryAcc.rowsReceived += jobSummary.rowsReceived;
           aggregateSummaryAcc.validTotal += jobSummary.validTotal;
           aggregateSummaryAcc.validUnique += jobSummary.validUnique;
@@ -3059,9 +3060,13 @@ How to fix: ${fixHint}` : ''}`;
           aggregateSummaryAcc.googleCallsUsed += jobSummary.googleCallsUsed;
           aggregateSummaryAcc.openAIOcrCallsUsed += jobSummary.openAIOcrCallsUsed;
           aggregateSummaryAcc.spendUsd += jobSummary.spendUsd;
-          const rowResults = ((r.resultsPayload as any)?.row_results ?? []) as Record<string, unknown>[];
-          const sourceFileName = String((r.job as any)?.file_name ?? (r.job as any)?.original_filename ?? '');
-          const stamped = rowResults.map((row) => ({ ...row, source_job_id: r.jobId, source_file_name: sourceFileName }));
+          const rowResults: RowResult[] = r.resultsPayload?.row_results ?? [];
+          const sourceFileName = String(r.job.file_name ?? r.job.original_filename ?? '');
+          const stamped: StampedRow[] = rowResults.map((row) => ({
+            ...row,
+            source_job_id: r.jobId,
+            source_file_name: sourceFileName,
+          }));
           allRows.matched.push(...normalizeRows(stamped.filter((row) => row.status === 'Matched')));
           allRows.unmatched.push(...normalizeRows(stamped.filter((row) => row.status !== 'Matched')));
         }
