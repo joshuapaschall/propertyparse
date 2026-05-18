@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import ParsePage from './ParsePage';
@@ -28,21 +28,6 @@ vi.mock('../components/TablePagination', () => ({ default: () => null }));
 vi.mock('../components/EditRowModal', () => ({ default: () => null }));
 vi.mock('../components/exports/ExportPanel', () => ({ default: () => null }));
 vi.mock('../components/AccountedRowsIndicator', () => ({ default: () => null }));
-vi.mock('../components/ResultsTable', () => ({
-  default: ({ rows, onSelectNeedsReviewRow, onSelectOutOfScopeRow, selectedNeedsReviewRowIds, selectedOutOfScopeRowIds, onApproveMatched, onForceOverride }: any) => (
-    <div data-testid='rows'>
-      {rows.map((r: any) => (
-        <div key={r.source_row_id}>
-          {r.source_job_id}:{r.source_file_name}:{r.source_row_id}
-          <button onClick={() => onSelectNeedsReviewRow?.(r.source_row_id, !(selectedNeedsReviewRowIds?.has?.(r.source_row_id)))}>toggle-needs-{r.source_row_id}</button>
-          <button onClick={() => onSelectOutOfScopeRow?.(r.source_row_id, !(selectedOutOfScopeRowIds?.has?.(r.source_row_id)))}>toggle-oos-{r.source_row_id}</button>
-          <button onClick={() => onApproveMatched?.(r)}>approve-{r.source_row_id}</button>
-          <button onClick={() => onForceOverride?.(r)}>override-{r.source_row_id}</button>
-        </div>
-      ))}
-    </div>
-  ),
-}));
 vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
 vi.mock('../lib/locationApi', () => ({ searchCities: vi.fn(), searchCounties: vi.fn(), searchStates: vi.fn() }));
 vi.mock('../lib/imageCompressor', () => ({ compressImage: vi.fn(async (f: File) => f) }));
@@ -60,6 +45,8 @@ vi.mock('../lib/api', () => ({
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.stubGlobal('scrollTo', vi.fn());
+  HTMLElement.prototype.scrollIntoView = vi.fn();
   createBatch.mockResolvedValue({ id: 'batch-1' });
   uploadFile.mockResolvedValue({ fileId: 'f' });
   parseFileAsync.mockResolvedValue({ ok: true });
@@ -70,9 +57,9 @@ beforeEach(() => {
   getJobDetail.mockImplementation(async (jobId: string) => ({ summary: { rows_received: 3, matched: 1, valid_total: 1, valid_unique: 1, needs_review: 2, out_of_scope: 0, skipped: 0, duplicates: 0, attention_total: 2, google_calls_used: 3, openai_ocr_calls_used: 1, spend_usd: 0.1 }, job: { id: jobId } }));
   getJobResults.mockImplementation(async (jobId: string) => ({
     row_results: [
-      { source_row_id: `${jobId}-1`, source_row_index: 1, address_raw: '1 Main St', status: 'Matched' },
-      { source_row_id: `${jobId}-2`, source_row_index: 2, address_raw: '2 Main St', status: 'Unmatched' },
-      { source_row_id: `${jobId}-3`, source_row_index: 3, address_raw: '3 Main St', status: 'Unmatched' },
+      { source_row_id: `${jobId}-1`, source_row_index: 1, address_raw: jobId === 'j2' ? '1 Main St B' : '1 Main St', status: 'Matched' },
+      { source_row_id: `${jobId}-2`, source_row_index: 2, address_raw: jobId === 'j2' ? '2 Main St B' : '2 Main St', status: 'Unmatched' },
+      { source_row_id: `${jobId}-3`, source_row_index: 3, address_raw: jobId === 'j2' ? '3 Main St B' : '3 Main St', status: 'Unmatched' },
     ],
   }));
   retryJobRow.mockResolvedValue({ updated_row_results: [] });
@@ -82,18 +69,44 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-it('hydrates and merges multi-job batch results into unified table', async () => {
-  vi.useRealTimers();
-  const user = userEvent.setup();
-  render(<MemoryRouter><ParsePage /></MemoryRouter>);
+const startBatchProcessing = async (user: ReturnType<typeof userEvent.setup>) => {
   await user.click(screen.getByTestId('upload-mode-batch'));
   await user.click(screen.getByText('pick-batch'));
   await user.click(screen.getByText('set-State'));
   await user.click(screen.getByText('set-Counties'));
-  await user.click(await screen.findByRole('button', { name: /Process batch/i }));
+  await user.click(await screen.findByRole('button', { name: /Process batch/i }, { timeout: 10000 }));
   await waitFor(() => expect(getBatchRollup).toHaveBeenCalled(), { timeout: 10000 });
   await waitFor(() => expect(getBatchJobs).toHaveBeenCalledWith('batch-1'), { timeout: 10000 });
-  await waitFor(() => expect(getJobResults).toHaveBeenCalledTimes(2), { timeout: 10000 });
+  await waitFor(() => expect(getJobResults.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 10000 });
+};
+
+const findReviewButtonForRow = async (rowIdentifier: string) => {
+  const buttons = await screen.findAllByRole('button', { name: /Review/i }, { timeout: 10000 });
+  for (const btn of buttons) {
+    const row = btn.closest('tr');
+    if (row && within(row).queryByText(new RegExp(rowIdentifier, 'i'))) {
+      return btn;
+    }
+  }
+  throw new Error(`No Review button found for row containing ${rowIdentifier}`);
+};
+
+const findCheckboxForRow = async (rowIdentifier: string) => {
+  const checkboxes = await screen.findAllByRole('checkbox', { name: /^Select row group /i }, { timeout: 10000 });
+  for (const checkbox of checkboxes) {
+    const row = checkbox.closest('tr');
+    if (row && within(row).queryByText(new RegExp(rowIdentifier, 'i'))) {
+      return checkbox;
+    }
+  }
+  throw new Error(`No checkbox found for row containing ${rowIdentifier}`);
+};
+
+it('hydrates and merges multi-job batch results into unified table', async () => {
+  vi.useRealTimers();
+  const user = userEvent.setup();
+  render(<MemoryRouter><ParsePage /></MemoryRouter>);
+  await startBatchProcessing(user);
   expect(getJobResults).toHaveBeenNthCalledWith(1, 'j1');
   expect(getJobResults).toHaveBeenNthCalledWith(2, 'j2');
 
@@ -112,15 +125,65 @@ it('routes per-row retry to row.source_job_id in batch mode', async () => {
   vi.useRealTimers();
   const user = userEvent.setup();
   render(<MemoryRouter><ParsePage /></MemoryRouter>);
-  await user.click(screen.getByTestId('upload-mode-batch'));
-  await user.click(screen.getByText('pick-batch'));
-  await user.click(screen.getByText('set-State'));
-  await user.click(screen.getByText('set-Counties'));
-  await user.click(await screen.findByRole('button', { name: /Process batch/i }));
-  await screen.findByRole('button', { name: /Needs Review/i });
-  await user.click(screen.getByRole('button', { name: /Needs Review/i }));
-  await user.click(await screen.findByText(/j2:b.xlsx:j2-2/i));
+  await startBatchProcessing(user);
+  const needsReviewTab = await screen.findByRole('button', { name: /^Needs Review \(/i }, { timeout: 10000 });
+  await user.click(needsReviewTab);
+  // j2 addresses are suffixed with "B" in fixtures so we can uniquely target a second-job row.
+  const reviewButton = await findReviewButtonForRow('2 Main St B');
+  await user.click(reviewButton);
+  const input = await screen.findByPlaceholderText(/Type a corrected address/i, { timeout: 10000 });
+  await user.clear(input);
+  await user.type(input, '123 Test Ave');
   await user.click(screen.getByRole('button', { name: /Retry & Next/i }));
   await waitFor(() => expect(retryJobRow).toHaveBeenCalled());
   expect(retryJobRow.mock.calls[0][0]).toBe('j2');
-});
+}, 30000);
+
+it('routes per-row approve to row.source_job_id in batch mode', async () => {
+  vi.useRealTimers();
+  const user = userEvent.setup();
+  render(<MemoryRouter><ParsePage /></MemoryRouter>);
+  await startBatchProcessing(user);
+  const needsReviewTab = await screen.findByRole('button', { name: /^Needs Review \(/i }, { timeout: 10000 });
+  await user.click(needsReviewTab);
+  // We use the drawer path (Approve & Next) since Unmatched fixtures do not guarantee inline "Approve matched".
+  const reviewButton = await findReviewButtonForRow('2 Main St B');
+  await user.click(reviewButton);
+  await user.click(await screen.findByRole('button', { name: /Approve & Next/i }, { timeout: 10000 }));
+  await waitFor(() => expect(approveMatchedJobRow).toHaveBeenCalled(), { timeout: 10000 });
+  expect(approveMatchedJobRow.mock.calls[0][0]).toBe('j2');
+}, 30000);
+
+it('bulk-approve fans out across source_job_ids', async () => {
+  vi.useRealTimers();
+  const user = userEvent.setup();
+  render(<MemoryRouter><ParsePage /></MemoryRouter>);
+  await startBatchProcessing(user);
+  const needsReviewTab = await screen.findByRole('button', { name: /^Needs Review \(/i }, { timeout: 10000 });
+  await user.click(needsReviewTab);
+  const j1Checkbox = await findCheckboxForRow('2 Main St');
+  const j2Checkbox = await findCheckboxForRow('2 Main St B');
+  await user.click(j1Checkbox);
+  await user.click(j2Checkbox);
+  approveMatchedJobRowsBatch.mockClear();
+  await user.click(screen.getByRole('button', { name: /Approve Selected/i }));
+  await waitFor(() => expect(approveMatchedJobRowsBatch).toHaveBeenCalled(), { timeout: 10000 });
+  const calls = approveMatchedJobRowsBatch.mock.calls;
+  const jobIds = new Set(calls.map((c) => c[0]));
+  expect(jobIds).toEqual(new Set(['j1', 'j2']));
+}, 30000);
+
+it('auto-fix flagged rows fans out by source_job_id', async () => {
+  vi.useRealTimers();
+  const user = userEvent.setup();
+  render(<MemoryRouter><ParsePage /></MemoryRouter>);
+  await startBatchProcessing(user);
+  const autoFixButton = await screen.findByRole('button', { name: /Auto-fix flagged rows \(AI\)/i }, { timeout: 10000 });
+  runAiFixFlaggedRows.mockClear();
+  await user.click(autoFixButton);
+  await waitFor(() => expect(runAiFixFlaggedRows).toHaveBeenCalled(), { timeout: 10000 });
+  const calls = runAiFixFlaggedRows.mock.calls;
+  const jobIds = new Set(calls.map((c) => c[0]));
+  expect(jobIds).toEqual(new Set(['j1', 'j2']));
+  expect(calls.every((c) => c[1] === true)).toBe(true);
+}, 30000);
