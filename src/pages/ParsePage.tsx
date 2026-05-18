@@ -1019,6 +1019,7 @@ export default function ParsePage() {
   const summaryHydrationPromiseRef = useRef<Promise<ParseSummary | null> | null>(null);
   const resultsHydrationPromiseRef = useRef<Promise<boolean> | null>(null);
   const busyRef = useRef(busy);
+  const consecutive404Ref = useRef(0);
   const progressSamplesRef = useRef<{ timestamp: number; done: number; total: number }[]>([]);
   const etaSecondsRef = useRef<number | null>(null);
   const activeProgressJobIdRef = useRef<string | null>(null);
@@ -2619,6 +2620,7 @@ How to fix: ${fixHint}` : ''}`;
 
   const startPolling = (jobIdToWatch: string, options?: { onFinished?: () => Promise<void> | void }) => {
     stopPolling();
+    consecutive404Ref.current = 0;
     activeProgressJobIdRef.current = jobIdToWatch;
     progressSamplesRef.current = [];
     etaSecondsRef.current = null;
@@ -2628,6 +2630,7 @@ How to fix: ${fixHint}` : ''}`;
       pollingInFlightRef.current = true;
       try {
         const { job } = await getJobWithStatus(jobIdToWatch, abortControllerRef.current?.signal);
+        consecutive404Ref.current = 0;
         if (activeProgressJobIdRef.current !== jobIdToWatch) {
           return;
         }
@@ -2793,7 +2796,37 @@ How to fix: ${fixHint}` : ''}`;
           resetParseUi({ showMissingJobToast: true });
           return;
         }
+        if (errorInfo?.status === 404 && busyRef.current) {
+          consecutive404Ref.current += 1;
+          // ~30 seconds of consecutive 404s. PARSE_POLL_INTERVAL_MS is 1.5s,
+          // so 20 polls covers roughly 30s.
+          if (consecutive404Ref.current >= 20) {
+            stopPolling();
+            setBusy(false);
+            setResultsFinalizing(false);
+            setSoftProgressOutage(false);
+            setError(
+              'We could not connect to your parse job. It may not have ' +
+                'started correctly. Please retry. (If this keeps ' +
+                'happening, contact support.)'
+            );
+            return;
+          }
+          setSoftProgressOutage(true);
+          setProgressPercent(null);
+          setProgressInfo((prev) => ({
+            ...prev,
+            unavailableReason:
+              prev.unavailableReason ||
+              'Processing is still running. Live progress will appear when available.',
+          }));
+          setPollErrorCount((prev) => prev + 1);
+          setPollError((err as Error).message ?? 'Polling failed.');
+          return;
+        }
         if (busyRef.current && isSoftProgressStatus(errorInfo?.status)) {
+          // Keep the existing soft-status branch for 503s and similar
+          // transient outages. Don't apply the 404 cutoff here.
           setSoftProgressOutage(true);
           setProgressPercent(null);
           setProgressInfo((prev) => ({
