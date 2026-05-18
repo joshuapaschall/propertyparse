@@ -3024,8 +3024,7 @@ How to fix: ${fixHint}` : ''}`;
         const status = String(job.status ?? '').toUpperCase();
         return status === 'COMPLETED' || status === 'SUCCESS';
       });
-      type StampedRow = RowResult & { source_job_id: string; source_file_name: string };
-      const allStampedRows: StampedRow[] = [];
+      const allStampedRows: RowResult[] = [];
       const aggregateSummaryAcc: NormalizedJobSummary = {
         rowsReceived: 0, validTotal: 0, validUnique: 0, needsReview: 0, outOfScope: 0, skipped: 0,
         duplicates: 0, matched: 0, attentionTotal: 0, googleCallsUsed: 0, openAIOcrCallsUsed: 0, spendUsd: 0,
@@ -3682,16 +3681,20 @@ How to fix: ${fixHint}` : ''}`;
       );
       parseSummaryRef.current = derivedSummary;
       setRowsReceived(deriveDisplayedRowsReceived(mergedRows, derivedSummary));
-      setMetadata((prev) => {
-        const next = { ...(prev ?? {}), ...((normalizedUpdatedJob ?? {}) as Record<string, unknown>) };
-        if (typeof totalRows === 'number') next.rows_received = totalRows;
-        if (typeof matchedCount === 'number') next.matched_count = matchedCount;
-        if (typeof unmatchedCount === 'number') next.unmatched_count = unmatchedCount;
-        if (typeof dedupedCountValue === 'number') next.deduped_count = dedupedCountValue;
-        if (typeof cacheHitsValue === 'number') next.cache_hits = cacheHitsValue;
-        if (typeof googleCallsValue === 'number') next.google_calls_used = googleCallsValue;
-        return next;
-      });
+      // In batch mode, updated_job is a single underlying job's metadata; writing it would clobber the batch aggregate.
+      // The derived parseSummary above is computed from merged rows, so it stays correct regardless.
+      if (batchResultsBatchId === null) {
+        setMetadata((prev) => {
+          const next = { ...(prev ?? {}), ...((normalizedUpdatedJob ?? {}) as Record<string, unknown>) };
+          if (typeof totalRows === 'number') next.rows_received = totalRows;
+          if (typeof matchedCount === 'number') next.matched_count = matchedCount;
+          if (typeof unmatchedCount === 'number') next.unmatched_count = unmatchedCount;
+          if (typeof dedupedCountValue === 'number') next.deduped_count = dedupedCountValue;
+          if (typeof cacheHitsValue === 'number') next.cache_hits = cacheHitsValue;
+          if (typeof googleCallsValue === 'number') next.google_calls_used = googleCallsValue;
+          return next;
+        });
+      }
       setParseSummary(derivedSummary);
     } else if (updatedRows?.length) {
       const derivedSummary = deriveDisplayedParseSummary(mergedRows, parseSummaryRef.current);
@@ -3770,14 +3773,18 @@ How to fix: ${fixHint}` : ''}`;
       setReviewError('Address is required.');
       return;
     }
-    if (batchResultsBatchId !== null) {
-      setReviewError('Per-row retries are not supported on multi-job batches yet — open History.');
+    const effectiveJobId = batchResultsBatchId !== null
+      ? (reviewRow.source_job_id ?? null)
+      : jobId;
+    if (!effectiveJobId) {
+      setReviewError(
+        batchResultsBatchId !== null
+          ? 'Cannot identify source job for this row. Try reloading the batch.'
+          : 'Missing job ID. Please re-run the parse job.'
+      );
       return;
     }
-    if (!jobId) {
-      setReviewError('Missing job ID. Please re-run the parse job.');
-      return;
-    }
+    const resolvedJobId = effectiveJobId;
     setReviewSaving(true);
     const memberRows = getGroupMemberRows(reviewRow);
     setRetryingRowIds((prev) => {
@@ -3790,14 +3797,14 @@ How to fix: ${fixHint}` : ''}`;
       const response =
         memberRows.length > 1
           ? await retryJobBatch(
-              jobId,
+              resolvedJobId,
               memberRows.map((memberRow) => ({
                 rowId: memberRow.source_row_id,
                 fullAddress: trimmedAddress,
               })),
               forceRefresh,
             )
-          : await retryJobRow(jobId, memberRows[0].source_row_id, trimmedAddress, forceRefresh);
+          : await retryJobRow(resolvedJobId, memberRows[0].source_row_id, trimmedAddress, forceRefresh);
       const updates = response.updated_row_results ?? response.updated_rows ?? [];
       const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
       await handleRetryUpdates({
@@ -3878,12 +3885,17 @@ How to fix: ${fixHint}` : ''}`;
 
 
   const handleApproveMatched = async (row: RowResult, allowScopeOverride = false) => {
-    if (batchResultsBatchId !== null) {
-      showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
-      return;
-    }
-    if (!jobId) {
-      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+    const effectiveJobId = batchResultsBatchId !== null
+      ? (row.source_job_id ?? null)
+      : jobId;
+    if (!effectiveJobId) {
+      showToast({
+        title: batchResultsBatchId !== null
+          ? 'Cannot identify source job for this row. Try reloading the batch.'
+          : 'Missing job ID',
+        description: batchResultsBatchId !== null ? undefined : 'Please re-run the parse job.',
+        variant: 'error',
+      });
       return;
     }
     const capabilities = getApprovalCapabilities(row);
@@ -3903,7 +3915,7 @@ How to fix: ${fixHint}` : ''}`;
     });
 
     try {
-      const response = await approveMatchedJobRow(jobId, {
+      const response = await approveMatchedJobRow(effectiveJobId, {
         rowId: row.source_row_id,
         applyToSameNormalizedInput: false,
         allowScopeOverride,
@@ -3950,8 +3962,17 @@ How to fix: ${fixHint}` : ''}`;
   };
 
   const handleForceOverride = async (row: RowResult) => {
-    if (!jobId) {
-      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+    const effectiveJobId = batchResultsBatchId !== null
+      ? (row.source_job_id ?? null)
+      : jobId;
+    if (!effectiveJobId) {
+      showToast({
+        title: batchResultsBatchId !== null
+          ? 'Cannot identify source job for this row. Try reloading the batch.'
+          : 'Missing job ID',
+        description: batchResultsBatchId !== null ? undefined : 'Please re-run the parse job.',
+        variant: 'error',
+      });
       return false;
     }
     const capabilities = getApprovalCapabilities(row);
@@ -3969,7 +3990,7 @@ How to fix: ${fixHint}` : ''}`;
     });
 
     try {
-      const response = await approveMatchedJobRow(jobId, {
+      const response = await approveMatchedJobRow(effectiveJobId, {
         rowId: row.source_row_id,
         applyToSameNormalizedInput: false,
         forceOverride: true,
@@ -4006,90 +4027,108 @@ How to fix: ${fixHint}` : ''}`;
   };
 
   const handleApproveSelectedNeedsReview = async () => {
-    if (!jobId) {
-      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
-      return;
-    }
-    const rowIds = Array.from(selectedNeedsReviewRowIds).filter((rowId) => {
+    const candidateRowIds = Array.from(selectedNeedsReviewRowIds).filter((rowId) => {
       const row = rowResultsById.get(rowId);
       if (!row) return false;
       const caps = getApprovalCapabilities(row);
       return caps.canApproveMatched || caps.canForceOverride;
     });
-    const needsForceOverride = rowIds.some((rowId) => {
-      const row = rowResultsById.get(rowId);
-      if (!row) return false;
-      const caps = getApprovalCapabilities(row);
-      return !caps.canApproveMatched && caps.canForceOverride;
-    });
-    if (!rowIds.length) return;
+    if (!candidateRowIds.length) return;
+    const grouped = new Map<string, string[]>();
+    if (batchResultsBatchId === null) {
+      if (!jobId) {
+        showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+        return;
+      }
+      grouped.set(jobId, candidateRowIds);
+    } else {
+      candidateRowIds.forEach((rowId) => {
+        const row = rowResultsById.get(rowId);
+        const sourceJobId = row?.source_job_id;
+        if (!sourceJobId) {
+          console.warn('[ParsePage] missing source_job_id for selected Needs Review row', rowId);
+          return;
+        }
+        grouped.set(sourceJobId, [...(grouped.get(sourceJobId) ?? []), rowId]);
+      });
+      if (grouped.size === 0) {
+        showToast({ title: 'Cannot identify source jobs for selected rows. Try reloading the batch.', variant: 'error' });
+        return;
+      }
+    }
     setApprovingRowIds((prev) => {
       const next = new Set(prev);
-      rowIds.forEach((rowId) => next.add(rowId));
+      candidateRowIds.forEach((rowId) => next.add(rowId));
       return next;
     });
     try {
-      const response = await approveMatchedJobRowsBatch(
-        jobId,
-        rowIds,
-        false,
-        needsForceOverride,
-        needsForceOverride ? 'Bulk override — manual review confirmed' : '',
+      const entries = Array.from(grouped.entries());
+      const groupResults = await Promise.allSettled(
+        entries.map(async ([sjid, ids]) => {
+          const needsForceForGroup = ids.some((rowId) => {
+            const row = rowResultsById.get(rowId);
+            if (!row) return false;
+            const caps = getApprovalCapabilities(row);
+            return !caps.canApproveMatched && caps.canForceOverride;
+          });
+          return approveMatchedJobRowsBatch(sjid, ids, false, needsForceForGroup, needsForceForGroup ? 'Bulk override — manual review confirmed' : '');
+        }),
       );
-      const updates = response.updated_row_results ?? response.updated_rows ?? [];
-      const failedRows = response.failed_rows ?? [];
-      const metadata = response.metadata;
-      const approvedCount = metadata?.approved_count ?? updates.length;
-      const failedCount = metadata?.failed_count ?? failedRows.length;
-      const requestedCount = metadata?.requested_count ?? rowIds.length;
-      const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
+      const allUpdatedRows: RowResult[] = [];
+      const allFailedRows: Array<{ row_id?: string; error?: string }> = [];
+      const rejectionSummaries: string[] = [];
+      let approvedSum = 0;
+      let failedSum = 0;
+      let requestedSum = 0;
+      let firstUpdatedJob: Record<string, unknown> | undefined;
+      groupResults.forEach((result, index) => {
+        const ids = entries[index][1];
+        if (result.status === 'fulfilled') {
+          const updates = result.value.updated_row_results ?? result.value.updated_rows ?? [];
+          const failedRows = result.value.failed_rows ?? [];
+          allUpdatedRows.push(...updates);
+          allFailedRows.push(...failedRows);
+          const metadata = result.value.metadata;
+          approvedSum += metadata?.approved_count ?? updates.length;
+          failedSum += metadata?.failed_count ?? failedRows.length;
+          requestedSum += metadata?.requested_count ?? ids.length;
+          if (!firstUpdatedJob) firstUpdatedJob = (result.value.updated_job ?? undefined) as Record<string, unknown> | undefined;
+        } else {
+          failedSum += ids.length;
+          requestedSum += ids.length;
+          rejectionSummaries.push((result.reason as Error)?.message ?? String(result.reason));
+        }
+      });
       await handleRetryUpdates({
-        updatedRows: updates,
-        updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
+        updatedRows: allUpdatedRows,
+        updatedJob: batchResultsBatchId === null ? firstUpdatedJob : undefined,
         freshReload: true,
       });
-      const duplicateCount = updates.filter((row) => normalizeStatus(row.status).includes('DUPLICATE')).length;
-
-      const failedRowSummary = failedRows
+      const duplicateCount = allUpdatedRows.filter((row) => normalizeStatus(row.status).includes('DUPLICATE')).length;
+      const failedRowSummary = allFailedRows
         .slice(0, 3)
-        .map((failure) => {
-          const rowId = failure.row_id ?? 'unknown row';
-          const message = failure.error ?? 'Unable to approve';
-          return `${rowId}: ${message}`;
-        })
+        .map((failure) => `${failure.row_id ?? 'unknown row'}: ${failure.error ?? 'Unable to approve'}`)
         .join(' · ');
-
-      const summaryParts = [
-        `${approvedCount} approved`,
-        `${failedCount} failed`,
-        `${requestedCount} selected`,
-      ];
+      const summaryParts = [`${approvedSum} approved`, `${failedSum} failed`, `${requestedSum} selected`];
+      const rejectionSummary = rejectionSummaries.length ? `Failed groups: ${rejectionSummaries.slice(0, 2).join(' · ')}` : null;
 
       publishLiveUpdate('job-updated');
       publishLiveUpdate('metrics-updated');
       showToast({
-        title: failedCount > 0 ? 'Bulk approve completed with partial success' : `Approved ${approvedCount} rows`,
+        title: failedSum > 0 ? 'Bulk approve completed with partial success' : `Approved ${approvedSum} rows`,
         description:
           [
             summaryParts.join(' · '),
             duplicateCount > 0 ? 'Some were marked duplicate (see Duplicates tab).' : null,
             failedRowSummary ? `Failed rows: ${failedRowSummary}` : null,
+            rejectionSummary,
           ]
             .filter(Boolean)
             .join(' '),
-        variant: failedCount > 0 || duplicateCount > 0 ? 'info' : 'success',
+        variant: failedSum > 0 || duplicateCount > 0 ? 'info' : 'success',
       });
-
-      if (failedCount === 0) {
-        setSelectedNeedsReviewRowIds(new Set());
-      } else {
-        const failedIdSet = new Set(
-          failedRows
-            .map((failure) => failure.row_id)
-            .filter((rowId): rowId is string => Boolean(rowId)),
-        );
-        setSelectedNeedsReviewRowIds(failedIdSet);
-      }
+      const failedIdSet = new Set(allFailedRows.map((failure) => failure.row_id).filter((rowId): rowId is string => Boolean(rowId)));
+      setSelectedNeedsReviewRowIds((prev) => new Set(Array.from(prev).filter((rowId) => failedIdSet.has(rowId))));
     } catch (err) {
       showToast({
         title: (err as Error).message ?? 'Bulk approve failed.',
@@ -4098,79 +4137,110 @@ How to fix: ${fixHint}` : ''}`;
     } finally {
       setApprovingRowIds((prev) => {
         const next = new Set(prev);
-        rowIds.forEach((rowId) => next.delete(rowId));
+        candidateRowIds.forEach((rowId) => next.delete(rowId));
         return next;
       });
     }
   };
 
   const handleApproveSelectedOutOfScope = async () => {
-    if (!jobId) {
-      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
-      return;
-    }
-    const rowIds = Array.from(selectedOutOfScopeRowIds).filter((rowId) => {
+    const candidateRowIds = Array.from(selectedOutOfScopeRowIds).filter((rowId) => {
       const row = rowResultsById.get(rowId);
       if (!row) return false;
       const caps = getApprovalCapabilities(row);
       return caps.canApproveWithScopeOverride || caps.canForceOverride;
     });
-    const needsForceOverride = rowIds.some((rowId) => {
-      const row = rowResultsById.get(rowId);
-      if (!row) return false;
-      const caps = getApprovalCapabilities(row);
-      return !caps.canApproveWithScopeOverride && caps.canForceOverride;
-    });
-    if (!rowIds.length) return;
+    if (!candidateRowIds.length) return;
+    const grouped = new Map<string, string[]>();
+    if (batchResultsBatchId === null) {
+      if (!jobId) {
+        showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+        return;
+      }
+      grouped.set(jobId, candidateRowIds);
+    } else {
+      candidateRowIds.forEach((rowId) => {
+        const row = rowResultsById.get(rowId);
+        const sourceJobId = row?.source_job_id;
+        if (!sourceJobId) {
+          console.warn('[ParsePage] missing source_job_id for selected Out of Scope row', rowId);
+          return;
+        }
+        grouped.set(sourceJobId, [...(grouped.get(sourceJobId) ?? []), rowId]);
+      });
+      if (grouped.size === 0) {
+        showToast({ title: 'Cannot identify source jobs for selected rows. Try reloading the batch.', variant: 'error' });
+        return;
+      }
+    }
     setApprovingRowIds((prev) => {
       const next = new Set(prev);
-      rowIds.forEach((rowId) => next.add(rowId));
+      candidateRowIds.forEach((rowId) => next.add(rowId));
       return next;
     });
     try {
-      const response = await approveMatchedJobRowsBatch(
-        jobId,
-        rowIds,
-        true,
-        needsForceOverride,
-        needsForceOverride ? 'Bulk override — manual review confirmed' : '',
+      const entries = Array.from(grouped.entries());
+      const groupResults = await Promise.allSettled(
+        entries.map(async ([sjid, ids]) => {
+          const needsForceForGroup = ids.some((rowId) => {
+            const row = rowResultsById.get(rowId);
+            if (!row) return false;
+            const caps = getApprovalCapabilities(row);
+            return !caps.canApproveWithScopeOverride && caps.canForceOverride;
+          });
+          return approveMatchedJobRowsBatch(sjid, ids, true, needsForceForGroup, needsForceForGroup ? 'Bulk override — manual review confirmed' : '');
+        }),
       );
-      const updates = response.updated_row_results ?? response.updated_rows ?? [];
-      const failedRows = response.failed_rows ?? [];
-      const metadata = response.metadata;
-      const approvedCount = metadata?.approved_count ?? updates.length;
-      const failedCount = metadata?.failed_count ?? failedRows.length;
-      const requestedCount = metadata?.requested_count ?? rowIds.length;
-      const updatedJob = response.updated_job ?? (response as Record<string, unknown>).updated_job;
+      const allUpdatedRows: RowResult[] = [];
+      const allFailedRows: Array<{ row_id?: string; error?: string }> = [];
+      const rejectionSummaries: string[] = [];
+      let approvedSum = 0;
+      let failedSum = 0;
+      let requestedSum = 0;
+      let firstUpdatedJob: Record<string, unknown> | undefined;
+      groupResults.forEach((result, index) => {
+        const ids = entries[index][1];
+        if (result.status === 'fulfilled') {
+          const updates = result.value.updated_row_results ?? result.value.updated_rows ?? [];
+          const failedRows = result.value.failed_rows ?? [];
+          allUpdatedRows.push(...updates);
+          allFailedRows.push(...failedRows);
+          const metadata = result.value.metadata;
+          approvedSum += metadata?.approved_count ?? updates.length;
+          failedSum += metadata?.failed_count ?? failedRows.length;
+          requestedSum += metadata?.requested_count ?? ids.length;
+          if (!firstUpdatedJob) firstUpdatedJob = (result.value.updated_job ?? undefined) as Record<string, unknown> | undefined;
+        } else {
+          failedSum += ids.length;
+          requestedSum += ids.length;
+          rejectionSummaries.push((result.reason as Error)?.message ?? String(result.reason));
+        }
+      });
       await handleRetryUpdates({
-        updatedRows: updates,
-        updatedJob: (updatedJob ?? undefined) as Record<string, unknown> | undefined,
+        updatedRows: allUpdatedRows,
+        updatedJob: batchResultsBatchId === null ? firstUpdatedJob : undefined,
         freshReload: true,
       });
-      const failedRowSummary = failedRows
+      const failedRowSummary = allFailedRows
         .slice(0, 3)
         .map((failure) => `${failure.row_id ?? 'unknown row'}: ${failure.error ?? 'Unable to approve'}`)
         .join(' · ');
+      const rejectionSummary = rejectionSummaries.length ? `Failed groups: ${rejectionSummaries.slice(0, 2).join(' · ')}` : null;
       publishLiveUpdate('job-updated');
       publishLiveUpdate('metrics-updated');
       showToast({
-        title: failedCount > 0 ? 'Bulk approve completed with partial success' : `Approved ${approvedCount} rows`,
+        title: failedSum > 0 ? 'Bulk approve completed with partial success' : `Approved ${approvedSum} rows`,
         description: [
-          `${approvedCount} approved · ${failedCount} failed · ${requestedCount} selected`,
+          `${approvedSum} approved · ${failedSum} failed · ${requestedSum} selected`,
           failedRowSummary ? `Failed rows: ${failedRowSummary}` : null,
+          rejectionSummary,
         ]
           .filter(Boolean)
           .join(' '),
-        variant: failedCount > 0 ? 'info' : 'success',
+        variant: failedSum > 0 ? 'info' : 'success',
       });
-      if (failedCount === 0) {
-        setSelectedOutOfScopeRowIds(new Set());
-      } else {
-        const failedIdSet = new Set(
-          failedRows.map((failure) => failure.row_id).filter((rowId): rowId is string => Boolean(rowId)),
-        );
-        setSelectedOutOfScopeRowIds(new Set(Array.from(failedIdSet)));
-      }
+      const failedIdSet = new Set(allFailedRows.map((failure) => failure.row_id).filter((rowId): rowId is string => Boolean(rowId)));
+      setSelectedOutOfScopeRowIds((prev) => new Set(Array.from(prev).filter((rowId) => failedIdSet.has(rowId))));
     } catch (err) {
       showToast({
         title: (err as Error).message ?? 'Bulk approve failed.',
@@ -4179,7 +4249,7 @@ How to fix: ${fixHint}` : ''}`;
     } finally {
       setApprovingRowIds((prev) => {
         const next = new Set(prev);
-        rowIds.forEach((rowId) => next.delete(rowId));
+        candidateRowIds.forEach((rowId) => next.delete(rowId));
         return next;
       });
     }
@@ -4308,7 +4378,42 @@ How to fix: ${fixHint}` : ''}`;
 
   const handleAutoFixFlaggedRows = async () => {
     if (batchResultsBatchId !== null) {
-      showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
+      const flaggedSourceJobIds = Array.from(
+        new Set(
+          rowResults
+            .filter((row) => isNeedsReviewRow(row) || isOutOfScopeRow(row))
+            .map((row) => row.source_job_id)
+            .filter((value): value is string => Boolean(value)),
+        ),
+      );
+      if (flaggedSourceJobIds.length === 0) {
+        showToast({ title: 'Nothing to fix', variant: 'info' });
+        return;
+      }
+      setRunningAiFixFlaggedRows(true);
+      try {
+        const results = await Promise.allSettled(flaggedSourceJobIds.map((sourceJobId) => runAiFixFlaggedRows(sourceJobId, true)));
+        const updates = results
+          .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof runAiFixFlaggedRows>>> => result.status === 'fulfilled')
+          .flatMap((result) => result.value.updated_row_results ?? result.value.updated_rows ?? []);
+        if (updates.length > 0) {
+          await handleRetryUpdates({ updatedRows: updates });
+        }
+        const failed = results.filter((result) => result.status === 'rejected');
+        const reasonSummary = failed
+          .slice(0, 2)
+          .map((result) => (result as PromiseRejectedResult).reason?.message ?? String((result as PromiseRejectedResult).reason))
+          .join(' · ');
+        showToast({
+          title: `AI auto-fix started on ${flaggedSourceJobIds.length} files`,
+          description: failed.length
+            ? `Reload the batch to refresh results as fixes complete. (${failed.length} files failed to start: ${reasonSummary})`
+            : 'Reload the batch to refresh results as fixes complete.',
+          variant: failed.length ? 'info' : 'success',
+        });
+      } finally {
+        setRunningAiFixFlaggedRows(false);
+      }
       return;
     }
     if (!jobId) {
