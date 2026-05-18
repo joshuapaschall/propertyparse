@@ -113,6 +113,8 @@ export type RowResult = {
   public_reason_message?: string;
   public_action_hint?: string;
   manual_actions?: unknown;
+  source_job_id?: string;
+  source_file_name?: string;
 };
 
 export type ManualActions = {

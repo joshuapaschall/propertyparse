@@ -11,6 +11,10 @@ const getJobResults = vi.fn();
 const createBatch = vi.fn();
 const parseFileAsync = vi.fn();
 const uploadFile = vi.fn();
+const retryJobRow = vi.fn();
+const approveMatchedJobRow = vi.fn();
+const approveMatchedJobRowsBatch = vi.fn();
+const runAiFixFlaggedRows = vi.fn();
 
 vi.mock('../components/AppShell', () => ({ default: ({ children }: { children: unknown }) => <div>{children as any}</div> }));
 vi.mock('../contexts/AuthContext', () => ({ useAuthControls: () => ({ role: 'admin' }) }));
@@ -24,7 +28,21 @@ vi.mock('../components/TablePagination', () => ({ default: () => null }));
 vi.mock('../components/EditRowModal', () => ({ default: () => null }));
 vi.mock('../components/exports/ExportPanel', () => ({ default: () => null }));
 vi.mock('../components/AccountedRowsIndicator', () => ({ default: () => null }));
-vi.mock('../components/ResultsTable', () => ({ default: ({ rows }: { rows: any[] }) => <div data-testid='rows'>{rows.map((r) => <div key={r.id}>{r.source_job_id}:{r.source_file_name}</div>)}</div> }));
+vi.mock('../components/ResultsTable', () => ({
+  default: ({ rows, onSelectNeedsReviewRow, onSelectOutOfScopeRow, selectedNeedsReviewRowIds, selectedOutOfScopeRowIds, onApproveMatched, onForceOverride }: any) => (
+    <div data-testid='rows'>
+      {rows.map((r: any) => (
+        <div key={r.source_row_id}>
+          {r.source_job_id}:{r.source_file_name}:{r.source_row_id}
+          <button onClick={() => onSelectNeedsReviewRow?.(r.source_row_id, !(selectedNeedsReviewRowIds?.has?.(r.source_row_id)))}>toggle-needs-{r.source_row_id}</button>
+          <button onClick={() => onSelectOutOfScopeRow?.(r.source_row_id, !(selectedOutOfScopeRowIds?.has?.(r.source_row_id)))}>toggle-oos-{r.source_row_id}</button>
+          <button onClick={() => onApproveMatched?.(r)}>approve-{r.source_row_id}</button>
+          <button onClick={() => onForceOverride?.(r)}>override-{r.source_row_id}</button>
+        </div>
+      ))}
+    </div>
+  ),
+}));
 vi.mock('../contexts/ToastContext', () => ({ useToast: () => ({ showToast: vi.fn() }) }));
 vi.mock('../lib/locationApi', () => ({ searchCities: vi.fn(), searchCounties: vi.fn(), searchStates: vi.fn() }));
 vi.mock('../lib/imageCompressor', () => ({ compressImage: vi.fn(async (f: File) => f) }));
@@ -37,7 +55,7 @@ vi.mock('../lib/api', () => ({
   createBatch: (...a: unknown[]) => createBatch(...a),
   parseFileAsync: (...a: unknown[]) => parseFileAsync(...a),
   uploadFile: (...a: unknown[]) => uploadFile(...a),
-  getJobWithStatus: vi.fn(), getAllJobRows: vi.fn(), getApiErrorInfo: vi.fn(() => null), downloadJobExport: vi.fn(), getJobExportCatalog: vi.fn(async () => []), approveMatchedJobRow: vi.fn(), approveMatchedJobRowsBatch: vi.fn(), retryJobBatch: vi.fn(), retryJobRow: vi.fn(), retryParseBatch: vi.fn(), retryParseRow: vi.fn(), runAiFixFlaggedRows: vi.fn(),
+  getJobWithStatus: vi.fn(), getAllJobRows: vi.fn(), getApiErrorInfo: vi.fn(() => null), downloadJobExport: vi.fn(), getJobExportCatalog: vi.fn(async () => []), approveMatchedJobRow: (...a: unknown[]) => approveMatchedJobRow(...a), approveMatchedJobRowsBatch: (...a: unknown[]) => approveMatchedJobRowsBatch(...a), retryJobBatch: vi.fn(), retryJobRow: (...a: unknown[]) => retryJobRow(...a), retryParseBatch: vi.fn(), retryParseRow: vi.fn(), runAiFixFlaggedRows: (...a: unknown[]) => runAiFixFlaggedRows(...a),
 }));
 
 beforeEach(() => {
@@ -57,6 +75,10 @@ beforeEach(() => {
       { source_row_id: `${jobId}-3`, source_row_index: 3, address_raw: '3 Main St', status: 'Unmatched' },
     ],
   }));
+  retryJobRow.mockResolvedValue({ updated_row_results: [] });
+  approveMatchedJobRow.mockResolvedValue({ updated_row_results: [] });
+  approveMatchedJobRowsBatch.mockResolvedValue({ updated_row_results: [], failed_rows: [], metadata: { approved_count: 0, failed_count: 0, requested_count: 0 } });
+  runAiFixFlaggedRows.mockResolvedValue({ updated_row_results: [] });
 });
 afterEach(() => vi.useRealTimers());
 
@@ -84,4 +106,21 @@ it('hydrates and merges multi-job batch results into unified table', async () =>
   // AccountedRowsIndicator-relevant state: 6 rows total across both jobs (1 matched + 2 unmatched per job)
   // The Needs Review pill reflects unmatched_needs_review count — both jobs report needs_review: 2.
   expect(screen.getByText(/Needs Review \(.* · 4 rows\)/i)).toBeTruthy();
+});
+
+it('routes per-row retry to row.source_job_id in batch mode', async () => {
+  vi.useRealTimers();
+  const user = userEvent.setup();
+  render(<MemoryRouter><ParsePage /></MemoryRouter>);
+  await user.click(screen.getByTestId('upload-mode-batch'));
+  await user.click(screen.getByText('pick-batch'));
+  await user.click(screen.getByText('set-State'));
+  await user.click(screen.getByText('set-Counties'));
+  await user.click(await screen.findByRole('button', { name: /Process batch/i }));
+  await screen.findByRole('button', { name: /Needs Review/i });
+  await user.click(screen.getByRole('button', { name: /Needs Review/i }));
+  await user.click(await screen.findByText(/j2:b.xlsx:j2-2/i));
+  await user.click(screen.getByRole('button', { name: /Retry & Next/i }));
+  await waitFor(() => expect(retryJobRow).toHaveBeenCalled());
+  expect(retryJobRow.mock.calls[0][0]).toBe('j2');
 });
