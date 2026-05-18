@@ -47,6 +47,7 @@ import { chunkImagesIntoPdfs } from '../lib/pdfChunker';
 import { buildScopeSummary, stripCountySuffix } from '../lib/scopeSummary';
 import { groupRows, type GroupedRow } from '../lib/groupRows';
 import {
+  downloadBatchExport,
   downloadJobExport,
   getApiErrorInfo,
   getJobExportCatalog,
@@ -991,6 +992,7 @@ export default function ParsePage() {
   } | null>(null);
   const [activeDownloadType, setActiveDownloadType] = useState<JobExportType | null>(null);
   const [exportCatalog, setExportCatalog] = useState<ExportCatalogItem[]>(FALLBACK_EXPORT_CATALOG);
+  const [batchResultsBatchId, setBatchResultsBatchId] = useState<string | null>(null);
   const [downloadSuccessLabel, setDownloadSuccessLabel] = useState<string | null>(null);
   const [progressInfo, setProgressInfo] = useState<{
     phase: string | null;
@@ -1157,6 +1159,7 @@ export default function ParsePage() {
       setLegacyUnmatchedRows([]);
       setMetadata(null);
       setLegacyMode(false);
+      setBatchResultsBatchId(null);
       setIsJobReload(false);
       setActiveTab('valid');
       setLegacyTab('matched');
@@ -2581,9 +2584,8 @@ How to fix: ${fixHint}` : ''}`;
         ) {
           stopBatchPolling();
           if (rollup.effective_status === 'COMPLETE' || rollup.effective_status === 'PARTIAL') {
-            const syntheticJobId = `batch:${batchId}`;
-            setJobId(syntheticJobId);
-            updateJobQueryParam(syntheticJobId);
+            setJobId(null);
+            clearJobQueryParam();
             setBatchHydrating(true);
             try {
               await hydrateCompletedBatch(batchId, abortControllerRef.current?.signal ?? null);
@@ -3023,7 +3025,7 @@ How to fix: ${fixHint}` : ''}`;
         return status === 'COMPLETED' || status === 'SUCCESS';
       });
       type StampedRow = RowResult & { source_job_id: string; source_file_name: string };
-      const allRows: { matched: ParsedRow[]; unmatched: ParsedRow[] } = { matched: [], unmatched: [] };
+      const allStampedRows: StampedRow[] = [];
       const aggregateSummaryAcc: NormalizedJobSummary = {
         rowsReceived: 0, validTotal: 0, validUnique: 0, needsReview: 0, outOfScope: 0, skipped: 0,
         duplicates: 0, matched: 0, attentionTotal: 0, googleCallsUsed: 0, openAIOcrCallsUsed: 0, spendUsd: 0,
@@ -3037,7 +3039,7 @@ How to fix: ${fixHint}` : ''}`;
           if (!jobId) return null;
           try {
             const detail = (await getJobDetail(jobId)) as { summary?: unknown; job?: JobRecord } | undefined;
-            const resultsPayload = (await getJobResults(jobId)) as { row_results?: RowResult[] } | undefined;
+            const resultsPayload = (await getJobResults(jobId)) as { row_results?: JobRecord[] } | undefined;
             return { jobId, job, detail, resultsPayload };
           } catch (err) {
             if (import.meta.env.DEV) console.warn('[batch-hydrate] job fetch failed', jobId, err);
@@ -3060,21 +3062,31 @@ How to fix: ${fixHint}` : ''}`;
           aggregateSummaryAcc.googleCallsUsed += jobSummary.googleCallsUsed;
           aggregateSummaryAcc.openAIOcrCallsUsed += jobSummary.openAIOcrCallsUsed;
           aggregateSummaryAcc.spendUsd += jobSummary.spendUsd;
-          const rowResults: RowResult[] = r.resultsPayload?.row_results ?? [];
+          const rawRowResults: JobRecord[] = r.resultsPayload?.row_results ?? [];
           const sourceFileName = String(r.job.file_name ?? r.job.original_filename ?? '');
-          const stamped: StampedRow[] = rowResults.map((row) => ({
-            ...row,
-            source_job_id: r.jobId,
-            source_file_name: sourceFileName,
-          }));
-          allRows.matched.push(...normalizeRows(stamped.filter((row) => row.status === 'Matched')));
-          allRows.unmatched.push(...normalizeRows(stamped.filter((row) => row.status !== 'Matched')));
+          for (let idx = 0; idx < rawRowResults.length; idx += 1) {
+            const normalized = normalizeJobRowResult(rawRowResults[idx], idx);
+            allStampedRows.push({
+              ...normalized,
+              source_job_id: r.jobId,
+              source_file_name: sourceFileName,
+            });
+          }
         }
       }
       if (signal?.aborted || !mountedRef.current) return false;
-      setLegacyMatchedRows(allRows.matched);
-      setLegacyUnmatchedRows(allRows.unmatched);
-      setParseSummary(toParseSummary(aggregateSummaryAcc));
+      const parseSummary = toParseSummary(aggregateSummaryAcc);
+      const displayedSummary = deriveDisplayedParseSummary(allStampedRows, parseSummary);
+      setParseSummary(displayedSummary);
+      setRowsReceived(deriveDisplayedRowsReceived(allStampedRows, displayedSummary));
+      setCanonicalAddresses(buildCanonicalAddressesFromRows(allStampedRows));
+      setDeriveCanonicalsFromRows(false);
+      setRowResults(allStampedRows);
+      setDuplicateGroups(buildDuplicateGroupsFromRows(allStampedRows));
+      setLegacyMode(false);
+      setLegacyMatchedRows([]);
+      setLegacyUnmatchedRows([]);
+      setBatchResultsBatchId(batchId);
       return true;
     },
     [],
@@ -3097,6 +3109,7 @@ How to fix: ${fixHint}` : ''}`;
     setLegacyUnmatchedRows([]);
     setMetadata(null);
     setLegacyMode(false);
+    setBatchResultsBatchId(null);
     setIsJobReload(false);
     setProgressStep(0);
     setProgressPercent(null);
@@ -3521,7 +3534,7 @@ How to fix: ${fixHint}` : ''}`;
   };
 
   const handleEditSave = (updated: ParsedRow) => {
-    if (jobId?.startsWith('batch:')) {
+    if (batchResultsBatchId !== null) {
       showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
       return;
     }
@@ -3562,7 +3575,7 @@ How to fix: ${fixHint}` : ''}`;
   };
 
   const handleRetryRow = async (row: ParsedRow) => {
-    if (jobId?.startsWith('batch:')) {
+    if (batchResultsBatchId !== null) {
       showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
       return;
     }
@@ -3585,7 +3598,7 @@ How to fix: ${fixHint}` : ''}`;
   };
 
   const handleRetryMarked = async () => {
-    if (jobId?.startsWith('batch:')) {
+    if (batchResultsBatchId !== null) {
       showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
       return;
     }
@@ -3757,12 +3770,12 @@ How to fix: ${fixHint}` : ''}`;
       setReviewError('Address is required.');
       return;
     }
-    if (!jobId) {
-      setReviewError('Missing job ID. Please re-run the parse job.');
+    if (batchResultsBatchId !== null) {
+      setReviewError('Per-row retries are not supported on multi-job batches yet — open History.');
       return;
     }
-    if (jobId.startsWith('batch:')) {
-      setReviewError('Per-row retries are not supported on multi-job batches yet — open History.');
+    if (!jobId) {
+      setReviewError('Missing job ID. Please re-run the parse job.');
       return;
     }
     setReviewSaving(true);
@@ -3865,12 +3878,12 @@ How to fix: ${fixHint}` : ''}`;
 
 
   const handleApproveMatched = async (row: RowResult, allowScopeOverride = false) => {
-    if (!jobId) {
-      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
+    if (batchResultsBatchId !== null) {
+      showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
       return;
     }
-    if (jobId.startsWith('batch:')) {
-      showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
+    if (!jobId) {
+      showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
       return;
     }
     const capabilities = getApprovalCapabilities(row);
@@ -4208,6 +4221,32 @@ How to fix: ${fixHint}` : ''}`;
 
 
   const handleDownloadJobExport = async (type: JobExportType, label: string) => {
+    if (batchResultsBatchId !== null) {
+      setActiveDownloadType(type);
+      setPollError(null);
+      try {
+        const { blob, filename } = await downloadBatchExport(batchResultsBatchId, type);
+        triggerBlobDownload(blob, filename);
+        setDownloadSuccessLabel(`${label} downloaded`);
+        publishLiveUpdate('job-exported');
+        publishLiveUpdate('metrics-updated');
+        showToast({ title: 'Export downloaded', variant: 'success' });
+        if (downloadSuccessTimerRef.current !== null) {
+          window.clearTimeout(downloadSuccessTimerRef.current);
+        }
+        downloadSuccessTimerRef.current = window.setTimeout(() => {
+          setDownloadSuccessLabel(null);
+          downloadSuccessTimerRef.current = null;
+        }, 2000);
+      } catch (err) {
+        const message = (err as Error).message ?? 'Failed to download export.';
+        setPollError(message);
+        showToast({ title: message, variant: 'error' });
+      } finally {
+        setActiveDownloadType(null);
+      }
+      return;
+    }
     if (!jobId) {
       setError('Missing job ID. Please re-run the parse job.');
       return;
@@ -4268,6 +4307,10 @@ How to fix: ${fixHint}` : ''}`;
 
 
   const handleAutoFixFlaggedRows = async () => {
+    if (batchResultsBatchId !== null) {
+      showToast({ title: 'Per-job action not available on batches; open History.', variant: 'info' });
+      return;
+    }
     if (!jobId) {
       showToast({ title: 'Missing job ID', description: 'Please re-run the parse job.', variant: 'error' });
       return;
@@ -5045,12 +5088,13 @@ How to fix: ${fixHint}` : ''}`;
             ) : null}
             <ExportPanel
                     triggerLabel="Export"
-                    catalog={exportCatalog}
+                    catalog={batchResultsBatchId !== null ? FALLBACK_EXPORT_CATALOG : exportCatalog}
                     onDownload={(type, label) => {
                       void handleDownloadJobExport(type, label);
                     }}
                     activeDownloadType={activeDownloadType}
-                    disabled={!jobId}
+                    disabled={!jobId && batchResultsBatchId === null}
+                    excludeTypes={batchResultsBatchId !== null ? ['original_file'] : undefined}
                   />
                   </div>
                 ) : null}

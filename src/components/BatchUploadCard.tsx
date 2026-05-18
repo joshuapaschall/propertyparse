@@ -48,7 +48,7 @@ const hasAcceptedExtension = (fileName: string): boolean => {
   return (ALL_ACCEPTED as readonly string[]).includes(lowerExt);
 };
 
-export type BatchUploadRejectionReason = 'type' | 'count' | 'size';
+export type BatchUploadRejectionReason = 'type' | 'count' | 'size' | 'empty';
 
 export type BatchUploadRejection = {
   reason: BatchUploadRejectionReason;
@@ -90,11 +90,16 @@ export default function BatchUploadCard({
       const accepted: File[] = [];
       const rejectedType: File[] = [];
       const rejectedSize: File[] = [];
+      const rejectedZeroByte: File[] = [];
 
       for (const candidate of incoming) {
         const ext = getLowerExtension(candidate.name);
         if (!hasAcceptedExtension(candidate.name)) {
           rejectedType.push(candidate);
+          continue;
+        }
+        if (candidate.size === 0) {
+          rejectedZeroByte.push(candidate);
           continue;
         }
         if (isDocumentExtension(ext) && candidate.size > maxDocumentSizeBytes) {
@@ -108,6 +113,12 @@ export default function BatchUploadCard({
         const message = `Unsupported file type${rejectedType.length > 1 ? 's' : ''}. Batch upload accepts ${ALL_ACCEPTED.join(', ')} only.`;
         setInlineError(message);
         onReject?.({ reason: 'type', message, rejectedFiles: rejectedType });
+      }
+
+      if (rejectedZeroByte.length > 0) {
+        const message = `${rejectedZeroByte.length} file(s) skipped because they are 0 bytes (empty). Check that your files are saved correctly and try again.`;
+        setInlineError(message);
+        onReject?.({ reason: 'empty', message, rejectedFiles: rejectedZeroByte });
       }
 
       if (rejectedSize.length > 0) {
@@ -161,7 +172,7 @@ export default function BatchUploadCard({
       }
 
       if (acceptedAfterLimits.length === 0) return;
-      if (rejectedType.length === 0 && rejectedSize.length === 0) {
+      if (rejectedType.length === 0 && rejectedSize.length === 0 && rejectedZeroByte.length === 0) {
         const countRejected =
           existingImageCount + incomingImages.length > resolvedMaxImages ||
           existingDocumentCount + acceptedDocumentFiles.length > maxDocuments;

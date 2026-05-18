@@ -74,4 +74,14 @@ it('hydrates and merges multi-job batch results into unified table', async () =>
   await waitFor(() => expect(getJobResults).toHaveBeenCalledTimes(2), { timeout: 10000 });
   expect(getJobResults).toHaveBeenNthCalledWith(1, 'j1');
   expect(getJobResults).toHaveBeenNthCalledWith(2, 'j2');
+
+  // After hydration, rowResults state must be populated with all 6 rows (3 from each job).
+  // If rowResults stayed empty, the modern UI would render the "Processing mismatch" banner.
+  // Wait for the parse summary tab to appear, then assert no mismatch banner.
+  await screen.findByRole('button', { name: /Valid \(rows: 2/i }, { timeout: 10000 });
+  expect(screen.queryByText(/Processing mismatch/i)).toBeNull();
+
+  // AccountedRowsIndicator-relevant state: 6 rows total across both jobs (1 matched + 2 unmatched per job)
+  // The Needs Review pill reflects unmatched_needs_review count — both jobs report needs_review: 2.
+  expect(screen.getByText(/Needs Review \(.* · 4 rows\)/i)).toBeTruthy();
 });
