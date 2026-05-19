@@ -9,6 +9,9 @@ import AsyncLocationMultiSelect from '../components/AsyncLocationMultiSelect';
 import ProcessingReportModal, {
   ProcessingReportFilter,
 } from '../components/ProcessingReportModal';
+import SmartExtractBadge from '../components/SmartExtractBadge';
+import SmartExtractPreviewModal from '../components/SmartExtractPreviewModal';
+import SmartExtractToggle from '../components/SmartExtractToggle';
 import ProgressIndicator from '../components/ProgressIndicator';
 import ResultsTable from '../components/ResultsTable';
 import TablePagination from '../components/TablePagination';
@@ -70,6 +73,8 @@ import {
   retryParseRow,
   runAiFixFlaggedRows,
   uploadFile,
+  previewSmartExtract,
+  type SmartExtractPreviewItem,
 } from '../lib/api';
 import { searchCities, searchCounties, searchStates } from '../lib/locationApi';
 import type {
@@ -966,6 +971,16 @@ export default function ParsePage() {
     'unknown',
   );
   const [forceRefresh, setForceRefresh] = useState(false);
+  const [smartExtractEnabled, setSmartExtractEnabled] = useState(false);
+  const [smartExtractPreviewOpen, setSmartExtractPreviewOpen] = useState(false);
+  const [smartExtractPreviewItems, setSmartExtractPreviewItems] = useState<SmartExtractPreviewItem[]>([]);
+  const [smartExtractPreviewLoading, setSmartExtractPreviewLoading] = useState(false);
+  const [smartExtractSkipFileIds, setSmartExtractSkipFileIds] = useState<Set<string>>(new Set());
+  const [pendingParseAction, setPendingParseAction] = useState<null | 'single' | 'batch'>(null);
+  const [pendingSingleFileId, setPendingSingleFileId] = useState<string | null>(null);
+  const [pendingSingleJobId, setPendingSingleJobId] = useState<string | null>(null);
+  const [pendingSingleCampaign, setPendingSingleCampaign] = useState<string>('');
+  const [pendingBatchContext, setPendingBatchContext] = useState<unknown>(null);
   const [legacyMode, setLegacyMode] = useState(false);
   const [isJobReload, setIsJobReload] = useState(false);
   const [processingReportOpen, setProcessingReportOpen] = useState(false);
@@ -3342,6 +3357,57 @@ How to fix: ${fixHint}` : ''}`;
     }
   };
 
+  const runParseAfterUpload = async (
+    uploadedFileId: string,
+    jobId: string,
+    trimmedCampaignName: string,
+    signal: AbortSignal,
+    skipSet: Set<string>,
+  ) => {
+    void shouldUseAsyncParse(file as File);
+    setProgressInfo((prev) => ({ ...prev, phase: 'PARSING' }));
+    startPolling(jobId, {
+      onFinished: async () => {
+        try {
+          await hydrateSummaryFromJobDetail(jobId, rowsReceived);
+          if (!mountedRef.current || signal.aborted) return;
+          publishLiveUpdate('job-updated', jobId);
+          publishLiveUpdate('metrics-updated', jobId);
+          setBusy(false);
+          await hydrateCompletedAsyncJob(jobId, rowsReceived);
+          if (!mountedRef.current || signal.aborted) return;
+          publishLiveUpdate('job-updated', jobId);
+          publishLiveUpdate('metrics-updated', jobId);
+          void reconcileDurableJob(jobId);
+        } catch (hydrationError) {
+          if (!mountedRef.current || signal.aborted) return;
+          setBusy(false);
+          setResultsFinalizing(false);
+          setError((hydrationError as Error).message ?? 'Unable to finalize parse results.');
+        }
+      },
+    });
+    await parseFileAsync(uploadedFileId, {
+      ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
+      force_refresh: forceRefresh,
+      jobId,
+      jobName: trimmedCampaignName || undefined,
+      smart_extract_enabled: smartExtractEnabled,
+      smart_extract_skip: skipSet.has(uploadedFileId),
+    });
+    updateJobQueryParam(jobId);
+    writeLastJobState({
+      version: LAST_JOB_STORAGE_VERSION,
+      jobId,
+      stateValue,
+      counties: selectedCounties,
+      cityValue,
+      scopeMode,
+      selectedLocalities,
+      campaignName: trimmedCampaignName,
+    });
+  };
+
   const handleParse = async () => {
     if (!file) return;
     resetForFreshParse();
@@ -3360,50 +3426,35 @@ How to fix: ${fixHint}` : ''}`;
       setProgressStep(1);
       setProgressStep(2);
 
-      void shouldUseAsyncParse(file);
-        setProgressInfo((prev) => ({
-          ...prev,
-          phase: 'PARSING',
-        }));
-        startPolling(newJobId, {
-          onFinished: async () => {
-            try {
-              await hydrateSummaryFromJobDetail(newJobId, upload.rowsReceived ?? null);
-              if (!mountedRef.current || signal.aborted) return;
-              publishLiveUpdate('job-updated', newJobId);
-              publishLiveUpdate('metrics-updated', newJobId);
-              setBusy(false);
-              await hydrateCompletedAsyncJob(newJobId, upload.rowsReceived ?? null);
-              if (!mountedRef.current || signal.aborted) return;
-              publishLiveUpdate('job-updated', newJobId);
-              publishLiveUpdate('metrics-updated', newJobId);
-              void reconcileDurableJob(newJobId);
-            } catch (hydrationError) {
-              if (!mountedRef.current || signal.aborted) return;
-              setBusy(false);
-              setResultsFinalizing(false);
-              setError((hydrationError as Error).message ?? 'Unable to finalize parse results.');
-            }
-          },
-        });
-        await parseFileAsync(upload.fileId, {
-          ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
-          force_refresh: forceRefresh,
-          jobId: newJobId,
-          jobName: trimmedCampaignName || undefined,
-        });
+      if (smartExtractEnabled) {
+        setSmartExtractPreviewLoading(true);
+        setPendingParseAction('single');
+        setPendingSingleFileId(upload.fileId);
+        setPendingSingleJobId(newJobId);
+        setPendingSingleCampaign(trimmedCampaignName);
+        setSmartExtractPreviewOpen(true);
+        try {
+          const preview = await previewSmartExtract([upload.fileId]);
+          if (!mountedRef.current) return;
+          setSmartExtractPreviewItems(preview.items);
+        } catch (err) {
+          if (!mountedRef.current) return;
+          setSmartExtractPreviewOpen(false);
+          setPendingParseAction(null);
+          setBusy(false);
+          const msg = (err as Error).message ?? '';
+          if (msg.includes('503') || msg.toLowerCase().includes('disabled')) {
+            setError('Smart Extract is not yet enabled on this server. Re-try with the toggle off, or contact admin.');
+          } else {
+            setError(`Smart Extract preview failed: ${msg}`);
+          }
+        } finally {
+          setSmartExtractPreviewLoading(false);
+        }
+        return;
+      }
 
-      updateJobQueryParam(newJobId);
-      writeLastJobState({
-        version: LAST_JOB_STORAGE_VERSION,
-        jobId: newJobId,
-        stateValue,
-        counties: selectedCounties,
-        cityValue,
-        scopeMode,
-        selectedLocalities,
-        campaignName: trimmedCampaignName,
-      });
+      await runParseAfterUpload(upload.fileId, newJobId, trimmedCampaignName, signal, new Set());
     } catch (err) {
       if ((err as { name?: string })?.name === 'AbortError') return;
       if (!mountedRef.current || signal.aborted) return;
@@ -3436,6 +3487,9 @@ How to fix: ${fixHint}` : ''}`;
 
     setBusy(true);
     setError(null);
+    if (smartExtractEnabled) {
+      setPendingBatchContext({});
+    }
 
     try {
       setBatchProgress({
@@ -3525,6 +3579,8 @@ How to fix: ${fixHint}` : ''}`;
               () => parseFileAsync(upload.fileId, {
                 ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
                 force_refresh: forceRefresh,
+                smart_extract_enabled: smartExtractEnabled,
+                smart_extract_skip: smartExtractSkipFileIds.has(upload.fileId),
                 jobId: newJobId,
                 jobName: trimmedCampaignName || undefined,
                 batchId: batch.id,
@@ -3584,6 +3640,8 @@ How to fix: ${fixHint}` : ''}`;
             () => parseFileAsync(upload.fileId, {
               ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
               force_refresh: forceRefresh,
+          smart_extract_enabled: smartExtractEnabled,
+          smart_extract_skip: smartExtractSkipFileIds.has(upload.fileId),
               jobId: newJobId,
               jobName: trimmedCampaignName || undefined,
               batchId: batch.id,
@@ -5052,6 +5110,11 @@ How to fix: ${fixHint}` : ''}`;
                   Shown in History so you can find this job later.
                 </p>
               </div>
+              <SmartExtractToggle
+                enabled={smartExtractEnabled}
+                onChange={setSmartExtractEnabled}
+                disabled={busy}
+              />
               <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                 <div>
                   <div className="flex items-center gap-2">
@@ -5297,7 +5360,16 @@ How to fix: ${fixHint}` : ''}`;
           <div className="sticky top-16 z-20 mb-6 rounded-2xl border border-slate-200/80 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold">Processing Results</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold">Processing Results</h2>
+                  {(metadata?.smart_extract as { used?: boolean; kind?: string; addresses_extracted?: number; address_zone?: string } | undefined)?.used ? (
+                    <SmartExtractBadge
+                      kind={(metadata?.smart_extract as { kind?: string | null }).kind}
+                      addressesExtracted={(metadata?.smart_extract as { addresses_extracted?: number }).addresses_extracted}
+                      addressZone={(metadata?.smart_extract as { address_zone?: string }).address_zone}
+                    />
+                  ) : null}
+                </div>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
                   Review parsed rows, fix issues, and export results.
                 </p>
@@ -6209,7 +6281,40 @@ How to fix: ${fixHint}` : ''}`;
         forceReverify={forceRefresh}
         showDebugMode={showDebugMode}
       />
-
+      <SmartExtractPreviewModal
+        open={smartExtractPreviewOpen}
+        items={smartExtractPreviewItems}
+        loading={smartExtractPreviewLoading}
+        onClose={() => {
+          setSmartExtractPreviewOpen(false);
+          setPendingParseAction(null);
+          setPendingSingleFileId(null);
+          setPendingSingleJobId(null);
+          setBusy(false);
+        }}
+        onContinue={(skipSet) => {
+          setSmartExtractSkipFileIds(skipSet);
+          setSmartExtractPreviewOpen(false);
+          if (
+            pendingParseAction === 'single' &&
+            pendingSingleFileId &&
+            pendingSingleJobId
+          ) {
+            const controller = abortControllerRef.current ?? new AbortController();
+            void runParseAfterUpload(
+              pendingSingleFileId,
+              pendingSingleJobId,
+              pendingSingleCampaign,
+              controller.signal,
+              skipSet,
+            );
+          }
+          if (pendingParseAction === 'batch' && pendingBatchContext) {
+            // TODO: batch resume wiring in follow-up.
+          }
+          setPendingParseAction(null);
+        }}
+      />
       {reviewRow ? (
         <div className="fixed inset-0 z-[60] flex justify-end bg-slate-900/60 px-4 py-6 dark:bg-slate-950/80">
           <div className="flex h-full w-full max-w-xl flex-col rounded-2xl bg-white shadow-xl dark:bg-slate-950">

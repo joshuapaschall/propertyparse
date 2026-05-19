@@ -139,11 +139,25 @@ export type ParseDebugInfo = {
   no_addresses_detected?: boolean;
 };
 
+
+export type SmartExtractMetadata = {
+  used: boolean;
+  reason?: string | null;
+  kind?: string | null;
+  addresses_extracted?: number;
+  address_zone?: string;
+  exclude?: string[];
+};
+
+export type ParseResponseMetadata = Record<string, unknown> & {
+  smart_extract?: SmartExtractMetadata;
+};
+
 export type ParseResponseV2 = {
   summary: ParseSummary;
   canonical_addresses: CanonicalAddress[];
   row_results: RowResult[];
   duplicate_groups: DuplicateGroup[];
   debug?: ParseDebugInfo;
-  metadata?: Record<string, unknown>;
+  metadata?: ParseResponseMetadata;
 };
