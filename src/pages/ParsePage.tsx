@@ -3314,7 +3314,7 @@ How to fix: ${fixHint}` : ''}`;
             publishLiveUpdate('job-updated', createdJobId);
             publishLiveUpdate('metrics-updated', createdJobId);
             void reconcileDurableJob(createdJobId);
-          } catch {
+          } catch (hydrationError) {
             if (!mountedRef.current) return;
             setBusy(false);
             setResultsFinalizing(false);
