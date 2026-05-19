@@ -442,8 +442,43 @@ export type ParseLocationPayload = {
   batchId?: string;
   /** Phase B2b will use this to embed the pageManifest in parse_jobs.metadata. */
   metadata?: Record<string, unknown>;
+  /** When true, route this file through Smart Extract preprocessing. */
+  smart_extract_enabled?: boolean;
+  /** When true (only meaningful if smart_extract_enabled is also true), skip Smart Extract for THIS specific file. Used in batch when user unchecks a file in the preview modal. */
+  smart_extract_skip?: boolean;
 };
 
+
+export type SmartExtractProfile = {
+  kind: string;
+  address_zone: string;
+  exclude: string[];
+  confidence: number;
+  sample_addresses: string[];
+};
+
+export type SmartExtractPreviewItem = {
+  file_id: string;
+  file_name: string;
+  recommended: boolean;
+  reason: string;
+  profile: SmartExtractProfile | null;
+};
+
+export type SmartExtractPreviewResponse = {
+  items: SmartExtractPreviewItem[];
+  enabled: boolean;
+};
+
+export async function previewSmartExtract(
+  fileIds: string[],
+): Promise<SmartExtractPreviewResponse> {
+  return postJson<SmartExtractPreviewResponse>(
+    '/smart_extract/preview',
+    { file_ids: fileIds },
+    { headers: getAuthHeaders() },
+  );
+}
 export async function parseFile(
   fileId: string,
   payload: ParseLocationPayload,
