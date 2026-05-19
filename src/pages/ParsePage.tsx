@@ -192,6 +192,18 @@ type NormalizedCanonicalAddress = CanonicalAddress & {
 };
 
 type ScopeMode = 'county_wide' | 'locality_strict';
+type BatchUploadRecord = {
+  fileId: string;
+  filename: string;
+  kind: 'image-chunk' | 'document';
+};
+
+type PendingBatchContext = {
+  batchId: string;
+  records: BatchUploadRecord[];
+  trimmedCampaignName: string;
+  totalSubmissions: number;
+};
 
 type PersistedLastJobState = {
   version: number;
@@ -975,12 +987,12 @@ export default function ParsePage() {
   const [smartExtractPreviewOpen, setSmartExtractPreviewOpen] = useState(false);
   const [smartExtractPreviewItems, setSmartExtractPreviewItems] = useState<SmartExtractPreviewItem[]>([]);
   const [smartExtractPreviewLoading, setSmartExtractPreviewLoading] = useState(false);
-  const [smartExtractSkipFileIds, setSmartExtractSkipFileIds] = useState<Set<string>>(new Set());
+  const [, setSmartExtractSkipFileIds] = useState<Set<string>>(new Set());
   const [pendingParseAction, setPendingParseAction] = useState<null | 'single' | 'batch'>(null);
   const [pendingSingleFileId, setPendingSingleFileId] = useState<string | null>(null);
   const [pendingSingleJobId, setPendingSingleJobId] = useState<string | null>(null);
   const [pendingSingleCampaign, setPendingSingleCampaign] = useState<string>('');
-  const [pendingBatchContext, setPendingBatchContext] = useState<unknown>(null);
+  const [pendingBatchContext, setPendingBatchContext] = useState<PendingBatchContext | null>(null);
   const [legacyMode, setLegacyMode] = useState(false);
   const [isJobReload, setIsJobReload] = useState(false);
   const [processingReportOpen, setProcessingReportOpen] = useState(false);
@@ -3466,6 +3478,107 @@ How to fix: ${fixHint}` : ''}`;
     }
   };
 
+  const runBatchSubmissionAfterPreview = async (
+    ctx: PendingBatchContext,
+    skipSet: Set<string>,
+    signal: AbortSignal,
+  ): Promise<void> => {
+    const jobIds: string[] = [];
+    let submittedCount = 0;
+    const failures: { filename: string; reason: string }[] = [];
+    setPendingBatchContext(null);
+    for (const record of ctx.records) {
+      if (!mountedRef.current || signal.aborted) return;
+      submittedCount += 1;
+      setBatchProgress({
+        phase: 'submitting',
+        current: submittedCount,
+        total: ctx.totalSubmissions,
+        message: `Submitting parse job ${submittedCount} of ${ctx.totalSubmissions}…`,
+        batchId: ctx.batchId,
+        jobIds: jobIds.slice(),
+      });
+      try {
+        const newJobId = safeUuid();
+        await submitWithConcurrencyRetry(
+          () => parseFileAsync(record.fileId, {
+            ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
+            force_refresh: forceRefresh,
+            smart_extract_enabled: smartExtractEnabled,
+            smart_extract_skip: skipSet.has(record.fileId),
+            jobId: newJobId,
+            jobName: ctx.trimmedCampaignName || undefined,
+            batchId: ctx.batchId,
+          }),
+          signal,
+          (attempt) => {
+            setBatchProgress({
+              phase: 'waiting-for-slot',
+              current: submittedCount,
+              total: ctx.totalSubmissions,
+              message: `Concurrency limit reached. Waiting for a slot (attempt ${attempt + 1}/${MAX_429_RETRY_ATTEMPTS})…`,
+              batchId: ctx.batchId,
+              jobIds: jobIds.slice(),
+            });
+          },
+        );
+        jobIds.push(newJobId);
+      } catch (err) {
+        if ((err as { name?: string })?.name === 'AbortError') throw err;
+        failures.push({ filename: record.filename, reason: (err as Error).message ?? 'Submission failed.' });
+      }
+    }
+    if (!mountedRef.current || signal.aborted) return;
+    setBatchProgress({
+      phase: 'done',
+      current: ctx.totalSubmissions,
+      total: ctx.totalSubmissions,
+      message: failures.length === 0
+        ? `Batch submitted: ${batchFiles.length} file${batchFiles.length === 1 ? '' : 's'} across ${jobIds.length} parse job${jobIds.length === 1 ? '' : 's'}. Track progress in the dashboard.`
+        : `Batch submitted: ${jobIds.length} job${jobIds.length === 1 ? '' : 's'} created, ${failures.length} file${failures.length === 1 ? '' : 's'} failed. Track progress in the dashboard.`,
+      batchId: ctx.batchId,
+      jobIds,
+    });
+    if (failures.length > 0) {
+      setError(`${failures.length} file(s) failed:\n${failures.map((f) => `• ${f.filename}: ${f.reason}`).join('\n')}`);
+    }
+    publishLiveUpdate('job-updated', ctx.batchId);
+    publishLiveUpdate('metrics-updated', ctx.batchId);
+    setBusy(false);
+
+    if (jobIds.length === 1) {
+      const singleJobId = jobIds[0];
+      setJobId(singleJobId);
+      updateJobQueryParam(singleJobId);
+      startPolling(singleJobId, {
+        onFinished: async () => {
+          try {
+            await hydrateSummaryFromJobDetail(singleJobId, null);
+            if (!mountedRef.current || signal.aborted) return;
+            publishLiveUpdate('job-updated', singleJobId);
+            publishLiveUpdate('metrics-updated', singleJobId);
+            setBusy(false);
+            await hydrateCompletedAsyncJob(singleJobId, null);
+            if (!mountedRef.current || signal.aborted) return;
+            publishLiveUpdate('job-updated', singleJobId);
+            publishLiveUpdate('metrics-updated', singleJobId);
+            void reconcileDurableJob(singleJobId);
+            window.setTimeout(() => {
+              if (!mountedRef.current) return;
+              setPersistenceWarningActive(false);
+              writeLocalParsePersistenceState({ persistenceWarning: false });
+            }, 15000);
+          } catch (hydrationError) {
+            if (!mountedRef.current || signal.aborted) return;
+            setBusy(false);
+          }
+        },
+      });
+    } else if (jobIds.length > 1 && ctx.batchId) {
+      startBatchPolling(ctx.batchId);
+    }
+  };
+
   // Phase B2a: batch upload orchestration.
   //
   //   1. createBatch         — POST /batches, get parse_batches.id
@@ -3544,180 +3657,94 @@ How to fix: ${fixHint}` : ''}`;
 
       const imagePdfCount = imageFiles.length > 0 && chunkResult ? chunkResult.chunks.length : 0;
       const totalSubmissions = imagePdfCount + docFiles.length;
-      const jobIds: string[] = [];
-      let submittedCount = 0;
+      const records: BatchUploadRecord[] = [];
+      let uploadCount = 0;
+
       if (chunkResult) {
         for (let i = 0; i < chunkResult.chunks.length; i += 1) {
           if (!mountedRef.current || signal.aborted) return;
           const chunk = chunkResult.chunks[i];
           const chunkFilename = `batch-${batch.id.slice(0, 8)}-part-${i + 1}-of-${chunkResult.chunks.length}.pdf`;
           const chunkFile = new File([chunk.pdfBlob], chunkFilename, { type: 'application/pdf' });
-          submittedCount += 1;
+          uploadCount += 1;
           setBatchProgress({
             phase: 'uploading',
-            current: submittedCount,
+            current: uploadCount,
             total: totalSubmissions,
             message: `Uploading PDF ${i + 1} of ${chunkResult.chunks.length}…`,
             batchId: batch.id,
-            jobIds: jobIds.slice(),
+            jobIds: [],
           });
           try {
             const upload = await uploadFile(chunkFile, trimmedCampaignName || undefined, signal);
-            if (!mountedRef.current || signal.aborted) return;
-            setBatchProgress({
-              phase: 'submitting',
-              current: submittedCount,
-              total: totalSubmissions,
-              message: `Submitting parse job ${i + 1} of ${chunkResult.chunks.length}…`,
-              batchId: batch.id,
-              jobIds: jobIds.slice(),
-            });
-            const newJobId = safeUuid();
-            await submitWithConcurrencyRetry(
-              () => parseFileAsync(upload.fileId, {
-                ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
-                force_refresh: forceRefresh,
-                smart_extract_enabled: smartExtractEnabled,
-                smart_extract_skip: smartExtractSkipFileIds.has(upload.fileId),
-                jobId: newJobId,
-                jobName: trimmedCampaignName || undefined,
-                batchId: batch.id,
-              }),
-              signal,
-              (attempt) => {
-                setBatchProgress({
-                  phase: 'waiting-for-slot',
-                  current: submittedCount,
-                  total: totalSubmissions,
-                  message: `Concurrency limit reached. Waiting for a slot (attempt ${attempt + 1}/${MAX_429_RETRY_ATTEMPTS})…`,
-                  batchId: batch.id,
-                  jobIds: jobIds.slice(),
-                });
-              },
-            );
-            jobIds.push(newJobId);
+            records.push({ fileId: upload.fileId, filename: chunkFilename, kind: 'image-chunk' });
           } catch (err) {
             if ((err as { name?: string })?.name === 'AbortError') throw err;
-            failures.push({ filename: chunkFilename, reason: (err as Error).message ?? 'Submission failed.' });
+            failures.push({ filename: chunkFilename, reason: (err as Error).message ?? 'Upload failed.' });
           }
         }
       }
 
       for (let docIndex = 0; docIndex < docFiles.length; docIndex += 1) {
         if (!mountedRef.current || signal.aborted) return;
-        const file = docFiles[docIndex];
-        submittedCount += 1;
+        const docFile = docFiles[docIndex];
+        uploadCount += 1;
         setBatchProgress({
           phase: 'uploading',
-          current: submittedCount,
+          current: uploadCount,
           total: totalSubmissions,
-          message: `Uploading ${file.name} (document ${docIndex + 1} of ${docFiles.length})…`,
+          message: `Uploading ${docFile.name} (document ${docIndex + 1} of ${docFiles.length})…`,
           batchId: batch.id,
-          jobIds: jobIds.slice(),
-        });
-        let upload;
-        try {
-          upload = await uploadFile(file, trimmedCampaignName || undefined, signal);
-        } catch (err) {
-          if ((err as { name?: string })?.name === 'AbortError') throw err;
-          failures.push({ filename: file.name, reason: (err as Error).message ?? 'Upload failed.' });
-          continue;
-        }
-
-        setBatchProgress({
-          phase: 'submitting',
-          current: submittedCount,
-          total: totalSubmissions,
-          message: `Submitting parse job ${submittedCount} of ${totalSubmissions}…`,
-          batchId: batch.id,
-          jobIds: jobIds.slice(),
+          jobIds: [],
         });
         try {
-          const newJobId = safeUuid();
-          await submitWithConcurrencyRetry(
-            () => parseFileAsync(upload.fileId, {
-              ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
-              force_refresh: forceRefresh,
-          smart_extract_enabled: smartExtractEnabled,
-          smart_extract_skip: smartExtractSkipFileIds.has(upload.fileId),
-              jobId: newJobId,
-              jobName: trimmedCampaignName || undefined,
-              batchId: batch.id,
-            }),
-            signal,
-            (attempt) => {
-              setBatchProgress({
-                phase: 'waiting-for-slot',
-                current: submittedCount,
-                total: totalSubmissions,
-                message: `Concurrency limit reached. Waiting for a slot (attempt ${attempt + 1}/${MAX_429_RETRY_ATTEMPTS})…`,
-                batchId: batch.id,
-                jobIds: jobIds.slice(),
-              });
-            },
-          );
-          jobIds.push(newJobId);
+          const upload = await uploadFile(docFile, trimmedCampaignName || undefined, signal);
+          records.push({ fileId: upload.fileId, filename: docFile.name, kind: 'document' });
         } catch (err) {
           if ((err as { name?: string })?.name === 'AbortError') throw err;
-          failures.push({ filename: file.name, reason: (err as Error).message ?? 'Submission failed.' });
+          failures.push({ filename: docFile.name, reason: (err as Error).message ?? 'Upload failed.' });
         }
       }
 
-      if (!mountedRef.current || signal.aborted) return;
-      setBatchProgress({
-        phase: 'done',
-        current: totalSubmissions,
-        total: totalSubmissions,
-        message: failures.length === 0
-          ? `Batch submitted: ${batchFiles.length} file${batchFiles.length === 1 ? '' : 's'} across ${jobIds.length} parse job${jobIds.length === 1 ? '' : 's'}. Track progress in the dashboard.`
-          : `Batch submitted: ${jobIds.length} job${jobIds.length === 1 ? '' : 's'} created, ${failures.length} file${failures.length === 1 ? '' : 's'} failed. Track progress in the dashboard.`,
+      const context: PendingBatchContext = {
         batchId: batch.id,
-        jobIds,
-      });
-      if (failures.length > 0) {
-        setError(`${failures.length} file(s) failed:\n${failures.map((f) => `• ${f.filename}: ${f.reason}`).join('\n')}`);
-      }
-      publishLiveUpdate('job-updated', batch.id);
-      publishLiveUpdate('metrics-updated', batch.id);
-      setBusy(false);
+        records,
+        trimmedCampaignName,
+        totalSubmissions,
+      };
 
-      // Auto-load results for single-job batches (most common case:
-      // all images fit in one PDF chunk). Mirrors the async single-file
-      // path: set jobId, update URL, start polling for progress + results.
-      if (jobIds.length === 1) {
-        const singleJobId = jobIds[0];
-        setJobId(singleJobId);
-        updateJobQueryParam(singleJobId);
-        startPolling(singleJobId, {
-          onFinished: async () => {
-            try {
-              await hydrateSummaryFromJobDetail(singleJobId, null);
-              if (!mountedRef.current || signal.aborted) return;
-              publishLiveUpdate('job-updated', singleJobId);
-              publishLiveUpdate('metrics-updated', singleJobId);
-              setBusy(false);
-              await hydrateCompletedAsyncJob(singleJobId, null);
-              if (!mountedRef.current || signal.aborted) return;
-              publishLiveUpdate('job-updated', singleJobId);
-              publishLiveUpdate('metrics-updated', singleJobId);
-              void reconcileDurableJob(singleJobId);
-              // Fallback: clear persistence warning after a generous delay
-              // if reconcileDurableJob hasn't already done so. For batch
-              // auto-load, the initial "source: memory" is always transient.
-              window.setTimeout(() => {
-                if (!mountedRef.current) return;
-                setPersistenceWarningActive(false);
-                writeLocalParsePersistenceState({ persistenceWarning: false });
-              }, 15000);
-            } catch (hydrationError) {
-              if (!mountedRef.current || signal.aborted) return;
-              setBusy(false);
-            }
-          },
-        });
-      } else if (jobIds.length > 1 && batch?.id) {
-        startBatchPolling(batch.id);
+      if (smartExtractEnabled) {
+        setSmartExtractPreviewLoading(true);
+        setPendingParseAction('batch');
+        setPendingSingleFileId(null);
+        setPendingSingleJobId(null);
+        setPendingSingleCampaign('');
+        setPendingBatchContext(context);
+        setSmartExtractPreviewOpen(true);
+        try {
+          const preview = await previewSmartExtract(records.map((record) => record.fileId));
+          if (!mountedRef.current || signal.aborted) return;
+          setSmartExtractPreviewItems(preview.items);
+        } catch (err) {
+          if (!mountedRef.current || signal.aborted) return;
+          setSmartExtractPreviewOpen(false);
+          setPendingParseAction(null);
+          setPendingBatchContext(null);
+          setBusy(false);
+          const msg = (err as Error).message ?? '';
+          if (msg.includes('503') || msg.toLowerCase().includes('disabled')) {
+            setError('Smart Extract is not enabled on the server. Try again with the toggle off.');
+          } else {
+            setError(`Smart Extract preview failed: ${msg}`);
+          }
+          return;
+        } finally {
+          setSmartExtractPreviewLoading(false);
+        }
+        return;
       }
+
+      await runBatchSubmissionAfterPreview(context, new Set(), signal);
     } catch (err) {
       if ((err as { name?: string })?.name === 'AbortError') return;
       if (!mountedRef.current || signal.aborted) return;
@@ -6309,9 +6336,9 @@ How to fix: ${fixHint}` : ''}`;
             );
           }
           if (pendingParseAction === 'batch' && pendingBatchContext) {
-            // Batch Smart Extract resume wiring intentionally deferred in this follow-up.
+            const controller = abortControllerRef.current ?? new AbortController();
+            void runBatchSubmissionAfterPreview(pendingBatchContext, skipSet, controller.signal);
           }
-          setPendingBatchContext(null);
           setPendingParseAction(null);
         }}
       />
