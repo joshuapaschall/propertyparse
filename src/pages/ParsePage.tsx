@@ -1251,6 +1251,18 @@ export default function ParsePage() {
           ...(resultsResponse?.summary ?? {}),
           ...(jobDetail.job ?? {}),
         } as JobRecord;
+        const failedStatus = String(combinedJob.status ?? combinedJob.Status ?? '').toUpperCase();
+        if (failedStatus === 'FAILED') {
+          const failedMessage =
+            typeof combinedJob.error_message === 'string' && combinedJob.error_message.trim()
+              ? combinedJob.error_message
+              : typeof combinedJob.errorMessage === 'string' && combinedJob.errorMessage.trim()
+                ? combinedJob.errorMessage
+                : 'Parse job failed.';
+          setError(failedMessage);
+          setRehydrating(false);
+          return;
+        }
         let normalizedRows: RowResult[] = [];
         if (resultsResponse?.row_results && Array.isArray(resultsResponse.row_results)) {
           normalizedRows = (resultsResponse.row_results as RowResult[]).map((row, index) =>
@@ -1689,9 +1701,10 @@ export default function ParsePage() {
   const parseLifecycleStatus = useMemo(() => {
     if (busy) return 'Running…';
     if (resultsFinalizing) return 'Finalizing results…';
+    if (error) return 'Failed';
     if (parseSummary) return 'Ready';
     return null;
-  }, [busy, parseSummary, resultsFinalizing]);
+  }, [busy, error, parseSummary, resultsFinalizing]);
 
   const progressDetail = useMemo(() => {
     if (isStartingParse) {
@@ -1739,13 +1752,14 @@ export default function ParsePage() {
         (rowResults.length > 0 || canonicalAddressesForDisplay.length > 0);
       if (settled) return false;
       return (
+        Boolean(error) ||
         busy ||
         resultsFinalizing ||
         progressInfo.phase !== null ||
         progressPercent !== null
       );
     },
-    [busy, parseSummary, progressInfo.phase, progressPercent, resultsFinalizing, rowResults.length, canonicalAddressesForDisplay.length],
+    [busy, error, parseSummary, progressInfo.phase, progressPercent, resultsFinalizing, rowResults.length, canonicalAddressesForDisplay.length],
   );
 
   const isJobSettled = useMemo(
@@ -4685,6 +4699,10 @@ How to fix: ${fixHint}` : ''}`;
   const canReviewForceOverride = Boolean(reviewApprovalCapabilities?.canForceOverride) && Boolean(reviewVerifiedAddress);
   const reviewApprovalBlocker = reviewApprovalCapabilities?.blocker ?? null;
   const scopeSummary = buildScopeSummary(stateValue, selectedCounties, scopeMode, selectedLocalities);
+  const lifecycleBadgeClass =
+    parseLifecycleStatus === 'Failed'
+      ? 'rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-semibold text-rose-600 dark:border-rose-400/40 dark:bg-rose-500/10 dark:text-rose-200'
+      : 'rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300';
 
   const handleCopyRowJson = async (payload: unknown) => {
     try {
@@ -5133,7 +5151,7 @@ How to fix: ${fixHint}` : ''}`;
                 </p>
               </div>
               {parseLifecycleStatus ? (
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                <span className={lifecycleBadgeClass}>
                   {parseLifecycleStatus}
                 </span>
               ) : null}
