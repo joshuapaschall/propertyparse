@@ -9,6 +9,8 @@ import AsyncLocationMultiSelect from '../components/AsyncLocationMultiSelect';
 import ProcessingReportModal, {
   ProcessingReportFilter,
 } from '../components/ProcessingReportModal';
+import SmartExtractBadge from '../components/SmartExtractBadge';
+import SmartExtractToggle from '../components/SmartExtractToggle';
 import ProgressIndicator from '../components/ProgressIndicator';
 import ResultsTable from '../components/ResultsTable';
 import TablePagination from '../components/TablePagination';
@@ -69,7 +71,7 @@ import {
   retryParseBatch,
   retryParseRow,
   runAiFixFlaggedRows,
-  uploadFile,
+  uploadFile
 } from '../lib/api';
 import { searchCities, searchCounties, searchStates } from '../lib/locationApi';
 import type {
@@ -966,6 +968,8 @@ export default function ParsePage() {
     'unknown',
   );
   const [forceRefresh, setForceRefresh] = useState(false);
+  const [smartExtractEnabled, setSmartExtractEnabled] = useState(false);
+  const [smartExtractSkipFileIds] = useState<Set<string>>(new Set());
   const [legacyMode, setLegacyMode] = useState(false);
   const [isJobReload, setIsJobReload] = useState(false);
   const [processingReportOpen, setProcessingReportOpen] = useState(false);
@@ -3310,7 +3314,7 @@ How to fix: ${fixHint}` : ''}`;
             publishLiveUpdate('job-updated', createdJobId);
             publishLiveUpdate('metrics-updated', createdJobId);
             void reconcileDurableJob(createdJobId);
-          } catch (hydrationError) {
+          } catch {
             if (!mountedRef.current) return;
             setBusy(false);
             setResultsFinalizing(false);
@@ -3525,6 +3529,8 @@ How to fix: ${fixHint}` : ''}`;
               () => parseFileAsync(upload.fileId, {
                 ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
                 force_refresh: forceRefresh,
+                smart_extract_enabled: smartExtractEnabled,
+                smart_extract_skip: smartExtractSkipFileIds.has(upload.fileId),
                 jobId: newJobId,
                 jobName: trimmedCampaignName || undefined,
                 batchId: batch.id,
@@ -3584,6 +3590,8 @@ How to fix: ${fixHint}` : ''}`;
             () => parseFileAsync(upload.fileId, {
               ...buildLocationPayload(stateValue, selectedCounties, scopeMode, selectedLocalities),
               force_refresh: forceRefresh,
+          smart_extract_enabled: smartExtractEnabled,
+          smart_extract_skip: smartExtractSkipFileIds.has(upload.fileId),
               jobId: newJobId,
               jobName: trimmedCampaignName || undefined,
               batchId: batch.id,
@@ -5052,6 +5060,11 @@ How to fix: ${fixHint}` : ''}`;
                   Shown in History so you can find this job later.
                 </p>
               </div>
+              <SmartExtractToggle
+                enabled={smartExtractEnabled}
+                onChange={setSmartExtractEnabled}
+                disabled={busy}
+              />
               <div className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
                 <div>
                   <div className="flex items-center gap-2">
@@ -5297,7 +5310,16 @@ How to fix: ${fixHint}` : ''}`;
           <div className="sticky top-16 z-20 mb-6 rounded-2xl border border-slate-200/80 bg-white/95 px-6 py-4 shadow-sm backdrop-blur dark:border-slate-800 dark:bg-slate-950/95">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div>
-                <h2 className="text-lg font-semibold">Processing Results</h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-semibold">Processing Results</h2>
+                  {(metadata?.smart_extract as { used?: boolean; kind?: string; addresses_extracted?: number; address_zone?: string } | undefined)?.used ? (
+                    <SmartExtractBadge
+                      kind={(metadata?.smart_extract as { kind?: string | null }).kind}
+                      addressesExtracted={(metadata?.smart_extract as { addresses_extracted?: number }).addresses_extracted}
+                      addressZone={(metadata?.smart_extract as { address_zone?: string }).address_zone}
+                    />
+                  ) : null}
+                </div>
                 <p className="text-sm text-slate-500 dark:text-slate-400">
                   Review parsed rows, fix issues, and export results.
                 </p>
@@ -6209,7 +6231,6 @@ How to fix: ${fixHint}` : ''}`;
         forceReverify={forceRefresh}
         showDebugMode={showDebugMode}
       />
-
       {reviewRow ? (
         <div className="fixed inset-0 z-[60] flex justify-end bg-slate-900/60 px-4 py-6 dark:bg-slate-950/80">
           <div className="flex h-full w-full max-w-xl flex-col rounded-2xl bg-white shadow-xl dark:bg-slate-950">
