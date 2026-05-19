@@ -203,6 +203,7 @@ type PendingBatchContext = {
   records: BatchUploadRecord[];
   trimmedCampaignName: string;
   totalSubmissions: number;
+  failures: { filename: string; reason: string }[];
 };
 
 type PersistedLastJobState = {
@@ -3529,18 +3530,19 @@ How to fix: ${fixHint}` : ''}`;
       }
     }
     if (!mountedRef.current || signal.aborted) return;
+    const allFailures = [...ctx.failures, ...failures];
     setBatchProgress({
       phase: 'done',
       current: ctx.totalSubmissions,
       total: ctx.totalSubmissions,
-      message: failures.length === 0
+      message: allFailures.length === 0
         ? `Batch submitted: ${batchFiles.length} file${batchFiles.length === 1 ? '' : 's'} across ${jobIds.length} parse job${jobIds.length === 1 ? '' : 's'}. Track progress in the dashboard.`
-        : `Batch submitted: ${jobIds.length} job${jobIds.length === 1 ? '' : 's'} created, ${failures.length} file${failures.length === 1 ? '' : 's'} failed. Track progress in the dashboard.`,
+        : `Batch submitted: ${jobIds.length} job${jobIds.length === 1 ? '' : 's'} created, ${allFailures.length} file${allFailures.length === 1 ? '' : 's'} failed. Track progress in the dashboard.`,
       batchId: ctx.batchId,
       jobIds,
     });
-    if (failures.length > 0) {
-      setError(`${failures.length} file(s) failed:\n${failures.map((f) => `• ${f.filename}: ${f.reason}`).join('\n')}`);
+    if (allFailures.length > 0) {
+      setError(`${allFailures.length} file(s) failed:\n${allFailures.map((f) => `• ${f.filename}: ${f.reason}`).join('\n')}`);
     }
     publishLiveUpdate('job-updated', ctx.batchId);
     publishLiveUpdate('metrics-updated', ctx.batchId);
@@ -3711,6 +3713,7 @@ How to fix: ${fixHint}` : ''}`;
         records,
         trimmedCampaignName,
         totalSubmissions,
+        failures,
       };
 
       if (smartExtractEnabled) {
