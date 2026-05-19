@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useAuthControls } from '../contexts/AuthContext';
 import AppShell from '../components/AppShell';
 import TablePagination from '../components/TablePagination';
@@ -135,6 +135,7 @@ export default function HistoryDetailPage() {
   const isPrivileged = role === 'admin' || role === 'owner';
   const { showToast } = useToast();
   const { jobId } = useParams();
+  const navigate = useNavigate();
 
   const [initialLoading, setInitialLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -487,6 +488,21 @@ export default function HistoryDetailPage() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link to="/history" className="text-xs font-semibold text-indigo-600 transition hover:text-indigo-800 dark:text-indigo-300 dark:hover:text-indigo-200">← Back to history</Link>
           <div className="flex flex-col items-end gap-2">
+            <button
+              type="button"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:opacity-50"
+              onClick={() => {
+                const batchId = pickString(mergedJobSummary ?? {}, ['batch_id', 'batchId']);
+                if (batchId) {
+                  navigate(`/parse?batch=${batchId}`);
+                } else if (jobId) {
+                  navigate(`/parse?job=${jobId}`);
+                }
+              }}
+              disabled={!jobId}
+            >
+              Continue working
+            </button>
             {exportIntegrityWarningVisible ? (
               <p className="max-w-sm rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800 dark:border-amber-400/40 dark:bg-amber-500/10 dark:text-amber-200">
                 Saved export rows are unavailable for this run. Downloads may be incomplete until backend persistence is repaired.
