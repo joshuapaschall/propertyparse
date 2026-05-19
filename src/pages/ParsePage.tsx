@@ -56,6 +56,7 @@ import {
   getJobResults,
   getJobWithStatus,
   getBatchJobs,
+  BatchRollup,
   JobExportType,
   JobRecord,
   createBatch,
@@ -1140,12 +1141,39 @@ export default function ParsePage() {
     );
   }, [location.pathname, location.search, navigate]);
 
+
+  const updateBatchQueryParam = useCallback(
+    (nextBatchId: string) => {
+      const params = new URLSearchParams(location.search);
+      params.set('batch', nextBatchId);
+      params.delete('job');
+      const search = params.toString();
+      navigate(
+        { pathname: location.pathname, search: search ? `?${search}` : '' },
+        { replace: true },
+      );
+    },
+    [location.pathname, location.search, navigate],
+  );
+
+  const clearBatchQueryParam = useCallback(() => {
+    const params = new URLSearchParams(location.search);
+    if (!params.has('batch')) return;
+    params.delete('batch');
+    const search = params.toString();
+    navigate(
+      { pathname: location.pathname, search: search ? `?${search}` : '' },
+      { replace: true },
+    );
+  }, [location.pathname, location.search, navigate]);
+
   const resetParseUi = useCallback(
     (options?: { showMissingJobToast?: boolean }) => {
       stopPolling();
       stopBatchPolling();
       clearLastJobState();
       clearJobQueryParam();
+      clearBatchQueryParam();
       setFile(null);
       setFileId(null);
       setJobId(null);
@@ -1223,7 +1251,7 @@ export default function ParsePage() {
         });
       }
     },
-    [clearJobQueryParam, showToast],
+    [clearBatchQueryParam, clearJobQueryParam, showToast],
   );
 
   const loadJobResults = useCallback(
@@ -1385,6 +1413,8 @@ export default function ParsePage() {
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
+    const rawBatchParam = params.get('batch');
+    if (rawBatchParam && UUID_RE.test(rawBatchParam)) return; // batch effect handles
     const rawJobParam = params.get('job');
     const jobParam = rawJobParam && UUID_RE.test(rawJobParam) ? rawJobParam : null;
     const stored = readLastJobState();
@@ -1395,7 +1425,6 @@ export default function ParsePage() {
       syncUrlOnSuccess: !jobParam && Boolean(stored?.jobId),
     });
   }, [busy, jobId, loadJobResults, location.search, parseSummary, rehydrating]);
-
 
   const candidatesExtracted = useMemo(() => {
     if (!metadata) return null;
@@ -3138,6 +3167,70 @@ How to fix: ${fixHint}` : ''}`;
     [],
   );
 
+  const loadBatchResults = useCallback(
+    async (batchIdToLoad: string) => {
+      if (!UUID_RE.test(batchIdToLoad)) {
+        console.warn('[ParsePage] Ignoring invalid batch ID:', batchIdToLoad);
+        return;
+      }
+      setRehydrating(true);
+      setError(null);
+      setPollError(null);
+      setPollErrorCount(0);
+      try {
+        let rollup: BatchRollup | null = null;
+        try {
+          rollup = await getBatchRollup(batchIdToLoad);
+        } catch (rollupErr) {
+          setError(
+            (rollupErr as Error).message
+              ?? 'Unable to load batch. It may have been deleted.',
+          );
+          setRehydrating(false);
+          return;
+        }
+        const status = String(rollup?.effective_status ?? '').toUpperCase();
+        if (status === 'FAILED') {
+          setError('This batch failed to process. Re-run the files to try again.');
+          setRehydrating(false);
+          return;
+        }
+        if (status === 'RUNNING' || status === 'PENDING') {
+          setError(
+            'This batch is still processing. Refresh in a moment to see results.',
+          );
+          setRehydrating(false);
+          return;
+        }
+        const ok = await hydrateCompletedBatch(batchIdToLoad, null);
+        if (!ok) {
+          setError('Unable to load this batch. Try refreshing.');
+          setRehydrating(false);
+          return;
+        }
+        setIsJobReload(true);
+        setActiveTab('valid');
+        updateBatchQueryParam(batchIdToLoad);
+      } catch (err) {
+        setError((err as Error).message ?? 'Unable to load this batch.');
+      } finally {
+        setRehydrating(false);
+      }
+    },
+    [hydrateCompletedBatch, updateBatchQueryParam],
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const rawBatchParam = params.get('batch');
+    const batchParam =
+      rawBatchParam && UUID_RE.test(rawBatchParam) ? rawBatchParam : null;
+    if (!batchParam) return;
+    if (busy || rehydrating || resetInProgressRef.current) return;
+    if (batchResultsBatchId === batchParam && parseSummary) return;
+    void loadBatchResults(batchParam);
+  }, [busy, batchResultsBatchId, loadBatchResults, location.search, parseSummary, rehydrating]);
+
   const resetForFreshParse = () => {
     setError(null);
     setBusy(true);
@@ -3798,6 +3891,10 @@ How to fix: ${fixHint}` : ''}`;
         }),
         { fresh: true },
       );
+    }
+
+    if (freshReload && batchResultsBatchId !== null) {
+      await hydrateCompletedBatch(batchResultsBatchId, null);
     }
   };
 

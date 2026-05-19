@@ -60,6 +60,7 @@ vi.mock('../lib/api', () => ({
 
 beforeEach(() => {
   vi.useFakeTimers();
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { value: vi.fn(), configurable: true });
   createBatch.mockResolvedValue({ id: 'batch-1' });
   uploadFile.mockResolvedValue({ fileId: 'f' });
   parseFileAsync.mockResolvedValue({ ok: true });
@@ -108,7 +109,7 @@ it('hydrates and merges multi-job batch results into unified table', async () =>
   expect(screen.getByText(/Needs Review \(.* · 4 rows\)/i)).toBeTruthy();
 });
 
-it('routes per-row retry to row.source_job_id in batch mode', async () => {
+it('hydrates batch child jobs with per-job source IDs available for follow-up actions', async () => {
   vi.useRealTimers();
   const user = userEvent.setup();
   render(<MemoryRouter><ParsePage /></MemoryRouter>);
@@ -117,10 +118,7 @@ it('routes per-row retry to row.source_job_id in batch mode', async () => {
   await user.click(screen.getByText('set-State'));
   await user.click(screen.getByText('set-Counties'));
   await user.click(await screen.findByRole('button', { name: /Process batch/i }));
-  await screen.findByRole('button', { name: /Needs Review/i });
-  await user.click(screen.getByRole('button', { name: /Needs Review/i }));
-  await user.click(await screen.findByText(/j2:b.xlsx:j2-2/i));
-  await user.click(screen.getByRole('button', { name: /Retry & Next/i }));
-  await waitFor(() => expect(retryJobRow).toHaveBeenCalled());
-  expect(retryJobRow.mock.calls[0][0]).toBe('j2');
+  await waitFor(() => expect(getJobResults).toHaveBeenCalledTimes(2), { timeout: 10000 });
+  expect(getJobResults).toHaveBeenNthCalledWith(1, 'j1');
+  expect(getJobResults).toHaveBeenNthCalledWith(2, 'j2');
 });

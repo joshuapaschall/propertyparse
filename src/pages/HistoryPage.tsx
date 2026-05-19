@@ -461,6 +461,15 @@ export default function HistoryPage() {
                         </td>
                         <td className="px-3 py-2.5 text-right whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
                           <div className="inline-flex items-center justify-end gap-2">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={(event) => { event.stopPropagation(); navigate(`/parse?job=${entry.row.id}`); }}
+                              disabled={!entry.row.hasId}
+                            >
+                              Continue
+                            </Button>
                             <span onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(entry.row.id); }}>
                               <ExportPanel
                                 triggerLabel="Export"
@@ -499,6 +508,14 @@ export default function HistoryPage() {
                             <td className="px-3 py-2.5"><Badge variant={getBadgeVariant(entry.status)}>{entry.status}</Badge></td>
                             <td className="px-3 py-2.5 text-right whitespace-nowrap">{formatHistoryRowCost(entry.rows.reduce((sum, row) => sum + Number(row.estimatedJobCost ?? row.spendUsd ?? 0), 0))}</td>
                             <td className="px-3 py-2.5 text-right whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={(event) => { event.stopPropagation(); navigate(`/parse?batch=${entry.batchId}`); }}
+                              >
+                                Continue
+                              </Button>
                               <ExportPanel
                                 triggerLabel="Export"
                                 className="relative inline-block text-left"
@@ -528,6 +545,13 @@ export default function HistoryPage() {
                                 <td className="px-3 py-2.5 text-right whitespace-nowrap">{formatHistoryRowCost(row.estimatedJobCost ?? row.spendUsd)}</td>
                                 <td className="px-3 py-2.5 text-right whitespace-nowrap" onClick={(event) => event.stopPropagation()}>
                                   <div className="inline-flex items-center justify-end gap-2">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={(event) => { event.stopPropagation(); navigate(`/parse?job=${row.id}`); }}
+                                      disabled={!row.hasId}
+                                    >Continue</Button>
                                     <span onClick={(event) => { event.stopPropagation(); void ensureExportCatalog(row.id); }}>
                                       <ExportPanel triggerLabel="Export" className="relative inline-block text-left" catalog={catalogByJobId[row.id] ?? FALLBACK_EXPORT_CATALOG} onDownload={(type, label) => void handleDownload(row.id, type, label)} activeDownloadType={getRowActiveDownloadType(row.id)} disabled={!row.hasId} />
                                     </span>
