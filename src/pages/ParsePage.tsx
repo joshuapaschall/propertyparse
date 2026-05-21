@@ -1674,7 +1674,7 @@ export default function ParsePage() {
     () =>
       filteredNeedsReviewGroups.flatMap((group) => {
         const caps = getGroupApprovalCapabilities(group);
-        return caps.canApproveMatched || caps.canForceOverride ? group.memberRowIds : [];
+        return caps.canApproveMatched || caps.canForceOverride || isAiSuggestedValidRow(group.displayRow) ? group.memberRowIds : [];
       }),
     [filteredNeedsReviewGroups, getGroupApprovalCapabilities],
   );
@@ -1886,7 +1886,25 @@ export default function ParsePage() {
     }
     return getDisplaySafeMatchedAddress(row);
   };
+  function isAiSuggestedValidRow(row: RowResult) {
+    const rowRecord = row as Record<string, unknown>;
+    const suggestion = (row.ai_fix_suggestion ?? rowRecord.aiFixSuggestion) as string | undefined;
+    const suggestedAddress = (row.ai_fix_suggested_address ?? rowRecord.aiFixSuggestedAddress) as string | undefined;
+    return suggestion === 'AI_SUGGESTED_VALID' && Boolean(suggestedAddress?.trim());
+  }
+  const getAiSuggestedAddress = (row: RowResult) =>
+    ((row.ai_fix_suggested_address ?? (row as Record<string, unknown>).aiFixSuggestedAddress) as string | undefined)?.trim() ?? '';
   const renderMatchedAddressCell = (row: RowResult) => {
+    if (isAiSuggestedValidRow(row)) {
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-indigo-700 dark:text-indigo-300">{getAiSuggestedAddress(row)}</span>
+          <span className="inline-flex w-fit items-center rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200">
+            AI suggested
+          </span>
+        </div>
+      );
+    }
     const { address, isCandidate } = getMatchedAddress(row);
     if (!address) return <span className="text-slate-400">—</span>;
     if (isCandidate) {
@@ -2078,6 +2096,21 @@ export default function ParsePage() {
     if (isSkippedRow(row)) return 'Skipped';
     return row.status || 'Unknown';
   };
+  const renderStatusCell = (row: RowResult) => (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span>{getStatusLabel(row)}</span>
+      {isAiSuggestedValidRow(row) ? (
+        <span className="inline-flex items-center rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-indigo-700 dark:bg-indigo-500/20 dark:text-indigo-200">
+          AI suggests valid
+        </span>
+      ) : null}
+      {(row.ai_confirmed ?? (row as Record<string, unknown>).aiConfirmed) ? (
+        <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+          AI reviewed ✓
+        </span>
+      ) : null}
+    </div>
+  );
 
   const humanizeReasonDetail = (detail: string) => {
     const trimmed = detail.trim();
@@ -4261,7 +4294,7 @@ How to fix: ${fixHint}` : ''}`;
       const row = rowResultsById.get(rowId);
       if (!row) return false;
       const caps = getApprovalCapabilities(row);
-      return caps.canApproveMatched || caps.canForceOverride;
+      return caps.canApproveMatched || caps.canForceOverride || isAiSuggestedValidRow(row);
     });
     if (!candidateRowIds.length) return;
     const grouped = new Map<string, string[]>();
@@ -4368,6 +4401,49 @@ How to fix: ${fixHint}` : ''}`;
       setApprovingRowIds((prev) => {
         const next = new Set(prev);
         candidateRowIds.forEach((rowId) => next.delete(rowId));
+        return next;
+      });
+    }
+  };
+  const handleConfirmAiSuggestions = async () => {
+    const aiRows = needsReviewRows.filter((row) => isAiSuggestedValidRow(row));
+    if (!aiRows.length) return;
+    setRetryingRowIds((prev) => new Set([...prev, ...aiRows.map((row) => row.source_row_id)]));
+    try {
+      const byJob = new Map<string, RowResult[]>();
+      for (const row of aiRows) {
+        const effectiveJobId = batchResultsBatchId !== null ? row.source_job_id : jobId;
+        if (!effectiveJobId) continue;
+        byJob.set(effectiveJobId, [...(byJob.get(effectiveJobId) ?? []), row]);
+      }
+      if (byJob.size === 0) {
+        showToast({ title: 'Cannot identify source jobs for AI suggestions. Try reloading.', variant: 'error' });
+        return;
+      }
+      const retryResponses = await Promise.all(
+        Array.from(byJob.entries()).map(async ([sourceJobId, rows]) =>
+          rows.length > 1
+            ? retryJobBatch(
+                sourceJobId,
+                rows.map((row) => ({
+                  rowId: row.source_row_id,
+                  fullAddress: getAiSuggestedAddress(row),
+                })),
+                forceRefresh,
+              )
+            : retryJobRow(sourceJobId, rows[0].source_row_id, getAiSuggestedAddress(rows[0]), forceRefresh),
+        ),
+      );
+      const retryUpdates = retryResponses.flatMap((response) => response.updated_row_results ?? response.updated_rows ?? []);
+      await handleRetryUpdates({ updatedRows: retryUpdates, freshReload: false });
+      setSelectedNeedsReviewRowIds(new Set(aiRows.map((row) => row.source_row_id)));
+      await handleApproveSelectedNeedsReview();
+    } catch (err) {
+      showToast({ title: (err as Error).message ?? 'Failed to confirm AI suggestions.', variant: 'error' });
+    } finally {
+      setRetryingRowIds((prev) => {
+        const next = new Set(prev);
+        aiRows.forEach((row) => next.delete(row.source_row_id));
         return next;
       });
     }
@@ -5407,7 +5483,7 @@ How to fix: ${fixHint}` : ''}`;
                   <button
                     type="button"
                     onClick={() => void handleAutoFixFlaggedRows()}
-                    disabled={!jobId || aiFixInProgress}
+                    disabled={(!jobId && batchResultsBatchId === null) || aiFixInProgress}
                     className="rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-500/10"
                   >
                     {aiFixInProgress ? (
@@ -5859,6 +5935,14 @@ How to fix: ${fixHint}` : ''}`;
                   <div className="mb-3 flex items-center justify-end">
                     <button
                       type="button"
+                      onClick={() => void handleConfirmAiSuggestions()}
+                      disabled={needsReviewRows.filter((row) => isAiSuggestedValidRow(row)).length === 0 || aiFixInProgress}
+                      className="mr-2 rounded-lg border border-indigo-200 px-3 py-2 text-xs font-semibold text-indigo-700 transition hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-indigo-500/40 dark:text-indigo-200 dark:hover:bg-indigo-500/10"
+                    >
+                      Confirm {needsReviewRows.filter((row) => isAiSuggestedValidRow(row)).length} AI suggestions
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => void handleApproveSelectedNeedsReview()}
                       disabled={selectedNeedsReviewCount === 0}
                       className="rounded-lg border border-emerald-200 px-3 py-2 text-xs font-semibold text-emerald-700 transition hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-60 dark:border-emerald-500/40 dark:text-emerald-200 dark:hover:bg-emerald-500/10"
@@ -5925,9 +6009,9 @@ How to fix: ${fixHint}` : ''}`;
                                         type="checkbox"
                                         aria-label={`Select row group ${getRowDisplayId(row)}`}
                                         className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500"
-                                        disabled={!groupCapabilities.canApproveMatched && !groupCapabilities.canForceOverride}
+                                        disabled={!groupCapabilities.canApproveMatched && !groupCapabilities.canForceOverride && !isAiSuggestedValidRow(row)}
                                         checked={groupSelected}
-                                        title={groupCapabilities.canApproveMatched || groupCapabilities.canForceOverride ? 'Select for bulk approve' : blockerLabel(groupCapabilities.blocker) || 'Approval unavailable'}
+                                        title={groupCapabilities.canApproveMatched || groupCapabilities.canForceOverride || isAiSuggestedValidRow(row) ? 'Select for bulk approve' : blockerLabel(groupCapabilities.blocker) || 'Approval unavailable'}
                                         onChange={(event) => {
                                           setSelectedNeedsReviewRowIds((prev) => {
                                             const next = new Set(prev);
@@ -5948,7 +6032,7 @@ How to fix: ${fixHint}` : ''}`;
                                     </td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{renderOriginalAddressCell(row)}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{renderMatchedAddressCell(row)}</td>
-                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
+                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{renderStatusCell(row)}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                       {renderReasonCell(row)}
                                     </td>
@@ -6021,7 +6105,7 @@ How to fix: ${fixHint}` : ''}`;
                                   {getSkippedOriginalAddress(row)}
                                 </td>
                                 <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
-                                  {getStatusLabel(row)}
+                                  {renderStatusCell(row)}
                                 </td>
                                 <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                   {renderReasonCell(row)}
@@ -6216,7 +6300,7 @@ How to fix: ${fixHint}` : ''}`;
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200 whitespace-normal break-words">{renderMatchedAddressCell(row)}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCounty(row) || '—'}</td>
                                     <td className="px-4 py-3 text-slate-700 dark:text-slate-200">{getMatchedCity(row) || '—'}</td>
-                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{getStatusLabel(row)}</td>
+                                    <td className="px-4 py-3 text-slate-500 dark:text-slate-400">{renderStatusCell(row)}</td>
                                     <td className="px-4 py-3 text-slate-500 dark:text-slate-400">
                                       {renderReasonCell(row)}
                                     </td>
