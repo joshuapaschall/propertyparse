@@ -115,6 +115,9 @@ export type RowResult = {
   manual_actions?: unknown;
   source_job_id?: string;
   source_file_name?: string;
+  ai_fix_suggestion?: string;
+  ai_fix_suggested_address?: string;
+  ai_confirmed?: boolean;
 };
 
 export type ManualActions = {

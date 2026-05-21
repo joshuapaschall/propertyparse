@@ -1070,6 +1070,56 @@ describe('ParsePage', () => {
     expect(screen.getByLabelText('Localities')).toBeInTheDocument();
   });
 
+  it('allows selecting AI suggested valid rows even when standard approval capabilities are blocked', async () => {
+    const user = userEvent.setup();
+    const summary = { rows_received: 1, valid_total: 0, valid_unique: 0, needs_review: 1, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 1 };
+    const row = {
+      source_row_id: 'r-ai-1',
+      source_row_index: 1,
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      detected_address: '12 Main',
+      ai_fix_suggestion: 'AI_SUGGESTED_VALID',
+      ai_fix_suggested_address: '12 Main St, Austin, TX 78701',
+      manual_actions: { can_approve_matched: false, can_force_override: false, blocker: 'missing_verified_place' },
+    };
+    parseFileAsync.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+    await user.click(await screen.findByRole('button', { name: /Needs Review \(1 issues · 1 rows\)/i }));
+
+    const checkbox = screen.getByRole('checkbox', { name: /Select row group/i });
+    expect(checkbox).toBeEnabled();
+    expect(screen.getByText('AI suggests valid')).toBeInTheDocument();
+    expect(screen.getByText('AI suggested')).toBeInTheDocument();
+  });
+
+  it('renders AI reviewed badge when row is AI-confirmed', async () => {
+    const user = userEvent.setup();
+    const summary = { rows_received: 1, valid_total: 0, valid_unique: 0, needs_review: 1, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 1 };
+    const row = {
+      source_row_id: 'r-ai-confirmed',
+      source_row_index: 1,
+      status: 'UNMATCHED_NEEDS_REVIEW',
+      detected_address: '12 Main',
+      ai_confirmed: true,
+    };
+    parseFileAsync.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: [row], canonical_addresses: [], duplicate_groups: [] });
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+    await user.click(await screen.findByRole('button', { name: /Needs Review \(1 issues · 1 rows\)/i }));
+    expect(screen.getByText('AI reviewed ✓')).toBeInTheDocument();
+  });
+
   it('sends explicit scope payload fields when parsing', async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><ParsePage /></MemoryRouter>);
