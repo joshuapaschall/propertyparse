@@ -15,6 +15,7 @@ import {
   JobRecord,
   getJobs,
   updateJobMetadata,
+  deleteJob,
 } from '../lib/api';
 import { useToast } from '../contexts/ToastContext';
 import ExportPanel from '../components/exports/ExportPanel';
@@ -113,6 +114,7 @@ export default function HistoryPage() {
   const [totalCount, setTotalCount] = useState(0);
   const [catalogByJobId, setCatalogByJobId] = useState<Record<string, ExportCatalogItem[]>>({});
   const [downloading, setDownloading] = useState<Record<string, boolean>>({});
+  const [deleting, setDeleting] = useState<Record<string, boolean>>({});
   const [localParsePersistenceWarning, setLocalParsePersistenceWarning] = useState(false);
   const [editingJobId, setEditingJobId] = useState<string | null>(null);
   const [campaignDraft, setCampaignDraft] = useState('');
@@ -285,6 +287,24 @@ export default function HistoryPage() {
       showToast({ title: (err as Error).message ?? 'Export failed.', variant: 'error' });
     } finally {
       setDownloading((prev) => ({ ...prev, [key]: false }));
+    }
+  };
+
+  const handleDeleteJob = async (jobId: string) => {
+    if (!jobId) return;
+    const confirmed = window.confirm('Delete this job permanently? This also removes its results and cannot be undone.');
+    if (!confirmed) return;
+
+    setDeleting((prev) => ({ ...prev, [jobId]: true }));
+    try {
+      await deleteJob(jobId);
+      setJobs((prev) => prev.filter((job) => pickString(job, ['job_id', 'jobId', 'id']) !== jobId));
+      setTotalCount((prev) => Math.max(0, prev - 1));
+      showToast({ title: 'Job deleted.', variant: 'success' });
+    } catch (err) {
+      showToast({ title: (err as Error).message ?? 'Unable to delete job.', variant: 'error' });
+    } finally {
+      setDeleting((prev) => ({ ...prev, [jobId]: false }));
     }
   };
 
@@ -482,6 +502,9 @@ export default function HistoryPage() {
                             </span>
                             <Button type="button" variant="ghost" size="sm" onClick={() => beginEditCampaign(entry.row.id, entry.row.name)} disabled={!entry.row.hasId}>
                               Edit name
+                            </Button>
+                            <Button type="button" variant="ghost" size="sm" onClick={() => void handleDeleteJob(entry.row.id)} disabled={!entry.row.hasId || deleting[entry.row.id]}>
+                              {deleting[entry.row.id] ? 'Deleting…' : 'Delete'}
                             </Button>
                           </div>
                         </td>
