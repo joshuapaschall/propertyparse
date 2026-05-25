@@ -9,6 +9,7 @@ const updateJobMetadata = vi.fn();
 const readLocalParsePersistenceState = vi.fn();
 const subscribeJobUpdates = vi.fn();
 const downloadJobExport = vi.fn();
+const deleteJob = vi.fn();
 const authState = { role: 'admin' };
 
 const buildJob = (index: number, status: 'DONE' | 'RUNNING' | 'FAILED' = 'DONE') => ({
@@ -35,6 +36,7 @@ vi.mock('../lib/api', () => ({
   updateJobMetadata: (...args: unknown[]) => updateJobMetadata(...args),
   getJobExportCatalog: vi.fn(async () => []),
   downloadJobExport: (...args: unknown[]) => downloadJobExport(...args),
+  deleteJob: (...args: unknown[]) => deleteJob(...args),
 }));
 vi.mock('../lib/persistenceStatus', () => ({
   readLocalParsePersistenceState: () => readLocalParsePersistenceState(),
@@ -51,6 +53,7 @@ describe('HistoryPage refresh behavior', () => {
     getJobs.mockResolvedValue({ items: [buildJob(1)], totalCount: 1 });
     updateJobMetadata.mockResolvedValue({});
     downloadJobExport.mockResolvedValue({ blob: new Blob(['x']), filename: 'x.csv' });
+    deleteJob.mockResolvedValue(undefined);
     subscribeJobUpdates.mockImplementation(() => () => undefined);
     Object.defineProperty(URL, 'createObjectURL', { value: vi.fn(() => 'blob:mock'), writable: true });
     Object.defineProperty(URL, 'revokeObjectURL', { value: vi.fn(() => undefined), writable: true });
@@ -179,7 +182,53 @@ describe('HistoryPage refresh behavior', () => {
 
   
 
-  it('renders aligned 12-column history table headers and row cells', async () => {
+  
+  it('deletes a job row after confirmation', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    getJobs.mockResolvedValue({ items: [buildJob(1)], totalCount: 1 });
+
+    render(<MemoryRouter><HistoryPage /></MemoryRouter>);
+    expect(await screen.findByText('Job 1')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(deleteJob).toHaveBeenCalledWith('job-1'));
+    await waitFor(() => expect(screen.queryByText('Job 1')).not.toBeInTheDocument());
+    expect(showToast).toHaveBeenCalledWith({ title: 'Job deleted.', variant: 'success' });
+    confirmSpy.mockRestore();
+  });
+
+  it('does nothing when delete confirmation is rejected', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<MemoryRouter><HistoryPage /></MemoryRouter>);
+    expect(await screen.findByText('Job 1')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    expect(deleteJob).not.toHaveBeenCalled();
+    expect(screen.getByText('Job 1')).toBeInTheDocument();
+    confirmSpy.mockRestore();
+  });
+
+  it('keeps the row and shows an error toast when delete fails', async () => {
+    const user = userEvent.setup();
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    deleteJob.mockRejectedValue(new Error('Delete failed.'));
+
+    render(<MemoryRouter><HistoryPage /></MemoryRouter>);
+    expect(await screen.findByText('Job 1')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+
+    await waitFor(() => expect(deleteJob).toHaveBeenCalledWith('job-1'));
+    expect(screen.getByText('Job 1')).toBeInTheDocument();
+    expect(showToast).toHaveBeenCalledWith({ title: 'Delete failed.', variant: 'error' });
+    confirmSpy.mockRestore();
+  });
+it('renders aligned 12-column history table headers and row cells', async () => {
     render(<MemoryRouter><HistoryPage /></MemoryRouter>);
     expect(await screen.findByText('Job 1')).toBeInTheDocument();
 

@@ -907,6 +907,20 @@ export async function removeOrgMember(userId: string) {
   }
 }
 
+export async function deleteJob(jobId: string): Promise<void> {
+  const path = `/jobs/${jobId}`;
+  const res = await performAuthedFetch(path, {
+    method: 'DELETE',
+  });
+  if (!res.ok) {
+    throw createApiError({
+      message: toFriendlyAuthMessage(res.status, await getErrorMessage(res)),
+      endpoint: path,
+      status: res.status,
+    });
+  }
+}
+
 export async function getJob(jobId: string) {
   const res = await requestJson<ApiResponse<JobRecord>>(`/jobs/${jobId}`, {
     method: 'GET',
