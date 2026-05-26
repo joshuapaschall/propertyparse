@@ -420,7 +420,26 @@ describe('ParsePage', () => {
 
 
 
-  it('shows export integrity warning when visible rows exist and catalog row count is zero', async () => {
+  it('does not show export integrity warning when summary and catalog both have zero for naturally empty categories', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
+    const summary = { rows_received: 1, needs_review: 1, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 1 };
+    const rows = [{ source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'LOW_PRECISION', detected_address: 'x' }];
+    parseFileAsync.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobExportCatalog.mockResolvedValue([{ type: 'out_of_scope', row_count: 0 }]);
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await screen.findByText('Processing Results');
+    expect(screen.queryByText(/Saved export rows are unavailable for this run/i)).not.toBeInTheDocument();
+  });
+
+  it('shows export integrity warning when summary expects rows but catalog reports zero', async () => {
     const user = userEvent.setup();
     uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 1 });
     const summary = { rows_received: 1, needs_review: 1, valid_total: 0, valid_unique: 0, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 0, attention_total: 1 };
@@ -436,6 +455,36 @@ describe('ParsePage', () => {
     await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
 
     expect(await screen.findByText(/Saved export rows are unavailable for this run/i)).toBeInTheDocument();
+  });
+
+  it('does not show export integrity warning for a fully healthy job with several empty buckets', async () => {
+    const user = userEvent.setup();
+    uploadFile.mockResolvedValue({ fileId: 'f1', rowsReceived: 3 });
+    const summary = { rows_received: 3, needs_review: 1, valid_total: 2, valid_unique: 2, skipped: 0, duplicates: 0, out_of_scope: 0, matched: 2, attention_total: 1 };
+    const rows = [
+      { source_row_id: 'r1', source_row_index: 1, status: 'MATCHED' },
+      { source_row_id: 'r2', source_row_index: 2, status: 'MATCHED' },
+      { source_row_id: 'r3', source_row_index: 3, status: 'UNMATCHED_NEEDS_REVIEW', reason_code: 'LOW_PRECISION', detected_address: 'x' },
+    ];
+    parseFileAsync.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobResults.mockResolvedValue({ summary, row_results: rows, canonical_addresses: [], duplicate_groups: [] });
+    getJobExportCatalog.mockResolvedValue([
+      { type: 'processing_report', row_count: 3 },
+      { type: 'unique_valid', row_count: 2 },
+      { type: 'needs_review', row_count: 1 },
+      { type: 'out_of_scope', row_count: 0 },
+      { type: 'duplicates', row_count: 0 },
+      { type: 'skipped', row_count: 0 },
+    ]);
+
+    render(<MemoryRouter><ParsePage /></MemoryRouter>);
+    await user.click(screen.getByRole('button', { name: 'select-file' }));
+    await user.click(screen.getByRole('button', { name: 'set-State' }));
+    await user.click(screen.getByRole('button', { name: /set-Counties/i }));
+    await user.click(await screen.findByRole('button', { name: /Process File|Reprocess File/i }));
+
+    await screen.findByText('Processing Results');
+    expect(screen.queryByText(/Saved export rows are unavailable for this run/i)).not.toBeInTheDocument();
   });
 
   it('shows normalized compare input, resolver details, badge, and approval blocker in needs review rows', async () => {

@@ -4580,8 +4580,21 @@ How to fix: ${fixHint}` : ''}`;
   const exportIntegrityWarningVisible = useMemo(() => {
     if (!hasVisibleRows) return false;
     const monitoredTypes: JobExportType[] = ['processing_report', 'unique_valid', 'needs_review', 'out_of_scope', 'duplicates', 'skipped'];
-    return monitoredTypes.some((type) => (exportCatalogByType.get(type)?.rowCount ?? 1) === 0);
-  }, [exportCatalogByType, hasVisibleRows]);
+    const expectedRowsByType = new Map<JobExportType, number>([
+      ['processing_report', responseRowsReceived ?? 0],
+      ['unique_valid', computedParseSummary?.valid_unique ?? 0],
+      ['needs_review', computedParseSummary?.needs_review ?? 0],
+      ['out_of_scope', computedParseSummary?.out_of_scope ?? 0],
+      ['duplicates', computedParseSummary?.duplicates ?? 0],
+      ['skipped', computedParseSummary?.skipped ?? 0],
+    ]);
+    return monitoredTypes.some((type) => {
+      const expectedRowCount = expectedRowsByType.get(type) ?? 0;
+      if (expectedRowCount <= 0) return false;
+      const exportItem = exportCatalogByType.get(type);
+      return typeof exportItem?.rowCount === 'number' && exportItem.rowCount === 0;
+    });
+  }, [computedParseSummary, exportCatalogByType, hasVisibleRows, responseRowsReceived]);
 
   const triggerBlobDownload = (blob: Blob, filename: string) => {
     const href = URL.createObjectURL(blob);
