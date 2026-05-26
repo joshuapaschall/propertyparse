@@ -342,12 +342,12 @@ export default function HistoryDetailPage() {
     if (!hasVisibleRows) return false;
     const monitoredTypes: JobExportType[] = ['processing_report', 'unique_valid', 'needs_review', 'out_of_scope', 'duplicates', 'skipped'];
     const expectedRowsByType = new Map<JobExportType, number>([
-      ['processing_report', responseRowsReceived ?? 0],
-      ['unique_valid', summary.valid_unique ?? 0],
-      ['needs_review', summary.needs_review ?? 0],
-      ['out_of_scope', summary.out_of_scope ?? 0],
-      ['duplicates', summary.duplicates ?? 0],
-      ['skipped', summary.skipped ?? 0],
+      ['processing_report', rowResults.length],
+      ['unique_valid', canonicalAddresses.length],
+      ['needs_review', filteredNeedsReviewGroups.length],
+      ['out_of_scope', outOfScopeGroups.length],
+      ['duplicates', duplicateGroups.length],
+      ['skipped', skippedGroups.length],
     ]);
     return monitoredTypes.some((type) => {
       const expectedRowCount = expectedRowsByType.get(type) ?? 0;
@@ -355,7 +355,7 @@ export default function HistoryDetailPage() {
       const exportItem = exportCatalogByType.get(type);
       return typeof exportItem?.rowCount === 'number' && exportItem.rowCount === 0;
     });
-  }, [exportCatalogByType, hasVisibleRows, responseRowsReceived, summary]);
+  }, [canonicalAddresses.length, duplicateGroups.length, exportCatalogByType, filteredNeedsReviewGroups.length, hasVisibleRows, outOfScopeGroups.length, rowResults.length, skippedGroups.length]);
 
   const handleDownload = async (type: JobExportType, label: string) => {
     if (!jobId) return;

@@ -138,6 +138,54 @@ describe('HistoryDetailPage summary normalization', () => {
     expect(downloadJobExport).toHaveBeenCalled();
   });
 
+
+
+  it('does not show export integrity warning when naturally-empty categories report zero rows', async () => {
+    getJobDetail.mockResolvedValue({
+      job: { job_id: 'job-1', spend_usd: 2.5 },
+      summary: { rows_received: 1, valid_total: 0, valid_unique: 0, needs_review: 1, skipped: 0, out_of_scope: 0, duplicates: 0 },
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 1, valid_total: 0, valid_unique: 0, needs_review: 1, skipped: 0, out_of_scope: 0, duplicates: 0 },
+      row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', detected_address: '123 Main', reason_code: 'LOW_PRECISION' }],
+      canonical_addresses: [],
+    });
+    getJobExportCatalog.mockResolvedValue([{ type: 'out_of_scope', row_count: 0 }]);
+
+    render(
+      <MemoryRouter initialEntries={['/history/job-1']}>
+        <Routes>
+          <Route path="/history/:jobId" element={<HistoryDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await screen.findByText('Rows Received');
+    expect(screen.queryByText(/Saved export rows are unavailable for this run/i)).not.toBeInTheDocument();
+  });
+
+  it('shows export integrity warning when expected rows are missing from export catalog', async () => {
+    getJobDetail.mockResolvedValue({
+      job: { job_id: 'job-1', spend_usd: 2.5 },
+      summary: { rows_received: 1, valid_total: 0, valid_unique: 0, needs_review: 1, skipped: 0, out_of_scope: 0, duplicates: 0 },
+    });
+    getJobResults.mockResolvedValue({
+      summary: { rows_received: 1, valid_total: 0, valid_unique: 0, needs_review: 1, skipped: 0, out_of_scope: 0, duplicates: 0 },
+      row_results: [{ source_row_id: 'r1', source_row_index: 1, status: 'UNMATCHED_NEEDS_REVIEW', detected_address: '123 Main', reason_code: 'LOW_PRECISION' }],
+      canonical_addresses: [],
+    });
+    getJobExportCatalog.mockResolvedValue([{ type: 'needs_review', row_count: 0 }]);
+
+    render(
+      <MemoryRouter initialEntries={['/history/job-1']}>
+        <Routes>
+          <Route path="/history/:jobId" element={<HistoryDetailPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText(/Saved export rows are unavailable for this run/i)).toBeInTheDocument();
+  });
   it('does not use csv fallback for original upload and preserves filename and extension', async () => {
     const user = userEvent.setup();
     getJobDetail.mockResolvedValue({
