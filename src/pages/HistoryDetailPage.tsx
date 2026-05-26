@@ -341,8 +341,21 @@ export default function HistoryDetailPage() {
   const exportIntegrityWarningVisible = useMemo(() => {
     if (!hasVisibleRows) return false;
     const monitoredTypes: JobExportType[] = ['processing_report', 'unique_valid', 'needs_review', 'out_of_scope', 'duplicates', 'skipped'];
-    return monitoredTypes.some((type) => (exportCatalogByType.get(type)?.rowCount ?? 1) === 0);
-  }, [exportCatalogByType, hasVisibleRows]);
+    const expectedRowsByType = new Map<JobExportType, number>([
+      ['processing_report', responseRowsReceived ?? 0],
+      ['unique_valid', summary.valid_unique ?? 0],
+      ['needs_review', summary.needs_review ?? 0],
+      ['out_of_scope', summary.out_of_scope ?? 0],
+      ['duplicates', summary.duplicates ?? 0],
+      ['skipped', summary.skipped ?? 0],
+    ]);
+    return monitoredTypes.some((type) => {
+      const expectedRowCount = expectedRowsByType.get(type) ?? 0;
+      if (expectedRowCount <= 0) return false;
+      const exportItem = exportCatalogByType.get(type);
+      return typeof exportItem?.rowCount === 'number' && exportItem.rowCount === 0;
+    });
+  }, [exportCatalogByType, hasVisibleRows, responseRowsReceived, summary]);
 
   const handleDownload = async (type: JobExportType, label: string) => {
     if (!jobId) return;
